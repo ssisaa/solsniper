@@ -193,6 +193,7 @@ class CandleMomo:
         self.unresolved: Optional[Dict[str, Any]] = None
         self.streak: Dict[str, List[Any]] = {}      # mint -> [side, consecutive count] of signals
         self.reds_since: Dict[str, int] = {}         # mint -> red signals since the last lot (downside ladder)
+        self.pro_px: Dict[str, float] = {}           # rule pro: mint -> chart price of the BUY call (its entry line)
         self.traded: Dict[str, float] = {}           # mint -> when its last trade closed (one-time-use mode)
         self.board_seen: Dict[str, float] = {}       # mint -> last time the board listed it
         self._jup_val: Dict[str, Tuple[float, float, int]] = {}   # mint -> (SOL value, ts, raw tokens)
@@ -634,8 +635,69 @@ class CandleMomo:
             if self.store:
                 self.store.audit("feed", mint=f.mint, status=f.status, provider=using)
 
+    def pro_context(self, mint: str) -> Dict[str, Any]:
+        """The open Candles trade on this coin for the Pro Trader read: entry (chart price) and time held."""
+        held = self.positions.get(mint)
+        if not held:
+            return {"flow": None, "holding": None}
+        ts = float(held.get("entry_ts") or time.time())
+        px = float(self.pro_px.get(mint) or 0)
+        if px <= 0:
+            lot = (held.get("lots") or [{}])[0]
+            px = float(lot.get("px") or 0)
+        f = self.feeds.get(mint)
+        if px <= 0 and f is not None and f.using:
+            px = float(self._px_at(f, ts) or 0)
+        return {"flow": None, "holding": {"entry": px, "held": time.time() - ts} if px > 0 else None}
+
+    def _pro_evaluate(self, f: Feed, seen: float) -> None:
+        """Rule "pro": a day trader's read of the 1s chart (src/signal/pro_trader.py) once per new candle.
+        Flat + BUY call -> BUY; holding + SELL call (target / stop / time stop) -> SELL."""
+        from src.signal import pro_trader as PT
+        rows = f.books[f.using].finals()
+        if len(rows) < 2:
+            return
+        if f.last_eval_t is None:
+            f.last_eval_t = rows[-1].t
+            return
+        if rows[-1].t <= f.last_eval_t:
+            return
+        f.last_eval_t = rows[-1].t
+        cur = rows[-1]
+        held = self.positions.get(f.mint)
+        if not held:
+            self.pro_px.pop(f.mint, None)
+        ctx = self.pro_context(f.mint)
+        cs = [{"t": c.t, "o": c.open, "h": c.high, "l": c.low, "c": c.close, "v": c.volume} for c in rows]
+        a = PT.analyze(cs, None, ctx["holding"])
+        if held is None and a.get("call") == "BUY":
+            side = "BUY"
+        elif held is not None and a.get("call") == "SELL":
+            side = "SELL"
+        else:
+            return
+        lag_ms = (seen - (cur.t + 1000) / 1000.0) * 1000.0
+        sig = {"id": signal_id(f.mint, cur.t, "pro"), "mint": f.mint, "ts": round(seen * 1000),
+               "side": side, "open": cur.open, "prevClose": rows[-2].close, "close": cur.close,
+               "ref": cur.open, "deltaPct": round((cur.close / cur.open - 1) * 100, 4) if cur.open else 0.0,
+               "candleTs": cur.t, "rule": "pro", "provider": f.using, "feedLagMs": round(lag_ms),
+               "symbol": f.symbol, "seen": seen, "pro": True, "pro_why": str(a.get("why") or ""),
+               "pro_px": float(a.get("px") or 0)}
+        self.feed_lag_ms.append(lag_ms)
+        self.m["signals_buy" if side == "BUY" else "signals_sell"] += 1
+        self.recent.appendleft(sig)
+        if self.store:
+            self.store.audit("signal", signalId=sig["id"], mint=f.mint, side=side, deltaPct=sig["deltaPct"],
+                             candleTs=cur.t, open=cur.open, prevClose=sig["prevClose"], close=cur.close,
+                             provider=f.using, feedLagMs=sig["feedLagMs"], cfg=self.cfg.digest(), pro=sig["pro_why"])
+        if self._route(sig) in ("intent", "queued") and side == "BUY":
+            self.pro_px[f.mint] = sig["pro_px"]
+
     def _evaluate(self, f: Feed, seen: float) -> None:
         cfg = self.cfg
+        if cfg.rule == "pro":
+            self._pro_evaluate(f, seen)
+            return
         book = f.books[f.using]
         rows = book.finals()          # finished candles only: an in-progress candle's close is not final
         if len(rows) < 2:
@@ -809,10 +871,12 @@ class CandleMomo:
                     await self._live_buy(sig)
                 else:
                     await self._paper_buy(sig)
-            elif self.cfg.sell_only_in_profit and not sig.get("manual") and not await self._in_profit(sig):
+            elif (self.cfg.sell_only_in_profit and not sig.get("manual") and not sig.get("pro")
+                  and not await self._in_profit(sig)):
                 pass                                 # skipped NOT_IN_PROFIT: keep holding, wait for a better green
             else:
                 why = ("manual Exit all (chart button) — sold at the market, not a rule sell" if sig.get("manual")
+                       else f"Pro Trader: {sig.get('pro_why') or 'sell call'}" if sig.get("pro")
                        else f"green candle (+{sig['deltaPct']:.2f}% candle) with the whole trade ≥ {self.green_target()[0]:g}% "
                             f"({self.green_target()[1]})" if self.cfg.sell_only_in_profit
                        else f"green candle +{sig['deltaPct']:.2f}% (any green sells; that % is the candle, not the trade)")
@@ -1351,6 +1415,20 @@ class CandleMomo:
         buy_on, sell_on = ("red", "green") if inverse else ("green", "red")
         tgt, tgt_from = self.green_target()
         out: Dict[str, Any] = {"minProfit": tgt, "minProfitFrom": tgt_from, "profitOnly": bool(cfg.sell_only_in_profit)}
+        if cfg.rule == "pro":
+            from src.signal import pro_trader as PT
+            out.update({"minProfit": PT.TARGET_PCT, "minProfitFrom": "Pro Trader target", "profitOnly": False, "pro": True})
+            if held:
+                up = held.get("upct")
+                out["entry"] = "Pro Trader: one entry per trade (no ladder)"
+                out["exit"] = (f"{'now ' + format(up, '+.1f') + '% — ' if up is not None else ''}Pro Trader sells at "
+                               f"{PT.TARGET_PCT:+.0f}% / {PT.STOP_PCT:+.0f}% / {PT.TIME_STOP_S:.0f}s")
+                out["ready"] = bool(up is not None and up >= PT.TARGET_PCT - PT.FEE_PCT)
+            else:
+                out["entry"] = ("support mode: the source buys lot 1" if self.support_source()
+                                else "Pro Trader BUY call: ≥10% under VWAP, green, RSI<45, volume ≥1.5x")
+                out["exit"] = "—"
+            return out
         if held:
             lots = len(held.get("lots") or []) or 1
             up = held.get("upct")

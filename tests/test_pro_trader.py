@@ -86,3 +86,57 @@ def test_strategy_listed_and_ignores_trade_signals(monkeypatch):
     e.pin = {"mint": "X", "ts": time.time()}
     monkeypatch.setattr(M.Mayhem2, "strategy", lambda self: "pro_trader")
     assert e._on_signal({"side": "buy", "seen": time.time(), "sol": 1}).startswith("ignored")
+
+
+# ---------- Candles rule "pro" ----------
+
+def _cm_engine(tmp_path, monkeypatch):
+    from src.signal import candle_momo as CM
+    from src.signal import candle_core as C
+    from src.signal.candle_store import Store
+    e = CM.CandleMomo()
+    e.store = Store(str(tmp_path / "p.sqlite"), str(tmp_path / "p.jsonl"))
+    e.cfg.rule = "pro"
+    routed = []
+    monkeypatch.setattr(e, "_route", lambda sig: routed.append(sig) or "intent")
+    f = CM.Feed("MINT", 400)
+    f.status = "OK"
+    f.using = "pump_rest"
+    rows = [C.Candle(t=c["t"], open=c["o"], high=c["h"], low=c["l"], close=c["c"], volume=c["v"], final=True)
+            for c in _flush()]
+    f.books["pump_rest"].merge(rows[:-1])
+    e.feeds["MINT"] = f
+    return e, f, rows, routed
+
+
+def test_candles_pro_rule_buys_on_the_call(tmp_path, monkeypatch):
+    e, f, rows, routed = _cm_engine(tmp_path, monkeypatch)
+    e._evaluate(f, time.time())                       # first read: history, no signal
+    f.books["pump_rest"].merge(rows[-1:])
+    e._evaluate(f, time.time())
+    assert len(routed) == 1 and routed[0]["side"] == "BUY" and routed[0]["pro"] and routed[0]["rule"] == "pro"
+    assert e.pro_px["MINT"] == routed[0]["pro_px"] > 0
+
+
+def test_candles_pro_rule_sells_at_target(tmp_path, monkeypatch):
+    from src.signal import candle_core as C
+    e, f, rows, routed = _cm_engine(tmp_path, monkeypatch)
+    f.books["pump_rest"].merge(rows[-1:])
+    entry = rows[-1].close
+    e.positions["MINT"] = {"mint": "MINT", "entry_ts": time.time() - 5, "entry_sol": 0.005, "lots": [{"n": 1}]}
+    e.pro_px["MINT"] = entry
+    e._evaluate(f, time.time())
+    f.books["pump_rest"].merge([C.Candle(t=rows[-1].t + 1000, open=entry, high=entry * 1.3, low=entry,
+                                         close=entry * 1.3, volume=5, final=True)])
+    e._evaluate(f, time.time())
+    assert routed and routed[-1]["side"] == "SELL" and "target" in routed[-1]["pro_why"]
+
+
+def test_candles_pro_hint_and_rule_choice():
+    from src.signal import candle_core as C
+    from src.signal import candle_momo as CM
+    assert "pro" in C.RULES
+    e = CM.CandleMomo()
+    e.cfg.rule = "pro"
+    h = e._hint("X")
+    assert h.get("pro") and "VWAP" in h["entry"] and h["minProfit"] == 25.0

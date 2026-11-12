@@ -19,7 +19,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-RULES = ("own_candle", "inverse", "literal")
+RULES = ("own_candle", "inverse", "literal", "pro")      # pro: src/signal/pro_trader.py chart read
 MODES = ("paper", "live")
 _NS = uuid.UUID("6f1e0c52-6c1b-4b8e-9d0e-2c6a1d0b7a11")
 

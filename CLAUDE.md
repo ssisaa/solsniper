@@ -91,7 +91,9 @@ Chosen by testing on 43 coins / 10,412 candles: 83 trades, 44 % wins, +2.3 %/tra
 plain trend-following lost on every setting. Small sample — never promise profit. Mayhem2 strategy `pro_trader`
 trades it (live / dry run); its paper twin always runs in "Strategies side by side". `/api/candles` returns the read
 as `pro`; the Mayhem2 chart draws EMA/VWAP lines, volume, an RSI pane, target/stop zones, replay tags and the
-"Pro Trader desk" panel.
+"Pro Trader desk" panel. **Candles** has the same: rule `pro` (Candles page Rule select) trades the Pro Trader call
+(BUY when flat; SELL at target / stop / time stop, not held back by Sell-only-in-profit; no ladder);
+`/api/candles?ctx=candle` follows the Candles trade; the Candles chart draws the same lines, RSI pane, desk and zones.
 
 **Mayhem2**: strategy `inv_ladder` added (Mayhem_Mode SELL = red buys, lots on reds 1/5/9, BUY = green sells
 all, always). **No circuit breaker** for Mayhem2 or Candles (their losses don't count toward it).

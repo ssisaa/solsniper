@@ -2098,13 +2098,18 @@ _chart_cache: Dict[str, tuple] = {}
 _chart_lock = threading.Lock()
 
 
-def _chart_with_read(mint: str) -> Dict[str, Any]:
-    """1s candles plus the Pro Trader read of them (call, plan, checklist, indicator lines, replay tags)."""
+def _chart_with_read(mint: str, ctx_src: str = "mayhem2") -> Dict[str, Any]:
+    """1s candles plus the Pro Trader read of them (call, plan, checklist, indicator lines, replay tags).
+    ctx_src picks whose open trade the read follows: the Mayhem2 page or the Candles page."""
     out = dict(_chart_candles(mint))
     try:
         from src.signal import pro_trader as PT
-        from src.signal.mayhem2 import get_engine as _m2
-        ctx = _m2().pro_context(mint)
+        if ctx_src == "candle":
+            from src.signal.candle_momo import get_engine as _cm
+            ctx = _cm().pro_context(mint)
+        else:
+            from src.signal.mayhem2 import get_engine as _m2
+            ctx = _m2().pro_context(mint)
         out["pro"] = PT.analyze(list(out.get("candles") or []), ctx.get("flow"), ctx.get("holding"))
     except Exception as exc:
         out["pro"] = {"ok": False, "call": "WAIT", "why": f"read failed ({type(exc).__name__})"}
@@ -4190,7 +4195,8 @@ def start_http_static_server(port: int = DEFAULT_HTTP_PORT) -> ThreadingHTTPServ
                 if not (32 <= len(mint) <= 44 and mint.isalnum()):
                     self._json(400, {"ok": False, "error": "Need ?mint="})
                     return
-                self._json(200, _chart_with_read(mint))
+                ctx_src = (parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "").get("ctx") or ["mayhem2"])[0]
+                self._json(200, _chart_with_read(mint, "candle" if ctx_src == "candle" else "mayhem2"))
                 return
             if path == "/api/candle/marks":
                 from urllib.parse import parse_qs
