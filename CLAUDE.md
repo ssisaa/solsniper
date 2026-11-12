@@ -77,7 +77,7 @@ profit 15 %, or the Settings Fast Pace margin if Fast Pace Sell is on and lower*
 Max hold 90 s; Exit reserve 0; Min reserve 0.15 SOL (also blocks lots 2+ on very young coins).
 
 **Mayhem2 feed (2026-11-13)**: two checkboxes on the Mayhem2 page (`mayhem2_feed`, one is always on).
-*Mayhem_Mode* (default) = unchanged. *Mixed* = pump boards New (< 3 min), then Movers, then Graduated, youngest
+*Mayhem_Mode* (default) = unchanged. *Mixed* = pins take turns New (< 3 min) → Movers → Graduated → New … (`_mixed_pick`, an empty board passes the turn), youngest
 first in each, pump coins only, a coin on two boards counts once; the pin needs no Mayhem_Mode holding, and
 **every wallet's** BUY / SELL on the pinned coin is the signal (`ALL_TRADES_URL`); Mayhem_Mode positions are not
 read. Coins off the pump curve (graduated) are valued by a Jupiter quote (`_jup_curve`, flat price, 1.5 s cache);

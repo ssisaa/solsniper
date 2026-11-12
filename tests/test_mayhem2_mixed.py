@@ -124,3 +124,19 @@ def test_graduated_coin_priced_by_jupiter(eng, monkeypatch):
     assert c["src"] == "jupiter" and bps == 125
     value = PC._sol_for_tokens(1_000_000_000, c["virtual_token"], c["virtual_sol"], 0) / 1e9
     assert abs(value - 0.005) < 1e-6
+
+
+def test_pins_take_turns_new_movers_graduated(eng):
+    got = []
+    for _ in range(5):
+        row = eng._mixed_pick()
+        got.append((row["m"], row["_grp"]))
+        eng.used[row["m"]] = {"ts": time.time(), "why": "traded"}
+    assert got == [("N1pump", "new"), ("M1pump", "movers"), ("G1pump", "graduated"),
+                   ("N2pump", "new"), ("M2pump", "movers")]
+
+
+def test_empty_group_passes_turn(eng):
+    eng.mixed_rows["movers"] = []
+    eng.mixed_turn = 1                       # movers' turn, but movers is empty
+    assert eng._mixed_pick()["_grp"] == "graduated" and eng.mixed_turn == 0

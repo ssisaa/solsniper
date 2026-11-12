@@ -170,6 +170,7 @@ class Mayhem2:
         self.mixed_rows: Dict[str, List[Dict[str, Any]]] = {g: [] for g in MIXED_GROUPS}
         self.mixed_at: Dict[str, float] = {g: 0.0 for g in MIXED_GROUPS}
         self.feed_was = ""
+        self.mixed_turn = 0                             # Mixed: index in MIXED_GROUPS whose turn is next
         self.jup_curve: Dict[str, Any] = {}             # mint -> (pseudo curve, at): coins off pump's curve
         self.started = False
 
@@ -410,6 +411,20 @@ class Mayhem2:
                 seen.add(r["m"])
                 out.append(r)
         return out
+
+    def _mixed_pick(self) -> Optional[Dict[str, Any]]:
+        """Mixed feed takes turns: New -> Movers -> Graduated -> New ... The group whose turn it is gives its
+        youngest unused coin; an empty group passes the turn on. After a pin, the turn moves to the next group."""
+        cands = [r for r in self._mixed_candidates() if r["m"] not in self.used]
+        n = len(MIXED_GROUPS)
+        for k in range(n):
+            i = (self.mixed_turn + k) % n
+            g = MIXED_GROUPS[i]
+            for r in cands:
+                if r["_grp"] == g:
+                    self.mixed_turn = (i + 1) % n
+                    return dict(r, _turn=g)
+        return None
 
     def candidates(self) -> List[Dict[str, Any]]:
         """Board coins younger than 3 minutes, pump only, active, newest first."""
@@ -1201,13 +1216,19 @@ class Mayhem2:
                         self.pin["traded"] = True
                     continue
                 mixed = self.mixed()
+                if mixed:
+                    row = self._mixed_pick()
+                    if row is not None:
+                        self._set_pin(row, f"{row['_grp']} board's turn, {row['_age']:.0f}s old")
+                        continue
+                    if time.time() - last_wait_note > 60 and self.board_at:
+                        last_wait_note = time.time()
+                        self.note("info", "No new coin on the New / Movers / Graduated boards yet. Watching.")
+                    continue
                 for row in self.candidates():
                     mint = row["m"]
                     if mint in self.used:
                         continue
-                    if mixed:
-                        self._set_pin(row, f"{row.get('_grp')} board, {row['_age']:.0f}s old")
-                        break
                     rec = self.pos.get(mint) or {}
                     if not rec.get("at"):
                         continue          # its Mayhem_Mode read comes in a moment
@@ -1834,7 +1855,7 @@ class Mayhem2:
             "boardAge": round(now - board_at, 1) if board_at else None, "error": err,
             "pin": pin, "rows": rows, "signals": signals, "notes": notes, "used": used,
             "marks": marks, "view": view,
-            "youngS": YOUNG_S, "feed": self.feed(),
+            "youngS": YOUNG_S, "feed": self.feed(), "nextTurn": MIXED_GROUPS[self.mixed_turn % len(MIXED_GROUPS)],
             "boards": {g: len(self.mixed_rows.get(g) or []) for g in MIXED_GROUPS} if mixed else None,
             "rules": {"profitMin": PROFIT_MIN_PCT, "waitS": WAIT_PROFIT_S, "tp": TAKE_PROFIT_PCT,
                       "trailArm": TRAIL_ARM_PCT, "trailKeep": TRAIL_KEEP, "stop": STOP_PCT, "maxHoldS": MAX_HOLD_S},

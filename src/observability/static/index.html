@@ -1343,7 +1343,7 @@ button.lite:hover{color:#fff;border-color:#eef3fb}
       <div class="m2-ctl">
         <label>Strategy <select id="m2Strat"></select></label>
         <label title="Coins: the Mayhem coins Mayhem_Mode holds; signals: Mayhem_Mode's BUY / SELL (unchanged)."><input type="checkbox" class="m2-feed" data-feed="mayhem"/> Mayhem_Mode</label>
-        <label title="Coins: pump's New board first (under 3 min), then Movers, then Graduated — youngest first in each. Signals: every wallet's BUY / SELL on the pinned coin. Graduated coins are priced by a Jupiter quote."><input type="checkbox" class="m2-feed" data-feed="mixed"/> Mixed (New, Movers, Graduated)</label>
+        <label title="Coins: pins take turns — New (under 3 min), then Movers, then Graduated, then New again; each turn takes that board's youngest coin not traded yet. Signals: every wallet's BUY / SELL on the pinned coin. Graduated coins are priced by a Jupiter quote."><input type="checkbox" class="m2-feed" data-feed="mixed"/> Mixed (New, Movers, Graduated)</label>
         <button type="button" class="m2-btn" id="m2DryBtn">Dry run …</button>
         <button type="button" class="m2-btn" id="m2AutoBtn">Auto Trade …</button>
         <span class="muted" id="m2CtlHint">To trade live: pick a strategy, switch Dry run OFF, then Auto Trade ON.</span>
@@ -4196,7 +4196,7 @@ function paintMayhem2(d){
   const mixed=d.feed==='mixed';
   document.querySelectorAll('.m2-feed').forEach(b=>{ if(document.activeElement!==b) b.checked=(b.dataset.feed===(d.feed||'mayhem')); });
   const sec=document.getElementById('m2CoinsTitle');
-  if(sec) sec.textContent=mixed?('Mixed coins: New → Movers → Graduated, youngest first in each (pinned on top)'+(d.boards?' · boards '+d.boards.new+' / '+d.boards.movers+' / '+d.boards.graduated:'')):'Coins under 3 minutes (pinned on top)';
+  if(sec) sec.textContent=mixed?('Mixed coins: pins take turns New → Movers → Graduated → New …, youngest first in each (pinned on top)'+(d.boards?' · boards '+d.boards.new+' / '+d.boards.movers+' / '+d.boards.graduated:'')+(d.nextTurn?' · next pin: '+d.nextTurn:'')):'Coins under 3 minutes (pinned on top)';
   const sigT=document.getElementById('m2SigTitle');
   if(sigT) sigT.textContent=mixed?'All wallets\' trades on the pin':'Mayhem_Mode trades on the pin';
   const sel=document.getElementById('m2Strat');
