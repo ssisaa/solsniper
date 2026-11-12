@@ -1,0 +1,14 @@
+# secrets — never commit
+config/sniper.yaml
+logs/
+*.key
+*keypair*.json
+*wallet*.json
+.env*
+# local data and build output
+venv/
+sqlitebase/
+deploy/*.tar.gz
+.pytest_cache/
+__pycache__/
+*.pyc
