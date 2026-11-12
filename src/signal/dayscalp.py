@@ -831,26 +831,31 @@ async def select_top1_dayscalp(cfg: Optional[DayScalpConfig] = None) -> Optional
             )
         settings_floor, settings_cap = _band()
         if _candle_supports_dayscalp():
-            # AutoTrade-Candles on Dayscalp: the youngest coin that passes Dayscalp's 5m band, volume and
-            # blacklist is bought at once as lot 1 (no 1s / 1m timing wait — Candles' rule times the lots
-            # and the sell).
-            ok_rows = [row for row in pool
-                       if liquid and settings_floor <= _num(row.get("change_m5_pct")) <= settings_cap
-                       and not _soft_filter_reason(row, cfg, vol_floor)]
-            if ok_rows:
-                now_t = time.time()
-                ok_rows.sort(key=lambda r: (r.get("created_ts") is None, -(float(r.get("created_ts") or 0))))
-                row = ok_rows[0]
+            # AutoTrade-Candles on Dayscalp: the FIRST token of the scan (the scan lists the newest pump
+            # coins first) is bought at once as lot 1 — no 5m band / volume / 1s / 1m wait. Candles' rule
+            # times the lots and the sell. Skipped: blacklist, bad mint, non-pump, coins Candles already
+            # traded or holds. RugCheck still runs at the buy when it is on.
+            try:
+                from src.signal.candle_momo import get_engine as _cm
+                eng = _cm()
+                skip = set(eng.traded) | set(eng.positions) | set(eng.unusable)
+            except Exception:
+                skip = set()
+            now_t = time.time()
+            for row in pool:
+                mint = str(row.get("mint") or "")
+                if (len(mint) < 32 or mint in skip or not (mint.endswith("pump") or mint.startswith("pump"))
+                        or _blacklisted(row.get("symbol") or "", row.get("name") or "", cfg)):
+                    continue
                 m5 = _num(row.get("change_m5_pct"))
                 age = (now_t - float(row["created_ts"])) if row.get("created_ts") else None
                 age_txt = f"{age / 60:.0f}m old" if age is not None and age >= 60 else (f"{age:.0f}s old" if age is not None else "age n/a")
-                why = f"AutoTrade-Candles: youngest passing Dayscalp ({age_txt}) — bought now as lot 1"
-                log.info("DAYSCALP candle pick %s m5=%+.1f%% %s mint=%s", row.get("symbol") or "?", m5, age_txt,
-                         str(row.get("mint") or "")[:8])
-                LAST_CANDLE_PICK.update(mint=str(row["mint"]), symbol=str(row.get("symbol") or ""), ts=now_t)
+                why = f"AutoTrade-Candles: first scan token ({age_txt}) — bought now as lot 1"
+                log.info("DAYSCALP candle pick %s m5=%+.1f%% %s mint=%s", row.get("symbol") or "?", m5, age_txt, mint[:8])
+                LAST_CANDLE_PICK.update(mint=mint, symbol=str(row.get("symbol") or ""), ts=now_t)
                 await _show_decoded(row, "BUYING", why)
                 return DayScalpCandidate(
-                    mint=row["mint"], symbol=row.get("symbol") or "", name=row.get("name") or "",
+                    mint=mint, symbol=row.get("symbol") or "", name=row.get("name") or "",
                     price_usd=_num(row.get("price_usd")), liquidity_usd=_num(row.get("liquidity_usd")),
                     volume_m5_usd=_num(row.get("volume_m5_usd")), change_m5_pct=m5,
                     change_h1_pct=_num(row.get("change_h1_pct")), buys_m5=int(row.get("buys_m5") or 0),
@@ -859,7 +864,7 @@ async def select_top1_dayscalp(cfg: Optional[DayScalpConfig] = None) -> Optional
                     reasons=[why, f"m5={m5:+.1f}%", f"vol_m5=${_num(row.get('volume_m5_usd')):.0f}"],
                     quick_entry=True,      # buy now: skip the 1s / 1m re-check before the buy (RugCheck still runs)
                 )
-            log.info("DAYSCALP candle pick — no coin passes the 5m band / volume right now")
+            log.info("DAYSCALP candle pick — no new scan token")
         for i, row in enumerate(show, start=1):
             m5 = _num(row.get("change_m5_pct"))
             symbol = row.get("symbol") or "?"

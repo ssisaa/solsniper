@@ -65,9 +65,9 @@ Controls source (else: "Change and Select Source to …"). When on:
 - **MayhemMode:** Candles grabs Mayhem_Mode's youngest open (< 30 s old) straight into the feeds and queues a
   MayhemMode buy (one coin at a time; Auto Trade off = watch only). Only coins bought while the open was < 30 s
   are taken over (`pos._open_age`).
-- **Dayscalp:** Dayscalp's scan picks the youngest coin (by pool/coin creation time) that passes its 5m band,
-  volume and blacklist, and buys it at once as lot 1 (`quick_entry`: no 1s/1m re-check; RugCheck still runs
-  when enabled). `src/signal/dayscalp.py` → `_candle_supports_dayscalp()`. That pick (the top row on Decoded
+- **Dayscalp:** Dayscalp's scan takes the **first scan token** (the scan lists the newest pump coins first)
+  and buys it at once as lot 1 — no 5m band / volume / 1s / 1m checks (`quick_entry`); skips blacklist,
+  non-pump, and coins Candles already traded or holds; RugCheck still runs when enabled. `src/signal/dayscalp.py` → `_candle_supports_dayscalp()`. That pick (the top row on Decoded
   Tokens, `LAST_CANDLE_PICK`) is fed to the Candles feeds at once, even when Auto Trade is off (watch only).
 - Revert (Candles page banner) turns it off and puts Candles back to paper.
 
