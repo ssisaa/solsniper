@@ -87,6 +87,13 @@ OpenHolds/CallOuts clicks and Decoded Tokens rows work with Auto Trade off; Deco
 only pump coins (mint starts or ends with "pump"); Live Trades card shows the whole Candles trade (all lots);
 non-SOL-quoted coins are valued on their own curve × the quote coin's SOL rate.
 
+**Dashboard PnL (2026-11-13)**: Daily / 30 days / total cards = closed trades after fees from the ledger (same
+rows as the win rate: the wallet's cash per sale, `_chain_cash`, else the ledger close); a win = net SOL after
+fees > 0. Dayscalp never buys a coin the wallet already holds (an "unconfirmed" buy had landed → CS bought twice). "Wallet vs invested" = wallet SOL + value of every coin
+still in the wallet − invested (its own figure). The wallet reconcile (`reconcile_wallet_sells`) counts every
+wallet BUY of a trade (ladders), trims a buy only when it is ~one token-account rent over Max position, and
+closes a ledger trade the wallet fully sold when the bot stopped before booking it.
+
 **Facts that matter** (measured): Mayhem coins usually crash and get paused within seconds to ~1 min (89 %
 pause); no strategy was profitable on them at the bot's ~3 s reaction (backtests) — never promise profit.
 pump frontend API 429s above ~10 req/s. Pump error 6042 = price moved past the slippage guard (buy refused,

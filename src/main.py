@@ -4375,6 +4375,12 @@ async def live_feed_demo(
                 continue
             if abs(float(op.ts or 0) - float(pos.entry_time or 0)) > 600:
                 continue   # a different (older) buy of this coin
+            try:
+                from src.signal.candle_momo import get_engine as _cme
+                if len((_cme().positions.get(pos.mint) or {}).get("lots") or []) > 1:
+                    continue   # a Candles ladder trade: its cost is all lots, never one buy's
+            except Exception:
+                pass
             sigs = [op.signature] + [x for x in (getattr(op, "add_sigs", None) or []) if x]
             if any(x not in chain for x in sigs):
                 continue   # a ladder lot the wallet list has not shown yet: never shrink to lot 1 only
@@ -5293,6 +5299,20 @@ async def dayscalp_loop(
         if any(p.status == "OPEN" for p in manager.positions.values()):
             log.info("DAYSCALP skip buy — open position exists")
             await _say("SKIP", "a coin is already open")
+            return
+        # A buy reported "not confirmed" may still have landed: CS was bought twice 8s apart (2026-11-13)
+        # because the gave-up coin skipped the wallet check. Never buy a coin the wallet already holds.
+        try:
+            from src.execution.signer import pubkey_from_env
+            from src.execution.wallet_tokens import get_token_raw_balance
+            pk_now = pubkey_from_env()
+            raw_now = await asyncio.wait_for(get_token_raw_balance(pk_now, top.mint), timeout=4.0) if pk_now else None
+        except Exception:
+            raw_now = None
+        if raw_now:
+            log.warning("DAYSCALP skip buy %s — the wallet already holds it (an earlier buy landed); not buying again",
+                        top.symbol)
+            await _say("SKIP", "wallet already holds it — an earlier buy landed")
             return
         block_reason = None
         if not trader.jupiter_ok():

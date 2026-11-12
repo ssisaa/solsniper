@@ -573,13 +573,30 @@ class TradeLedger:
         return float(e.pnl_sol or 0)
 
     def _win_loss(self, epoch: float) -> tuple:
-        """One closed trade. A win is green SOL after fees, or a green % since buy."""
-        groups: Dict[str, List[LedgerEntry]] = {}
+        """Wins / losses from the same per-sale results as the PnL cards: the wallet's cash per sell
+        (cost of every buy of that coin vs SOL back) for coins the wallet shows, else the ledger close.
+        A win is > 0 SOL after fees."""
+        results: Dict[str, float] = {}
+        chain = self._chain_cash()
+        chain_mints = {c["mint"] for c in chain}
+        for c in chain:
+            if float(c["ts"] or 0) >= epoch:
+                results[c["mint"] + ":" + str(int(float(c["ts"] or 0)))] = float(c["pnl"] or 0)
+        rest: Dict[str, List[LedgerEntry]] = {}
         for e in self.entries:
-            if e.side != "CLOSE" or float(e.ts or 0) < epoch:
+            if e.side != "CLOSE" or float(e.ts or 0) < epoch or (e.mint and e.mint in chain_mints):
                 continue
-            key = getattr(e, "group_id", "") or e.id
-            groups.setdefault(key, []).append(e)
+            rest.setdefault(getattr(e, "group_id", "") or e.id, []).append(e)
+        if not chain and not rest:
+            return 0, 0
+        wins = sum(1 for v in results.values() if v > 1e-9)
+        losses = len(results) - wins
+        w2, l2 = self._win_loss_rows(rest)
+        return wins + w2, losses + l2
+
+    def _win_loss_rows(self, groups_in: Dict[str, List["LedgerEntry"]]) -> tuple:
+        """Ledger-only closes. A win is green SOL after fees (a green % since buy only when no SOL figure)."""
+        groups = groups_in
         wins = 0
         for rows in groups.values():
             sol = sum(self._close_sol(row) for row in rows)
@@ -597,7 +614,14 @@ class TradeLedger:
                 if getattr(row, "book_locked", False) and row.pnl_usd is not None:
                     locked = True
                     usd += float(row.pnl_usd or 0)
-            if sol > 1e-9 or (since is not None and since > 0) or (locked and usd > 0):
+            # A win is net SOL after fees > 0 — the same figure as the PnL. pump's "% since buy" (price
+            # only, no fees, lot 1 only) counted SOL losses as wins (12 wins / 2 losses with PnL red).
+            # It decides only when the row has no SOL result at all.
+            has_sol = any(float(row.exit_sol or 0) > 0 or abs(float(row.pnl_sol or 0)) > 1e-12 for row in rows)
+            if has_sol:
+                if sol > 1e-9:
+                    wins += 1
+            elif (since is not None and since > 0) or (locked and usd > 0):
                 wins += 1
         losses = len(groups) - wins
         return wins, losses
@@ -648,16 +672,10 @@ class TradeLedger:
         self._losses = losses
         closed = wins + losses
         rate = (wins / closed) if closed else 0.0
+        # The PnL cards are the closed trades after fees — the same rows as the win rate and the trade
+        # list. Wallet equity − invested (which also counts coins still held / stuck in the wallet) is
+        # its own figure, "Wallet vs invested". Mixing them showed −0.0043 next to 85% wins.
         daily_out, d30_out, total_out = daily, d30, total
-        try:
-            from src.storage.capital_pnl import current_capital_pnl
-            cap = current_capital_pnl()
-        except Exception:
-            cap = None
-        if cap:
-            daily_out = float(cap["pnl_daily_sol"])
-            d30_out = float(cap["pnl_30d_sol"])
-            total_out = float(cap["pnl_total_sol"])
         return {
             "pnl_daily_sol": round(daily_out, 6),
             "pnl_live_sol": round(float(self._live or 0), 6),
@@ -1526,6 +1544,17 @@ class TradeLedger:
                 # A ladder buy spans the whole trip, not only the window before the first close.
                 if not op.add_sigs:
                     seg_buys = own_buys[:1]
+                # Ladder buys the ledger counted without a signature (route reply lost, coins landed):
+                # every other wallet BUY of this coin inside this trip belongs to it.
+                others = {
+                    s for o in self.entries if o.side == "OPEN" and o.mint == mint and o is not op
+                    for s in [o.signature] + list(o.add_sigs or []) if s
+                }
+                have = {b["sig"] for b in seg_buys}
+                seg_buys = seg_buys + [
+                    b for b in buys if b["mint"] == mint and float(op.ts or 0) - 5 <= b["ts"] <= buy_end
+                    and b["sig"] not in used and b["sig"] not in have and not (b["sig"] and b["sig"] in others)
+                ]
             else:
                 others = {
                     s for o in self.entries if o.side == "OPEN" and o.mint == mint and o is not op
@@ -1582,9 +1611,19 @@ class TradeLedger:
                     cap = float(get_config().max_position_sol or 0)
                 except Exception:
                     cap = 0.0
-                if cap > 0 and buy_sol > cap + 0.00005 and (buy_sol - cap) <= 0.006:
-                    buy_sol = round(cap, 6)
-                fee_sol = known
+                # Each wallet BUY row is the SOL that went into that buy (rent is its own RENT row). Only a
+                # single buy that is above Max position by about a token-account rent is trimmed back. The old
+                # whole-trade cap cut Candles ladder trades (2-3 buys) and Lightning overpays to one Max
+                # position, so losses were booked as wins (COOK, Huang 2026-11-13).
+                if cap > 0:
+                    trimmed = 0.0
+                    for b in seg_buys:
+                        sol_b = float(b["sol"] or 0)
+                        if 0.0014 <= sol_b - cap <= 0.0021:
+                            sol_b = cap
+                        trimmed += sol_b
+                    buy_sol = round(trimmed, 9)
+                fee_sol = known * max(1, len(seg_buys))
                 if op is not None:
                     op.entry_tip_sol = 0.0
             if op is not None and buy_sol > 0:
@@ -1609,6 +1648,28 @@ class TradeLedger:
                 if changed:
                     fixed += 1
                     self._push_remote(op)
+            if (op is not None and not closes and seg_sells and buy_sol > 0
+                    and time.time() - max(s["ts"] for s in seg_sells) > 30):
+                # The wallet sold every token of a trade the ledger still lists as open (the bot was
+                # restarted ~1s after the sell landed, before it wrote the close: coin "21", 2026-11-13).
+                sold_tok = sum(s["tokens"] for s in seg_sells)
+                if buy_tokens > 0 and sold_tok >= buy_tokens * 0.98:
+                    exit_sol = round(sum(s["sol"] for s in seg_sells), 9)
+                    last = max(seg_sells, key=lambda s: s["ts"])
+                    try:
+                        self.record_close(
+                            id=f"wallet-{mint[:8]}-{int(last['ts'])}", mint=mint, symbol=op.symbol or mint[:6],
+                            mode=op.mode or "live", token_amount=float(buy_tokens), entry_sol=float(buy_sol),
+                            entry_fee_sol=float(fee_sol or 0), entry_tip_sol=0.0, exit_sol=exit_sol,
+                            exit_fee_sol=0.00001, hold_seconds=max(0.0, float(last["ts"]) - float(op.ts or 0)),
+                            reason="wallet_sell", signature=str(last.get("sig") or ""), source=op.source or "",
+                            sale_label="Full Closed", name=getattr(op, "name", "") or "")
+                        fixed += 1
+                        log.warning("LEDGER %s closed from the wallet: sold %.6f SOL for %.6f — the bot stopped "
+                                    "before it booked the sell", op.symbol or mint[:8], exit_sol, buy_sol)
+                    except Exception:
+                        log.exception("ledger wallet close failed mint=%s", mint[:8])
+                continue
             if not closes or not seg_sells:
                 continue
             seg_sells.sort(key=lambda s: s["ts"])

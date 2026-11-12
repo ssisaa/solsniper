@@ -808,12 +808,12 @@ button.lite:hover{color:#fff;border-color:#eef3fb}
       <div class="muted" id="sWrDetail" style="margin-top:8px">0 wins · 0 losses · closed trades after fees</div>
     </div>
     <div class="pnl-strip">
-      <div class="pnl-card" style="--accent:#3ee0a0"><div class="k">Daily PnL</div><div class="n g" id="pnlDaily">0.0000</div><div class="s">since clear, or 00:00 SGT</div><div class="fx" id="pnlDailyFx">—</div></div>
+      <div class="pnl-card" style="--accent:#3ee0a0"><div class="k">Daily PnL</div><div class="n g" id="pnlDaily">0.0000</div><div class="s">closed trades after fees · since clear or 00:00 SGT</div><div class="fx" id="pnlDailyFx">—</div></div>
       <div class="pnl-card" style="--accent:#6cb6ff"><div class="k">PnL · live trade</div><div class="n" id="pnlLive">0.0000</div><div class="s">open position, after fees</div><div class="fx" id="pnlLiveFx">—</div></div>
-      <div class="pnl-card" style="--accent:#f0c14a"><div class="k">PnL · 30 days <button type="button" id="btnClear30" class="lite">clear</button></div><div class="n" id="pnl30">0.0000</div><div class="s">equity − invested</div><div class="fx" id="pnl30Fx">—</div></div>
-      <div class="pnl-card" style="--accent:#9b8cff"><div class="k">PnL · total <button type="button" id="btnClearTotal" class="lite">clear</button></div><div class="n" id="pnlTotal">0.0000</div><div class="s">equity − invested</div><div class="fx" id="pnlTotalFx">—</div></div>
+      <div class="pnl-card" style="--accent:#f0c14a"><div class="k">PnL · 30 days <button type="button" id="btnClear30" class="lite">clear</button></div><div class="n" id="pnl30">0.0000</div><div class="s">closed trades after fees</div><div class="fx" id="pnl30Fx">—</div></div>
+      <div class="pnl-card" style="--accent:#9b8cff"><div class="k">PnL · total <button type="button" id="btnClearTotal" class="lite">clear</button></div><div class="n" id="pnlTotal">0.0000</div><div class="s">closed trades after fees</div><div class="fx" id="pnlTotalFx">—</div></div>
     </div>
-    <div class="pnl-check" id="pnlCheck"><span class="muted">Wallet vs invested</span><b id="pnlCheckVal">set invested SOL</b></div>
+    <div class="pnl-check" id="pnlCheck"><span class="muted" title="Wallet SOL + market value of every coin still in the wallet − invested. Includes coins that are held or stuck, so it differs from the closed-trade PnL.">Wallet vs invested</span><b id="pnlCheckVal">set invested SOL</b></div>
     <div class="card live-chart-card">
       <div class="row-between"><h2 style="margin:0">Live chart</h2><span class="muted" id="liveChartMeta">No open trade</span></div>
       <div class="chart-wrap"><canvas id="cLive"></canvas></div>

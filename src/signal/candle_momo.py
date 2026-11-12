@@ -1425,6 +1425,7 @@ class CandleMomo:
         from src.execution.wallet_tokens import get_token_holding
         pk = pubkey_from_env()
         before = float(pos.tokens or 0)
+        t_add = time.time()
         try:
             routed = await run_swap(self.trader, "buy", mint, sol=size, reason="candle_add") or {}
         except Exception as exc:
@@ -1453,7 +1454,7 @@ class CandleMomo:
         try:
             from src.observability.ledger import get_ledger
             get_ledger().add_to_open(mint, sol=size, fee_sol=fee, tokens=got,
-                                     signature=str(routed.get("sig") or ""))
+                                     signature=str(routed.get("sig") or "") or self._recent_buy_sig(mint, t_add))
             self.manager._push_remote()
         except Exception:
             log.exception("candle ladder ledger add failed")
@@ -1479,6 +1480,28 @@ class CandleMomo:
         self.exec_fail_streak = 0
         self.note("buy", f"{sym} LIVE LADDER BUY lot {lot['n']} {size:.4f} SOL (red #{sig.get('streak')}, total "
                          f"{rec['entry_sol']:.4f} SOL) — landed {ms/1000:.2f}s after the signal.", mint)
+
+    @staticmethod
+    def _recent_buy_sig(mint: str, since: float) -> str:
+        """The signature of a ladder buy whose route reply came back empty but whose coins landed: the
+        candle send cache, else the wallet's newest BUY row for this coin. Without it the ledger counts
+        the lot but cannot tell it apart, and the on-chain cost check cut the trade back to lot 1."""
+        try:
+            from src.execution.tx_route import candle_buy_get
+            row = candle_buy_get(mint, 60.0)
+            if row and row.get("sig") and float(row.get("ts") or 0) >= since - 1:
+                return str(row["sig"])
+        except Exception:
+            pass
+        try:
+            from src.observability.exec_history import get_exec_history
+            for e in reversed(list(get_exec_history().wallet_entries)):
+                if (e.mint == mint and (e.side or "").upper() == "BUY" and float(e.ts or 0) >= since - 2
+                        and getattr(e, "signature", "")):
+                    return str(e.signature)
+        except Exception:
+            pass
+        return ""
 
     def _mgr_pos(self, mint: str):
         if self.manager is None:

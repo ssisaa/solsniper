@@ -1278,3 +1278,15 @@ def test_clear_session_keeps_live_log_and_stop_files(tmp_path, monkeypatch):
     assert (tmp_path / "bot.stop").exists() and (tmp_path / "run_forever.lock").exists()
     assert (tmp_path / "supervisor.log").exists()
     assert not (tmp_path / "trades.jsonl").exists()
+
+
+def test_ledger_win_needs_sol_profit():
+    import types as _t
+    from src.observability.ledger import TradeLedger
+    led = TradeLedger.__new__(TradeLedger)
+    row = lambda pnl_in, out, since: _t.SimpleNamespace(side="CLOSE", ts=time.time(), group_id="", id=str(out), mint="M" + str(out),
+                                                       exit_sol=out, entry_sol=pnl_in, entry_fee_sol=0.0, entry_tip_sol=0.0,
+                                                       exit_fee_sol=0.0, pnl_sol=out - pnl_in, since_buy_pct=since,
+                                                       pnl_usd=None, book_locked=False)
+    led.entries = [row(0.0106, 0.0090, 12.0), row(0.005, 0.0059, 5.0)]    # SOL loss with green pump %, real win
+    assert led._win_loss(0) == (1, 1)
