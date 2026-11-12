@@ -67,7 +67,8 @@ Controls source (else: "Change and Select Source to …"). When on:
   are taken over (`pos._open_age`).
 - **Dayscalp:** Dayscalp's scan picks the youngest coin (by pool/coin creation time) that passes its 5m band,
   volume and blacklist, and buys it at once as lot 1 (`quick_entry`: no 1s/1m re-check; RugCheck still runs
-  when enabled). `src/signal/dayscalp.py` → `_candle_supports_dayscalp()`.
+  when enabled). `src/signal/dayscalp.py` → `_candle_supports_dayscalp()`. That pick (the top row on Decoded
+  Tokens, `LAST_CANDLE_PICK`) is fed to the Candles feeds at once, even when Auto Trade is off (watch only).
 - Revert (Candles page banner) turns it off and puts Candles back to paper.
 
 **Candles rule now (user's choice 2026-11-12/13)**: inverse ladder, Count `in_a_row`, Reds per lot **4** →

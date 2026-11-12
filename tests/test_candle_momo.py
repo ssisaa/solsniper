@@ -1247,3 +1247,18 @@ def test_dayscalp_candle_pick_takes_youngest_passing(monkeypatch):
     monkeypatch.setattr(DS, "_apply_live_band", lambda c: c)
     top = asyncio.run(DS.select_top1_dayscalp(cfg))
     assert top.symbol == "YOUNG" and top.quick_entry is True
+
+
+def test_dayscalp_pick_is_fed_even_without_buy(monkeypatch):
+    import src.config.runtime as rt
+    import src.signal.dayscalp as DS
+    from src.signal.candle_momo import CandleMomo
+    e = CandleMomo()
+    e.store = None
+    e.cfg.support_enabled = True
+    e.manager = _types.SimpleNamespace(positions={})
+    monkeypatch.setattr(rt, "get_config", lambda: _types.SimpleNamespace(filter_mode="dayscalp", trade_enabled=False))
+    DS.LAST_CANDLE_PICK.update(mint="YENUpump", symbol="yenu", ts=time.time())
+    e._pick([])
+    assert "YENUpump" in e.feeds and e.feeds["YENUpump"].symbol == "yenu"
+    DS.LAST_CANDLE_PICK.update(mint="", ts=0.0)

@@ -487,6 +487,17 @@ class CandleMomo:
             if src == "mayhem":
                 for m in self._mayhem_grab():
                     want.setdefault(m, "mayhem-new")
+            if src == "dayscalp":
+                try:
+                    from src.signal.dayscalp import LAST_CANDLE_PICK as _pk
+                    for gm, gv in list(self._grab.items()):
+                        if time.time() - float(gv.get("at") or 0) > 60:
+                            self._grab.pop(gm, None)
+                    if _pk.get("mint") and time.time() - float(_pk.get("ts") or 0) < 20:
+                        want.setdefault(_pk["mint"], "scan")      # Decoded Tokens' top pick: watch it now
+                        self._grab.setdefault(_pk["mint"], {"at": time.time(), "symbol": _pk.get("symbol") or ""})
+                except Exception:
+                    pass
             for m, origin in want.items():
                 if m not in self.feeds:
                     f = Feed(m, cfg.count)
@@ -494,7 +505,9 @@ class CandleMomo:
                     f.symbol = ((self.positions.get(m) or {}).get("symbol") or (self._grab.get(m) or {}).get("symbol")
                                 or m[:6])
                     self.feeds[m] = f
-                    self.note("info", f"Watching {f.symbol} ({'Mayhem_Mode just opened it — buying' if origin == 'mayhem-new' else src + ' holds it'}).", m)
+                    what = {"mayhem-new": "Mayhem_Mode just opened it — buying",
+                            "scan": "Dayscalp's top pick on Decoded Tokens — bought as lot 1 when Auto Trade is on"}
+                    self.note("info", f"Watching {f.symbol} ({what.get(origin, src + ' holds it')}).", m)
             for m in list(self.feeds):
                 if m not in want:
                     self.feeds.pop(m, None)

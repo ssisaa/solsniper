@@ -776,6 +776,11 @@ async def _drop_client(client) -> None:
         pass
 
 
+# The scan's latest pick under AutoTrade-Candles (top row on Decoded Tokens): Candles feeds it at once,
+# bought or not (Auto Trade off = watch only).
+LAST_CANDLE_PICK: Dict[str, Any] = {"mint": "", "symbol": "", "ts": 0.0}
+
+
 def _candle_supports_dayscalp() -> bool:
     """AutoTrade-Candles is on and Dayscalp is the Live Controls source."""
     try:
@@ -842,6 +847,7 @@ async def select_top1_dayscalp(cfg: Optional[DayScalpConfig] = None) -> Optional
                 why = f"AutoTrade-Candles: youngest passing Dayscalp ({age_txt}) — bought now as lot 1"
                 log.info("DAYSCALP candle pick %s m5=%+.1f%% %s mint=%s", row.get("symbol") or "?", m5, age_txt,
                          str(row.get("mint") or "")[:8])
+                LAST_CANDLE_PICK.update(mint=str(row["mint"]), symbol=str(row.get("symbol") or ""), ts=now_t)
                 await _show_decoded(row, "BUYING", why)
                 return DayScalpCandidate(
                     mint=row["mint"], symbol=row.get("symbol") or "", name=row.get("name") or "",
