@@ -33,8 +33,8 @@ STATE_URL = "https://frontend-api-v3.pump.fun/coins-v2/{mint}/mayhem-state"
 # Mixed feed (Mayhem2 page checkbox "Mixed"): New first, then Movers, then Graduated.
 MIXED_BOARDS = (
     ("new", "https://advanced-indexer.pump.fun/boards/new?tier=web&chains=solana&offset=0&limit=30", 0.8),
-    ("movers", "https://advanced-indexer.pump.fun/boards/movers?tier=web&surface=WEB&platform=WEB&limit=150&chains=solana", 3.0),
-    ("graduated", "https://advanced-indexer.pump.fun/boards/graduated?tier=web&offset=0&limit=30", 3.0),
+    ("movers", "https://advanced-indexer.pump.fun/boards/movers?tier=web&surface=WEB&platform=WEB&limit=150&chains=solana", 1.5),
+    ("graduated", "https://advanced-indexer.pump.fun/boards/graduated?tier=web&offset=0&limit=30", 1.5),
 )
 MIXED_GROUPS = tuple(g for g, _u, _e in MIXED_BOARDS)
 ALL_TRADES_URL = "https://frontend-api-v3.pump.fun/trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/{mint}"
@@ -384,21 +384,25 @@ class Mayhem2:
                   else "Feed: Mayhem_Mode — its Mayhem coins and its BUY / SELL.")
 
     def _mixed_candidates(self) -> List[Dict[str, Any]]:
-        """Mixed feed: New (under 3 minutes), then Movers, then Graduated; pump coins only; youngest
-        first inside each group; a coin on two boards counts once (its first group)."""
+        """Mixed feed: New (under 3 minutes), then Movers, then Graduated; Solana coins whose mint starts or
+        ends with 'pump' only; youngest first inside each group. Each board keeps all its own coins (a coin on
+        Movers and Graduated is in both), so every board's turn gets that board's youngest coin."""
         now = time.time()
         with self.lock:
             groups = {g: list(self.mixed_rows.get(g) or []) for g in MIXED_GROUPS}
             ats = dict(self.mixed_at)
             states = dict(self.state)
-        out, seen = [], set()
+        out = []
         for g in MIXED_GROUPS:
             shift = max(0.0, now - ats.get(g, 0.0)) if ats.get(g) else 0.0
-            part = []
+            part, seen = [], set()
             for r in groups[g]:
                 mint = str(r.get("m") or "")
-                if not mint or mint in seen or str(r.get("pg") or "") != "pump":
+                if not mint or mint in seen or not (mint.startswith("pump") or mint.endswith("pump")):
                     continue
+                if not str(r.get("c") or "solana").startswith("solana"):
+                    continue
+                seen.add(mint)
                 age = float(r.get("age") or 0) + shift
                 if g == "new" and age > YOUNG_S:
                     continue
@@ -407,9 +411,7 @@ class Mayhem2:
                     continue          # a Mayhem coin that is paused / completed
                 part.append(dict(r, _age=age, _grp=g))
             part.sort(key=lambda r: r["_age"])
-            for r in part:
-                seen.add(r["m"])
-                out.append(r)
+            out.extend(part)
         return out
 
     def _mixed_pick(self) -> Optional[Dict[str, Any]]:
@@ -1772,7 +1774,12 @@ class Mayhem2:
         pin = dict(self.pin) if self.pin else None
         mixed = self.mixed()
         if mixed:
-            board = self._mixed_candidates()[:60]
+            once, board = set(), []
+            for r in self._mixed_candidates():
+                if r["m"] not in once:
+                    once.add(r["m"])
+                    board.append(r)
+            board = board[:60]
         rows = []
         for r in board:
             mint = str(r.get("m") or "")

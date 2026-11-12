@@ -32,7 +32,7 @@ def eng(monkeypatch):
 def test_order_new_then_movers_then_graduated_youngest_first(eng):
     got = [(r["m"], r["_grp"]) for r in eng.candidates()]
     assert got == [("N1pump", "new"), ("N2pump", "new"),
-                   ("M1pump", "movers"), ("M2pump", "movers"),
+                   ("N1pump", "movers"), ("M1pump", "movers"), ("M2pump", "movers"),
                    ("G1pump", "graduated"), ("G2pump", "graduated")]
 
 
@@ -133,10 +133,22 @@ def test_pins_take_turns_new_movers_graduated(eng):
         got.append((row["m"], row["_grp"]))
         eng.used[row["m"]] = {"ts": time.time(), "why": "traded"}
     assert got == [("N1pump", "new"), ("M1pump", "movers"), ("G1pump", "graduated"),
-                   ("N2pump", "new"), ("M2pump", "movers")]
+                   ("N2pump", "new"), ("M2pump", "movers")]      # N1pump (also on Movers) is used already
 
 
 def test_empty_group_passes_turn(eng):
     eng.mixed_rows["movers"] = []
     eng.mixed_turn = 1                       # movers' turn, but movers is empty
     assert eng._mixed_pick()["_grp"] == "graduated" and eng.mixed_turn == 0
+
+
+def test_only_solana_pump_vanity_mints(eng):
+    eng.mixed_rows["new"] += [_row("pumpStartX", 1), _row("NoPumpMint", 1), _row("Ethpump", 1, c="eth:1")]
+    got = [r["m"] for r in eng.candidates() if r["_grp"] == "new"]
+    assert "pumpStartX" in got and "NoPumpMint" not in got and "Ethpump" not in got
+
+
+def test_graduated_turn_takes_its_own_youngest_even_if_on_movers(eng):
+    eng.mixed_rows["movers"].append(_row("G1pump", 180, gd=1))
+    eng.mixed_turn = 2
+    assert eng._mixed_pick()["m"] == "G1pump"

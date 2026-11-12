@@ -78,7 +78,7 @@ Max hold 90 s; Exit reserve 0; Min reserve 0.15 SOL (also blocks lots 2+ on very
 
 **Mayhem2 feed (2026-11-13)**: two checkboxes on the Mayhem2 page (`mayhem2_feed`, one is always on).
 *Mayhem_Mode* (default) = unchanged. *Mixed* = pins take turns New (< 3 min) → Movers → Graduated → New … (`_mixed_pick`, an empty board passes the turn), youngest
-first in each, pump coins only, a coin on two boards counts once; the pin needs no Mayhem_Mode holding, and
+first in each board (boards read every 0.8 s / 1.5 s), Solana coins whose mint starts or ends with "pump" only, each board keeps its own coins (a coin on Movers and Graduated is in both); the pin needs no Mayhem_Mode holding, and
 **every wallet's** BUY / SELL on the pinned coin is the signal (`ALL_TRADES_URL`); Mayhem_Mode positions are not
 read. Coins off the pump curve (graduated) are valued by a Jupiter quote (`_jup_curve`, flat price, 1.5 s cache);
 dry run skips the local build for them. Idle unpin (30 s without a trade) and one trade per coin still apply.
