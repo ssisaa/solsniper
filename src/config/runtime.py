@@ -234,7 +234,7 @@ class RuntimeConfig:
                     v = norm
                 elif k == "mayhem2_strategy":
                     v = str(v or "").strip()
-                    if v not in ("copy", "inverse", "inverse_tp", "inverse_big", "inverse_big_tp", "ladder", "inv_ladder"):
+                    if v not in ("copy", "inverse", "inverse_tp", "inverse_big", "inverse_big_tp", "ladder", "inv_ladder", "pro_trader"):
                         continue
                 elif k == "mayhem2_feed":
                     v = str(v or "").strip().lower()

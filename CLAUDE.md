@@ -83,6 +83,16 @@ first in each board (boards read every 0.8 s / 1.5 s), Solana coins whose mint s
 read. Coins off the pump curve (graduated) are valued by a Jupiter quote (`_jup_curve`, flat price, 1.5 s cache);
 dry run skips the local build for them. Idle unpin (30 s without a trade) and one trade per coin still apply.
 
+**Pro Trader (2026-11-13)**: `src/signal/pro_trader.py` reads the pinned coin's 1s candles (EMA 9/21, VWAP, RSI,
+MACD, volume, 15 s BUY/SELL flow) → call BUY / SELL / HOLD / WAIT / AVOID with entry, target, stop, checklist and a
+replay of the rules on the chart. Entry = "VWAP dip with volume" (≥10 % under VWAP, green candle, RSI < 45, last-5
+volume ≥ 1.5× the 20 before); exit target +25 %, stop −5 %, 60 s time stop (engine: real value % minus 2 % fees).
+Chosen by testing on 43 coins / 10,412 candles: 83 trades, 44 % wins, +2.3 %/trade after fees even 1 candle late;
+plain trend-following lost on every setting. Small sample — never promise profit. Mayhem2 strategy `pro_trader`
+trades it (live / dry run); its paper twin always runs in "Strategies side by side". `/api/candles` returns the read
+as `pro`; the Mayhem2 chart draws EMA/VWAP lines, volume, an RSI pane, target/stop zones, replay tags and the
+"Pro Trader desk" panel.
+
 **Mayhem2**: strategy `inv_ladder` added (Mayhem_Mode SELL = red buys, lots on reds 1/5/9, BUY = green sells
 all, always). **No circuit breaker** for Mayhem2 or Candles (their losses don't count toward it).
 

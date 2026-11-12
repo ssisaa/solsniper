@@ -398,7 +398,29 @@ td{padding:8px 6px;border-bottom:1px solid rgba(120,160,210,.08);vertical-align:
 #view-mayhem2 .m2-notes mark{background:rgba(240,180,60,.35);color:inherit;border-radius:2px}
 #view-mayhem2 .m2-read{font-size:11px;color:var(--muted,#8aa0b8);font-variant-numeric:tabular-nums;white-space:nowrap}
 #view-mayhem2 .m2-read b{color:var(--text,#e6edf3)}
-#view-mayhem2 .m2-chartwrap{position:relative;flex:1;min-height:0}
+#view-mayhem2 .m2-chartwrap{position:relative;flex:1;min-height:0;border-radius:10px;overflow:hidden;background:radial-gradient(120% 90% at 50% 0%,rgba(40,70,120,.18),rgba(6,10,18,.0) 60%),linear-gradient(180deg,#0b1220,#070b14);border:1px solid rgba(120,160,210,.14)}
+#view-mayhem2 .m2-desk{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 12px;margin:0 0 8px;padding:8px 10px;border-radius:10px;border:1px solid rgba(120,160,210,.16);background:linear-gradient(135deg,rgba(18,28,46,.9),rgba(10,16,28,.9));font-size:11.5px;max-height:38%;overflow:auto}
+#view-mayhem2 .dk-call{grid-row:span 2;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-width:96px;padding:6px 10px;border-radius:10px;background:rgba(138,160,184,.08);border:1px solid rgba(138,160,184,.25)}
+#view-mayhem2 .dk-tag{font-size:20px;font-weight:900;letter-spacing:.06em;line-height:1}
+#view-mayhem2 .dk-call.BUY{background:rgba(62,224,160,.12);border-color:rgba(62,224,160,.6);box-shadow:0 0 18px rgba(62,224,160,.25)}
+#view-mayhem2 .dk-call.BUY .dk-tag,#view-mayhem2 .dk-call.HOLD .dk-tag{color:#3ee0a0}
+#view-mayhem2 .dk-call.SELL{background:rgba(255,93,115,.12);border-color:rgba(255,93,115,.6);box-shadow:0 0 18px rgba(255,93,115,.25)}
+#view-mayhem2 .dk-call.SELL .dk-tag,#view-mayhem2 .dk-call.AVOID .dk-tag{color:#ff5d73}
+#view-mayhem2 .dk-call.HOLD{border-color:rgba(62,224,160,.4)}
+#view-mayhem2 .dk-call.WAIT .dk-tag{color:#ffcc66}
+#view-mayhem2 .dk-meter{width:84px;height:5px;border-radius:9px;background:rgba(138,160,184,.18);overflow:hidden}
+#view-mayhem2 .dk-meter i{display:block;height:100%;border-radius:9px;background:linear-gradient(90deg,#ff5d73,#ffcc66 50%,#3ee0a0)}
+#view-mayhem2 .dk-sub{font-size:10px;color:var(--muted,#8aa0b8);white-space:nowrap}
+#view-mayhem2 .dk-row{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;min-width:0}
+#view-mayhem2 .dk-row .why{font-weight:700;color:var(--text,#e6edf3)}
+#view-mayhem2 .dk-kv{color:var(--muted,#8aa0b8);white-space:nowrap}
+#view-mayhem2 .dk-kv b{color:var(--text,#e6edf3);font-variant-numeric:tabular-nums}
+#view-mayhem2 .dk-kv b.g{color:#3ee0a0}#view-mayhem2 .dk-kv b.r{color:#ff5d73}
+#view-mayhem2 .dk-chk{white-space:nowrap;padding:1px 7px;border-radius:999px;border:1px solid rgba(138,160,184,.25);color:var(--muted,#8aa0b8)}
+#view-mayhem2 .dk-chk.ok{border-color:rgba(62,224,160,.55);color:#bff5de;background:rgba(62,224,160,.08)}
+#view-mayhem2 .dk-ctx{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px 14px;color:var(--muted,#8aa0b8);font-size:11px}
+#view-mayhem2 .dk-ctx b{color:var(--text,#e6edf3)}#view-mayhem2 .dk-ctx b.g,#view-mayhem2 .dk-ctx .g{color:#7debc0}#view-mayhem2 .dk-ctx b.r,#view-mayhem2 .dk-ctx .r{color:#ff8fa0}
+#view-mayhem2 .m2-chartbox.expanded .m2-desk{font-size:12.5px}
 #view-mayhem2 .m2-chartwrap canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair}
 #view-mayhem2 .m2-chartmsg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:13px;pointer-events:none}
 #view-mayhem2 .m2-chartbox.expanded{position:fixed;inset:24px;z-index:1001;background:#0d1522;border-color:rgba(108,182,255,.45);box-shadow:0 20px 60px rgba(0,0,0,.6)}
@@ -1388,6 +1410,7 @@ button.lite:hover{color:#fff;border-color:#eef3fb}
               <button type="button" class="m2-icon" id="m2ChartExp" title="Expand (F)" aria-label="Expand chart">⤢</button>
             </div>
           </div>
+          <div class="m2-desk" id="m2Desk" title="Pro Trader: reads this 1s chart every second like a day trader. Strategy pro_trader trades this call (live / dry run); its paper twin always does (Strategies side by side)."><div class="dk-call WAIT"><span class="dk-tag">WAIT</span><span class="dk-sub">reading the chart…</span></div><div class="dk-row muted">Pro Trader desk</div></div>
           <div class="m2-chartwrap" id="m2ChartWrap"><canvas id="m2Chart"></canvas><div class="m2-chartmsg muted" id="m2ChartMsg">No coin pinned.</div></div>
         </div>
       </div>
@@ -4437,6 +4460,7 @@ document.getElementById('cmKillBtn').addEventListener('click',()=>{
   cmPost({kill:!_cmCfg.kill}, 'Kill switch');
 });
 // ---------- Mayhem2: messages panel + 1s chart ----------
+let _m2Pro=null;
 let _m2Notes=[], _m2ChartPin=null, _m2ChartSigs=[], _m2ChartMarks=[], _m2Candles=[], _m2ChartMint='', _m2ChartBusy=false, _m2Hover=null, _m2ChartAt=0;
 const _m2Pref=(()=>{ try{ return JSON.parse(localStorage.getItem('m2Pref')||'{}')||{}; }catch(e){ return {}; } })();
 function m2SavePref(){ try{ localStorage.setItem('m2Pref', JSON.stringify(_m2Pref)); }catch(e){} }
@@ -4493,19 +4517,48 @@ async function m2LoadChart(){
   const pin=_m2ChartPin;
   const msg=document.getElementById('m2ChartMsg');
   document.getElementById('m2ChartSym').innerHTML=pin?'· <b>'+escapeHtml(pin.symbol)+'</b> <a href="https://pump.fun/coin/'+escapeHtml(pin.mint)+'" target="_blank" rel="noopener">↗</a>':'';
-  if(!pin){ _m2Candles=[]; _m2ChartMint=''; if(msg){ msg.textContent='No coin pinned.'; msg.hidden=false; } m2DrawChart(); return; }
-  if(pin.mint!==_m2ChartMint){ _m2Candles=[]; _m2ChartMint=pin.mint; _m2Hover=null; if(msg){ msg.textContent='Loading 1s candles…'; msg.hidden=false; } m2DrawChart(); }
+  if(!pin){ _m2Candles=[]; _m2Pro=null; m2PaintDesk(); _m2ChartMint=''; if(msg){ msg.textContent='No coin pinned.'; msg.hidden=false; } m2DrawChart(); return; }
+  if(pin.mint!==_m2ChartMint){ _m2Candles=[]; _m2Pro=null; m2PaintDesk(); _m2ChartMint=pin.mint; _m2Hover=null; if(msg){ msg.textContent='Loading 1s candles…'; msg.hidden=false; } m2DrawChart(); }
   _m2ChartBusy=true;
   try{
     const r=await fetch('/api/candles?mint='+encodeURIComponent(pin.mint),{cache:'no-store'});
     const d=await r.json();
     if(d.mint!==_m2ChartMint) return;
     _m2Candles=(d.candles||[]).filter(c=>c.o>0&&c.c>0);
+    _m2Pro=d.pro||null; m2PaintDesk();
     _m2ChartAt=Date.now();
     if(msg){ msg.hidden=_m2Candles.length>0; if(!_m2Candles.length) msg.textContent=d.error?('Chart feed: '+d.error):'No trade yet on this coin.'; }
     m2DrawChart();
   }catch(e){ if(msg&&!_m2Candles.length){ msg.textContent='Chart feed unreachable.'; msg.hidden=false; } }
   finally{ _m2ChartBusy=false; }
+}
+function m2PaintDesk(){
+  const el=document.getElementById('m2Desk'); if(!el) return;
+  const a=_m2Pro;
+  if(!a){ const html='<div class="dk-call WAIT"><span class="dk-tag">—</span><span class="dk-sub">no coin</span></div><div class="dk-row muted">Pro Trader reads the pinned coin\'s 1s chart every second.</div>'; if(el._h!==html){ el._h=html; el.innerHTML=html; } return; }
+  const call=String(a.call||'WAIT'), conf=Math.max(0,Math.min(100,Number(a.confidence)||0));
+  const pc=v=>v==null?'—':((v>0?'+':'')+Number(v).toFixed(1)+'%');
+  const checks=(a.checks||[]).map(c=>`<span class="dk-chk ${c.ok?'ok':''}">${c.ok?'✓':'✗'} ${escapeHtml(c.t)}</span>`).join('');
+  const rp=a.replay||{};
+  const plan=a.ok?`<span class="dk-kv">${a.holding?'Entry':'Entry now'} <b>${m2Px(a.entry)}</b></span>
+    <span class="dk-kv">Target <b class="g">${m2Px(a.target)} (${pc(a.targetPct)})</b></span>
+    <span class="dk-kv">Stop <b class="r">${m2Px(a.stop)} (${pc(a.stopPct)})</b></span>
+    <span class="dk-kv">R:R <b>${a.rr||'—'}:1</b></span>
+    <span class="dk-kv">Time stop <b>${a.timeStopS||60}s</b></span>
+    ${a.holding?`<span class="dk-kv">In trade <b class="${a.pnlPct>0?'g':(a.pnlPct<0?'r':'')}">${pc(a.pnlPct)}</b> · ${Number(a.held||0).toFixed(0)}s</span>`:''}`:'';
+  const ctx=a.ok?`<div class="dk-ctx">
+    <span>RSI <b>${a.rsi==null?'—':a.rsi}</b></span><span>ATR <b>${a.atrPct==null?'—':a.atrPct+'%'}</b></span>
+    <span>vs VWAP <b>${a.underVwap==null?'—':pc(-a.underVwap)}</b></span><span>off high <b>${a.offHigh==null?'—':'−'+a.offHigh+'%'}</b></span>
+    <span>volume <b>${a.volX==null?'—':a.volX+'x'}</b></span>
+    ${a.flow?`<span>flow 15s <b class="g">${a.flow.buy} buys</b> / <b class="r">${a.flow.sell} sells</b></span>`:''}
+    ${(a.up||[]).map(x=>`<span class="g">▲ ${escapeHtml(x)}</span>`).join('')}
+    ${(a.dn||[]).map(x=>`<span class="r">▼ ${escapeHtml(x)}</span>`).join('')}
+    ${rp.trades!=null?`<span title="The same rules replayed over the candles on this chart (after ~2% fees). Past bars only — not a promise.">this chart: <b>${rp.trades}</b> trades · <b>${rp.wins}</b> won · avg <b class="${rp.avgPct>0?'g':(rp.avgPct<0?'r':'')}">${pc(rp.avgPct)}</b></span>`:''}
+  </div>`:'';
+  const html=`<div class="dk-call ${escapeHtml(call)}"><span class="dk-tag">${escapeHtml(call)}</span><div class="dk-meter"><i style="width:${conf}%"></i></div><span class="dk-sub">confidence ${conf}</span></div>
+    <div class="dk-row"><span class="why">${escapeHtml(a.why||'')}</span>${plan}</div>
+    <div class="dk-row">${checks}</div>${ctx}`;
+  if(el._h!==html){ el._h=html; el.innerHTML=html; }
 }
 function m2DrawChart(){
   const cv=document.getElementById('m2Chart'); if(!cv) return;
@@ -4515,66 +4568,154 @@ function m2DrawChart(){
   const g=cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,W,H);
   const rd=document.getElementById('m2ChartRead');
   const cs=_m2Candles; if(!cs.length){ if(rd) rd.innerHTML=''; return; }
+  const UP='#3ee0a0', DN='#ff5d73', C9='#ffcc66', C21='#b18cff', CV='#4cc9f0', MUT='rgba(138,160,184,.85)';
+  const FONT='system-ui,-apple-system,Segoe UI,sans-serif';
   const expanded=document.getElementById('m2ChartBox').classList.contains('expanded');
-  const padR=72, padB=22, padT=10, pw=Math.max(40,W-padR-8), ph=Math.max(40,H-padB-padT);
-  const step=expanded?11:8;                         // px per second
-  const span=Math.max(10,Math.floor(pw/step));      // seconds shown
+  const pro=_m2Pro&&_m2Pro.ok?_m2Pro:null, L=pro&&pro.lines?pro.lines:null;
+  const padR=78, padL=8, padT=12, fut=pro?46:10;              // right: price axis; fut: room for the plan
+  const rsiH=L?Math.max(46,Math.round(H*0.17)):0, gapR=L?18:0, timeH=20;
+  const pw=Math.max(40,W-padR-padL-fut), mainH=Math.max(60,H-padT-timeH-rsiH-gapR);
+  const volH=Math.round(mainH*0.18);
+  const step=expanded?11:8;
+  const span=Math.max(10,Math.floor(pw/step));
   const tEnd=cs[cs.length-1].t, tStart=tEnd-(span-1)*1000;
   const vis=cs.filter(c=>c.t>=tStart);
+  const lineAt={}; if(L){ L.t.forEach((t,i)=>{ lineAt[t]=i; }); }
   let lo=Math.min(...vis.map(c=>c.l)), hi=Math.max(...vis.map(c=>c.h));
+  if(pro){ const zs=[pro.stop,pro.target,pro.entry].filter(v=>v>0); if(zs.length){ lo=Math.min(lo,...zs); hi=Math.max(hi,...zs); } }
+  if(L){ for(const c of vis){ const i=lineAt[c.t]; if(i==null) continue; for(const k of ['ema9','ema21','vwap']){ const v=L[k][i]; if(v>0){ lo=Math.min(lo,v); hi=Math.max(hi,v); } } } }
   if(!(hi>lo)){ hi=hi*1.01; lo=lo*0.99; }
-  const pad=(hi-lo)*0.08; lo-=pad; hi+=pad;
-  const X=t=>8+((t-tStart)/1000)*step+step/2, Y=p=>padT+(hi-p)/(hi-lo)*ph;
-  g.font='11px system-ui,-apple-system,Segoe UI,sans-serif'; g.textBaseline='middle';
+  const pad=(hi-lo)*0.06; lo-=pad; hi+=pad;
+  const priceH=mainH-volH*0.35;                                   // volume sits under the candles, overlapping a little
+  const X=t=>padL+((t-tStart)/1000)*step+step/2, Y=p=>padT+(hi-p)/(hi-lo)*priceH;
+  const xEnd=padL+pw+fut;
+  // watermark
+  if(_m2ChartPin){ g.save(); g.font=`900 ${Math.round(Math.min(64,mainH*0.22))}px ${FONT}`; g.fillStyle='rgba(120,160,210,.05)'; g.textAlign='center'; g.textBaseline='middle'; g.fillText(String(_m2ChartPin.symbol||'').toUpperCase(), padL+(pw+fut)/2, padT+mainH/2); g.restore(); }
+  g.font=`11px ${FONT}`; g.textBaseline='middle';
   // grid + price axis
-  g.strokeStyle='rgba(138,160,184,.12)'; g.fillStyle='rgba(138,160,184,.85)'; g.lineWidth=1;
-  for(let i=0;i<=5;i++){ const p=lo+(hi-lo)*i/5, y=Math.round(Y(p))+.5; g.beginPath(); g.moveTo(8,y); g.lineTo(8+pw,y); g.stroke(); g.textAlign='left'; g.fillText(m2Px(p), 8+pw+6, y); }
-  // time axis: a label every 10s (15s when crowded)
+  g.lineWidth=1;
+  for(let i=0;i<=5;i++){ const p=lo+(hi-lo)*i/5, y=Math.round(Y(p))+.5; g.strokeStyle='rgba(138,160,184,.08)'; g.beginPath(); g.moveTo(padL,y); g.lineTo(xEnd,y); g.stroke(); g.fillStyle=MUT; g.textAlign='left'; g.fillText(m2Px(p), xEnd+6, y); }
   const every=step*10<70?15:10; g.textAlign='center';
-  for(let t=Math.ceil(tStart/1000/every)*every*1000; t<=tEnd; t+=every*1000){ const x=Math.round(X(t))+.5; g.strokeStyle='rgba(138,160,184,.08)'; g.beginPath(); g.moveTo(x,padT); g.lineTo(x,padT+ph); g.stroke(); g.fillText(new Date(t).toTimeString().slice(0,8), x, H-padB/2); }
-  // candles
+  for(let t=Math.ceil(tStart/1000/every)*every*1000; t<=tEnd; t+=every*1000){ const x=Math.round(X(t))+.5; g.strokeStyle='rgba(138,160,184,.06)'; g.beginPath(); g.moveTo(x,padT); g.lineTo(x,padT+mainH+gapR+rsiH); g.stroke(); g.fillStyle=MUT; g.fillText(new Date(t).toTimeString().slice(0,8), x, H-timeH/2); }
+  // plan zones (target green, stop red) from the entry to the right edge
+  if(pro&&pro.entry>0&&(pro.call==='BUY'||pro.holding)){
+    const x0=pro.holding?Math.max(padL,X(tEnd-Math.max(0,Number(pro.held||0))*1000)):X(tEnd), ye=Y(pro.entry), yt=Y(pro.target), ys=Y(pro.stop);
+    let gr=g.createLinearGradient(0,yt,0,ye); gr.addColorStop(0,'rgba(62,224,160,.28)'); gr.addColorStop(1,'rgba(62,224,160,.05)');
+    g.fillStyle=gr; g.fillRect(x0,yt,xEnd-x0,ye-yt);
+    gr=g.createLinearGradient(0,ye,0,ys); gr.addColorStop(0,'rgba(255,93,115,.05)'); gr.addColorStop(1,'rgba(255,93,115,.28)');
+    g.fillStyle=gr; g.fillRect(x0,ye,xEnd-x0,ys-ye);
+    const tagL=(y,col,txt)=>{ g.font=`bold 10px ${FONT}`; const w=g.measureText(txt).width+10; g.fillStyle=col; if(g.roundRect){ g.beginPath(); g.roundRect(xEnd-w-4,y-8,w,16,4); g.fill(); } else g.fillRect(xEnd-w-4,y-8,w,16); g.fillStyle='#04121e'; g.textAlign='left'; g.fillText(txt,xEnd-w+1,y+.5); };
+    g.setLineDash([5,4]); g.lineWidth=1.2;
+    [[yt,UP],[ye,'#e6edf3'],[ys,DN]].forEach(([y,col])=>{ g.strokeStyle=col; g.beginPath(); g.moveTo(x0,Math.round(y)+.5); g.lineTo(xEnd,Math.round(y)+.5); g.stroke(); });
+    g.setLineDash([]);
+    tagL(yt,UP,'TARGET '+(pro.targetPct>0?'+':'')+pro.targetPct+'%'); tagL(ye,'#e6edf3','ENTRY'); tagL(ys,DN,'STOP '+pro.stopPct+'%');
+  }
+  // volume
+  const vmax=Math.max(1e-12,...vis.map(c=>Number(c.v)||0)), vBase=padT+mainH;
+  for(const c of vis){ const x=Math.round(X(c.t)), h=(Number(c.v)||0)/vmax*volH, bw=Math.max(2,Math.floor(step*0.7)); g.fillStyle=c.c>=c.o?'rgba(62,224,160,.22)':'rgba(255,93,115,.22)'; g.fillRect(x-Math.floor(bw/2), vBase-h, bw, h); }
+  // indicator lines
+  const drawLine=(k,col,w,dash)=>{ if(!L) return; g.strokeStyle=col; g.lineWidth=w; g.setLineDash(dash||[]); g.beginPath(); let on=false; for(const c of vis){ const i=lineAt[c.t]; const v=i==null?null:L[k][i]; if(!(v>0)){ on=false; continue; } const x=X(c.t), y=Y(v); if(on) g.lineTo(x,y); else { g.moveTo(x,y); on=true; } } g.stroke(); g.setLineDash([]); };
+  g.save(); g.shadowColor='rgba(76,201,240,.5)'; g.shadowBlur=6; drawLine('vwap',CV,1.4,[6,4]); g.restore();
+  drawLine('ema21',C21,1.4); drawLine('ema9',C9,1.4);
+  // candles (soft glow)
   const bw=Math.max(2,Math.floor(step*0.7));
   for(const c of vis){
-    const x=Math.round(X(c.t)), up=c.c>=c.o, col=up?'#3ee0a0':'#ff5d73';
-    g.strokeStyle=col; g.fillStyle=col; g.globalAlpha=c.f?1:.6;
+    const x=Math.round(X(c.t)), up=c.c>=c.o, col=up?UP:DN;
+    g.strokeStyle=col; g.fillStyle=col; g.globalAlpha=c.f===false?.6:1;
     g.beginPath(); g.moveTo(x+.5,Y(c.h)); g.lineTo(x+.5,Y(c.l)); g.stroke();
     const y1=Y(Math.max(c.o,c.c)), y2=Y(Math.min(c.o,c.c));
+    g.shadowColor=col; g.shadowBlur=up?6:4;
     g.fillRect(x-Math.floor(bw/2), y1, bw, Math.max(1,y2-y1));
+    g.shadowBlur=0;
   }
   g.globalAlpha=1;
-  // Mayhem_Mode trades on the pin
+  // visible high / low
+  const hiC=vis.reduce((a,c)=>c.h>a.h?c:a,vis[0]), loC=vis.reduce((a,c)=>c.l<a.l?c:a,vis[0]);
+  g.font=`10px ${FONT}`; g.fillStyle=MUT; g.textAlign='center';
+  g.fillText('H '+m2Px(hiC.h), Math.min(padL+pw-20,Math.max(padL+24,X(hiC.t))), Math.max(padT+6,Y(hiC.h)-8));
+  g.fillText('L '+m2Px(loC.l), Math.min(padL+pw-20,Math.max(padL+24,X(loC.t))), Math.min(padT+priceH+10,Y(loC.l)+10));
+  // signals on the pin (small triangles)
   for(const s of _m2ChartSigs){
     const t=Math.floor(s.ts)*1000; if(t<tStart||t>tEnd+1000) continue;
     const c=cs.find(k=>k.t===t), x=X(t), buy=s.side==='buy';
-    const y=c?(buy?Y(c.l)+10:Y(c.h)-10):(buy?padT+ph-8:padT+8);
-    g.globalAlpha=.45; g.fillStyle=buy?'#3ee0a0':'#ff5d73'; g.beginPath();
+    const y=c?(buy?Y(c.l)+9:Y(c.h)-9):(buy?padT+priceH-8:padT+8);
+    g.globalAlpha=.4; g.fillStyle=buy?UP:DN; g.beginPath();
     if(buy){ g.moveTo(x,y-4); g.lineTo(x-4,y+3); g.lineTo(x+4,y+3); } else { g.moveTo(x,y+4); g.lineTo(x-4,y-3); g.lineTo(x+4,y-3); }
     g.fill(); g.globalAlpha=1;
   }
-  // The selected strategy's own buys / sells (live, dry run, or its paper trades)
-  g.font='bold 10px system-ui,-apple-system,Segoe UI,sans-serif';
+  // tag helper (pill + stem)
+  const pill=(x,y,txt,col,stemTo,outline)=>{
+    g.font=`bold 10px ${FONT}`; const w=Math.max(20,g.measureText(txt).width+12);
+    if(stemTo!=null){ g.strokeStyle=col; g.lineWidth=1; g.setLineDash([2,2]); g.beginPath(); g.moveTo(x+.5,y); g.lineTo(x+.5,stemTo); g.stroke(); g.setLineDash([]); }
+    g.beginPath(); if(g.roundRect) g.roundRect(x-w/2,y-8,w,16,8); else g.rect(x-w/2,y-8,w,16);
+    if(outline){ g.fillStyle='rgba(7,11,20,.9)'; g.fill(); g.strokeStyle=col; g.stroke(); g.fillStyle=col; } else { g.fillStyle=col; g.fill(); g.fillStyle='#04121e'; }
+    g.textAlign='center'; g.fillText(txt,x,y+.5);
+  };
+  // Pro Trader replay calls on this chart (outlined) — where the rules said BUY and where they closed
+  if(pro&&pro.replay){
+    for(const m of pro.replay.marks||[]){
+      if(m.t<tStart||m.t>tEnd) continue;
+      const c=cs.find(k=>k.t===m.t); if(!c) continue;
+      const buy=m.side==='buy', x=X(m.t);
+      const col=buy?UP:(String(m.label).startsWith('+')?UP:DN);
+      pill(x, buy?Y(c.l)+30:Y(c.h)-30, buy?'▲ BUY':'▼ '+m.label, col, buy?Y(c.l)+2:Y(c.h)-2, true);
+    }
+  }
+  // the selected strategy's own buys / sells (filled)
   for(const m of _m2ChartMarks){
     const t=Math.floor(m.ts)*1000; if(t<tStart||t>tEnd+1000) continue;
     const c=cs.find(k=>k.t===t), x=X(t), buy=m.side==='buy';
-    const y=c?(buy?Y(c.l)+22:Y(c.h)-22):(buy?padT+ph-18:padT+18);
-    const label=m.label||(buy?'B':'S'), w=Math.max(18,g.measureText(label).width+10);
-    g.strokeStyle=buy?'#3ee0a0':'#ff5d73'; g.lineWidth=1; g.setLineDash([2,2]);
-    g.beginPath(); g.moveTo(x+.5,y+(buy?-9:9)); g.lineTo(x+.5,c?(buy?Y(c.l):Y(c.h)):y); g.stroke(); g.setLineDash([]);
-    g.fillStyle=buy?'#3ee0a0':'#ff5d73'; g.beginPath();
-    if(g.roundRect) g.roundRect(x-w/2,y-8,w,16,8); else g.rect(x-w/2,y-8,w,16);
-    g.fill(); g.fillStyle='#04121e'; g.textAlign='center'; g.fillText(label,x,y+.5);
+    const y=c?(buy?Y(c.l)+50:Y(c.h)-50):(buy?padT+priceH-18:padT+18);
+    pill(x, y, m.label||(buy?'B':'S'), buy?UP:DN, c?(buy?Y(c.l):Y(c.h)):null, false);
   }
-  g.font='11px system-ui,-apple-system,Segoe UI,sans-serif';
+  // live call at the last candle
+  if(pro&&(pro.call==='BUY'||pro.call==='SELL')){
+    const last=cs[cs.length-1], x=X(last.t), buy=pro.call==='BUY';
+    const pulse=.5+.5*Math.sin(Date.now()/220);
+    g.save(); g.shadowColor=buy?UP:DN; g.shadowBlur=12+8*pulse; pill(x, buy?Y(last.l)+16:Y(last.h)-16, buy?'BUY NOW':'SELL NOW', buy?UP:DN, null, false); g.restore();
+  }
   // last price line + tag
-  const last=cs[cs.length-1], ly=Math.round(Y(last.c))+.5, lc=last.c>=last.o?'#3ee0a0':'#ff5d73';
-  g.setLineDash([4,4]); g.strokeStyle=lc; g.beginPath(); g.moveTo(8,ly); g.lineTo(8+pw,ly); g.stroke(); g.setLineDash([]);
-  g.fillStyle=lc; g.fillRect(8+pw+2, ly-9, padR-4, 18); g.fillStyle='#04121e'; g.textAlign='left'; g.fillText(m2Px(last.c), 8+pw+6, ly);
-  // hover crosshair
+  const last=cs[cs.length-1], ly=Math.round(Y(last.c))+.5, lc=last.c>=last.o?UP:DN;
+  g.setLineDash([3,4]); g.strokeStyle=lc; g.lineWidth=1; g.beginPath(); g.moveTo(padL,ly); g.lineTo(xEnd,ly); g.stroke(); g.setLineDash([]);
+  g.font=`bold 11px ${FONT}`; g.fillStyle=lc; if(g.roundRect){ g.beginPath(); g.roundRect(xEnd+2, ly-9, padR-6, 18, 4); g.fill(); } else g.fillRect(xEnd+2, ly-9, padR-6, 18);
+  g.fillStyle='#04121e'; g.textAlign='left'; g.fillText(m2Px(last.c), xEnd+6, ly);
+  // legend
+  if(L){
+    g.font=`bold 10px ${FONT}`; let lx=padL+6; const ly0=padT+8;
+    for(const [txt,col] of [['EMA 9',C9],['EMA 21',C21],['VWAP',CV]]){ g.fillStyle=col; g.fillRect(lx,ly0-1,12,2); g.fillText(txt,lx+16,ly0); lx+=g.measureText(txt).width+32; }
+    g.fillStyle=MUT; g.fillText('▲▼ trades · outlined = Pro Trader replay · filled = bot', lx, ly0);
+  }
+  // RSI pane
+  if(L){
+    const r0=padT+mainH+gapR, R=v=>r0+(100-v)/100*rsiH;
+    g.fillStyle='rgba(138,160,184,.05)'; g.fillRect(padL,r0,pw+fut,rsiH);
+    g.fillStyle='rgba(177,140,255,.08)'; g.fillRect(padL,R(70),pw+fut,R(30)-R(70));
+    g.strokeStyle='rgba(138,160,184,.25)'; g.setLineDash([3,3]); g.lineWidth=1;
+    for(const v of [30,70]){ g.beginPath(); g.moveTo(padL,Math.round(R(v))+.5); g.lineTo(xEnd,Math.round(R(v))+.5); g.stroke(); }
+    g.setLineDash([]);
+    g.font=`10px ${FONT}`; g.fillStyle=MUT; g.textAlign='left'; g.fillText('70',xEnd+6,R(70)); g.fillText('30',xEnd+6,R(30));
+    g.fillText('RSI 14',padL+6,r0+8);
+    g.strokeStyle='#b18cff'; g.lineWidth=1.4; g.beginPath(); let on=false, lastR=null;
+    for(const c of vis){ const i=lineAt[c.t]; const v=i==null?null:L.rsi[i]; if(v==null){ on=false; continue; } lastR=v; const x=X(c.t), y=R(v); if(on) g.lineTo(x,y); else { g.moveTo(x,y); on=true; } }
+    g.stroke();
+    if(lastR!=null){ const y=R(lastR); g.fillStyle=lastR>=70?DN:(lastR<=30?UP:'#b18cff'); if(g.roundRect){ g.beginPath(); g.roundRect(xEnd+2,y-8,34,16,4); g.fill(); } else g.fillRect(xEnd+2,y-8,34,16); g.fillStyle='#04121e'; g.font=`bold 10px ${FONT}`; g.fillText(lastR.toFixed(0),xEnd+8,y+.5); }
+  }
+  // hover crosshair + tooltip
   let show=last;
   if(_m2Hover){
-    const t=tStart+Math.round((_m2Hover.x-8-step/2)/step)*1000, hc=cs.find(k=>k.t===t);
-    g.strokeStyle='rgba(230,237,243,.35)'; g.beginPath(); g.moveTo(Math.round(X(t))+.5,padT); g.lineTo(Math.round(X(t))+.5,padT+ph); g.moveTo(8,Math.round(_m2Hover.y)+.5); g.lineTo(8+pw,Math.round(_m2Hover.y)+.5); g.stroke();
-    if(hc) show=hc;
+    const t=tStart+Math.round((_m2Hover.x-padL-step/2)/step)*1000, hc=cs.find(k=>k.t===t);
+    g.strokeStyle='rgba(230,237,243,.3)'; g.lineWidth=1; g.setLineDash([3,3]); g.beginPath(); g.moveTo(Math.round(X(t))+.5,padT); g.lineTo(Math.round(X(t))+.5,padT+mainH+gapR+rsiH); g.moveTo(padL,Math.round(_m2Hover.y)+.5); g.lineTo(xEnd,Math.round(_m2Hover.y)+.5); g.stroke(); g.setLineDash([]);
+    if(_m2Hover.y<=padT+priceH){ const p=hi-(_m2Hover.y-padT)/priceH*(hi-lo); g.fillStyle='rgba(230,237,243,.9)'; g.fillRect(xEnd+2,_m2Hover.y-8,padR-6,16); g.fillStyle='#04121e'; g.font=`10px ${FONT}`; g.textAlign='left'; g.fillText(m2Px(p),xEnd+6,_m2Hover.y+.5); }
+    if(hc){
+      show=hc;
+      const i=L?lineAt[hc.t]:null, ch=hc.o?((hc.c/hc.o-1)*100):0;
+      const rows=[[new Date(hc.t).toTimeString().slice(0,8),'#e6edf3'],['O '+m2Px(hc.o)+'  H '+m2Px(hc.h),MUT],['L '+m2Px(hc.l)+'  C '+m2Px(hc.c),MUT],[(ch>=0?'+':'')+ch.toFixed(2)+'%  vol $'+Number(hc.v||0).toFixed(0),ch>=0?UP:DN]];
+      if(i!=null){ rows.push(['EMA9 '+m2Px(L.ema9[i]),C9]); rows.push(['EMA21 '+m2Px(L.ema21[i]),C21]); rows.push(['VWAP '+m2Px(L.vwap[i]),CV]); if(L.rsi[i]!=null) rows.push(['RSI '+L.rsi[i],'#b18cff']); }
+      g.font=`11px ${FONT}`; const bwid=Math.max(...rows.map(r=>g.measureText(r[0]).width))+16, bh=rows.length*15+10;
+      let bx=X(hc.t)+14; if(bx+bwid>xEnd) bx=X(hc.t)-14-bwid; let by=Math.max(padT,Math.min(_m2Hover.y-bh/2,padT+mainH-bh));
+      g.fillStyle='rgba(8,13,24,.92)'; g.strokeStyle='rgba(120,160,210,.35)'; g.beginPath(); if(g.roundRect) g.roundRect(bx,by,bwid,bh,8); else g.rect(bx,by,bwid,bh); g.fill(); g.stroke();
+      g.textAlign='left'; rows.forEach((r,k)=>{ g.fillStyle=r[1]; g.fillText(r[0],bx+8,by+12+k*15); });
+    }
   }
   if(rd){
     const ch=show.o?((show.c/show.o-1)*100):0, age=Math.max(0,(Date.now()-(last.t+1000))/1000);

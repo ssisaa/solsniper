@@ -2098,6 +2098,19 @@ _chart_cache: Dict[str, tuple] = {}
 _chart_lock = threading.Lock()
 
 
+def _chart_with_read(mint: str) -> Dict[str, Any]:
+    """1s candles plus the Pro Trader read of them (call, plan, checklist, indicator lines, replay tags)."""
+    out = dict(_chart_candles(mint))
+    try:
+        from src.signal import pro_trader as PT
+        from src.signal.mayhem2 import get_engine as _m2
+        ctx = _m2().pro_context(mint)
+        out["pro"] = PT.analyze(list(out.get("candles") or []), ctx.get("flow"), ctx.get("holding"))
+    except Exception as exc:
+        out["pro"] = {"ok": False, "call": "WAIT", "why": f"read failed ({type(exc).__name__})"}
+    return out
+
+
 def _chart_candles(mint: str) -> Dict[str, Any]:
     now = time.time()
     with _chart_lock:
@@ -4177,7 +4190,7 @@ def start_http_static_server(port: int = DEFAULT_HTTP_PORT) -> ThreadingHTTPServ
                 if not (32 <= len(mint) <= 44 and mint.isalnum()):
                     self._json(400, {"ok": False, "error": "Need ?mint="})
                     return
-                self._json(200, _chart_candles(mint))
+                self._json(200, _chart_with_read(mint))
                 return
             if path == "/api/candle/marks":
                 from urllib.parse import parse_qs
