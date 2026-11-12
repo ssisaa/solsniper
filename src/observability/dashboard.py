@@ -2111,6 +2111,8 @@ def _chart_with_read(mint: str, ctx_src: str = "mayhem2") -> Dict[str, Any]:
             from src.signal.mayhem2 import get_engine as _m2
             ctx = _m2().pro_context(mint)
         out["pro"] = PT.analyze(list(out.get("candles") or []), ctx.get("flow"), ctx.get("holding"))
+        from src.signal import botpredict as BP
+        out["bp"] = BP.analyze(list(out.get("candles") or []), ctx.get("holding"))
     except Exception as exc:
         out["pro"] = {"ok": False, "call": "WAIT", "why": f"read failed ({type(exc).__name__})"}
     return out

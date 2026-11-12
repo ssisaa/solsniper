@@ -66,16 +66,20 @@ SHADOWS = {
     "ladder":         ("buy",  "sell", 0.0),    # BUY -> buy; SELL -> sell only in profit; BUY under last buy -> buy again
     "inv_ladder":     ("sell", "buy",  0.0),    # Candles inverse ladder: SELL (red) -> buy, every 3rd red -> lot, BUY (green) -> sell all
     "pro_trader":     ("",     "",     0.0),    # reads the 1s chart (src/signal/pro_trader.py), not the trade signals
+    "botpredict":     ("",     "",     0.0),    # the bot's own learned prediction (src/signal/botpredict.py)
 }
 SHADOW_RULES = {
     "copy": "BUY→buy, SELL→sell", "inverse": "SELL→buy, BUY→sell", "inverse_tp": "SELL→buy, exit TP/stop/25s",
     "inverse_big": "SELL ≥0.05 SOL→buy, BUY→sell", "inverse_big_tp": "SELL ≥0.05 SOL→buy, exit TP/stop/25s",
     "ladder": "BUY→buy, SELL→sell if in profit, BUY below last buy→buy again (max 3)",
     "pro_trader": "chart trader: BUY on a VWAP dip with volume (≥10% under VWAP, green, RSI<45, vol ≥1.5x); target +25%, stop −5%, 60s time stop",
+    "botpredict": "bot's own prediction: BUY when its learned model gives ≥ ~15% chance of +25% before −5% in 60s (top 2% of moments); target +25%, stop −5%, 60s",
     "inv_ladder": "inverse ladder: SELL (red)→buy lot 1, leave 3 reds, next red→next lot below the last buy (lots on reds 1, 5, 9; max 3), BUY (green)→sell all",
 }
 LADDERS = ("ladder", "inv_ladder")
 PRO = "pro_trader"
+BOTP = "botpredict"
+CHART_STRATS = (PRO, BOTP)              # strategies that trade a chart read: same +25% / -5% / 60s exits
 PRO_EVERY = 1.0                         # chart read for the pinned coin      # multi-buy strategies: no stop, no max hold
 INV_REDS_PER_LOT = 4                    # inv_ladder: after a lot, leave 3 reds, buy on the 4th (lots on reds 1, 5, 9)
 # Ladder: up to this many buys into one trade. A SELL signal sells only at PROFIT_MIN_PCT or better
@@ -177,7 +181,8 @@ class Mayhem2:
         self.mixed_turn = 0                             # Mixed: index in MIXED_GROUPS whose turn is next
         self.jup_curve: Dict[str, Any] = {}             # mint -> (pseudo curve, at): coins off pump's curve
         self.pro: Dict[str, Any] = {}                   # latest Pro Trader read of the pinned coin
-        self.pro_buy_px = ("", 0.0)                     # (mint, chart price) of the last Pro Trader BUY call
+        self.pro_buy_px = ("", 0.0)
+        self.botp: Dict[str, Any] = {}                  # latest Botpredict read of the pinned coin                     # (mint, chart price) of the last Pro Trader BUY call
         self.started = False
 
     # ---------- switches ----------
@@ -805,7 +810,7 @@ class Mayhem2:
             held = now - float(getattr(pos, "entry_time", 0) or now)
             ladder = self.strategy() in LADDERS
             why = ""
-            if self.strategy() == PRO:
+            if self.strategy() in CHART_STRATS:
                 why = self._pro_exit(since, held)
                 if why:
                     self._sell(pos, why)
@@ -1642,7 +1647,7 @@ class Mayhem2:
                 return
             sh["pos"] = {"mint": mint, "symbol": sym, "tokens": t1, "cost": size, "at": time.time(),
                          "pct": None, "peak": None, "buys": 1, "last_px": size * 1e9 / t1 if t1 else 0.0,
-                         "pro_px": sh.pop("pro_px", None) if name == PRO else None}
+                         "pro_px": sh.pop("pro_px", None) if name in CHART_STRATS else None}
             sh["marks"].append({"ts": time.time(), "mint": mint, "side": "buy", "label": "B" if name not in LADDERS else "B1"})
             self._paper_note(name, "info", f"{sym} — BUY {size:.4f} SOL (paper, curve price).", mint)
         finally:
@@ -1697,7 +1702,7 @@ class Mayhem2:
             why = ""
             if not self.pin or self.pin["mint"] != mint:
                 why = "coin unpinned (paused / idle / closed)"
-            elif name == PRO:
+            elif name in CHART_STRATS:
                 why = self._pro_exit(pct, time.time() - pos["at"])
             elif pct >= TAKE_PROFIT_PCT:
                 why = f"take profit {pct:+.1f}%"
@@ -1757,7 +1762,7 @@ class Mayhem2:
 
     def _pro_mark(self, pos) -> None:
         """A Pro Trader buy: remember the chart price of the BUY call (its entry line on the chart)."""
-        if pos is None or self.strategy() != PRO:
+        if pos is None or self.strategy() not in CHART_STRATS:
             return
         m, px = self.pro_buy_px
         if m == pos.mint and px > 0:
@@ -1779,11 +1784,11 @@ class Mayhem2:
                     s_ += 1
             flow = {"buy": b, "sell": s_}
         holding = None
-        if self.strategy() == PRO:
+        if self.strategy() in CHART_STRATS:
             pos = self._held(mint)
             if pos is not None and float(getattr(pos, "_pro_px", 0) or 0) > 0:
                 holding = {"entry": float(pos._pro_px), "held": now - float(getattr(pos, "entry_time", now) or now)}
-            sp = self.shadow[PRO]["pos"]
+            sp = self.shadow[self.strategy()]["pos"]
             if holding is None and sp and sp.get("mint") == mint and sp.get("pro_px"):
                 holding = {"entry": float(sp["pro_px"]), "held": now - float(sp.get("at") or now)}
         return {"flow": flow, "holding": holding}
@@ -1802,29 +1807,41 @@ class Mayhem2:
                 from src.observability.dashboard import _chart_candles
                 data = await asyncio.to_thread(_chart_candles, mint)
                 ctx = self.pro_context(mint)
-                a = PT.analyze(list(data.get("candles") or []), ctx["flow"], ctx["holding"])
+                from src.signal import botpredict as BP
+                cs = list(data.get("candles") or [])
+                a = PT.analyze(cs, ctx["flow"], ctx["holding"])
                 a.pop("lines", None)
                 a.pop("replay", None)
                 a["mint"] = mint
                 a["at"] = time.time()
                 self.pro = a
-                if not a.get("ok") or a["call"] != "BUY" or not self.pin or self.pin["mint"] != mint:
+                bp = BP.analyze(cs, ctx["holding"])
+                bp.pop("replay", None)
+                bp.pop("probs", None)
+                bp["mint"] = mint
+                self.botp = bp
+                if not self.pin or self.pin["mint"] != mint:
                     continue
                 sym = pin.get("symbol") or mint[:6]
-                why = " · ".join(x["t"] for x in a.get("checks") or [])
-                sh = self.shadow[PRO]
-                if sh["pos"] is None and not sh.get("busy") and mint not in sh["done"]:
-                    sh["busy"] = True
-                    sh["pro_px"] = a["px"]
-                    asyncio.ensure_future(self._shadow_enter(PRO, mint, sym))
-                    self._paper_note(PRO, "info", f"{sym} — Pro Trader BUY call: {why}.", mint)
-                if self.strategy() == PRO and self._own() and self._held(mint) is None and self.busy != "buy" \
-                        and mint not in self.exiting:
-                    self.pro_buy_px = (mint, a["px"])
-                    out = self._try_buy(pin, time.time())
-                    self.note("buy" if ("sent" in out or "DRY" in out) else "info",
-                              f"{sym} — Pro Trader BUY call ({why}) → {out}. Plan: target {PT.TARGET_PCT:+.0f}%, "
-                              f"stop {PT.STOP_PCT:+.0f}%, {PT.TIME_STOP_S:.0f}s max.", mint)
+                calls = []
+                if a.get("ok") and a["call"] == "BUY":
+                    calls.append((PRO, "Pro Trader", a, " · ".join(x["t"] for x in a.get("checks") or [])))
+                if bp.get("ok") and bp["call"] == "BUY":
+                    calls.append((BOTP, "Botpredict", bp, bp["why"] + (" — " + ", ".join(bp.get("pros") or []) if bp.get("pros") else "")))
+                for name, title, read, why in calls:
+                    sh = self.shadow[name]
+                    if sh["pos"] is None and not sh.get("busy") and mint not in sh["done"]:
+                        sh["busy"] = True
+                        sh["pro_px"] = read["px"]
+                        asyncio.ensure_future(self._shadow_enter(name, mint, sym))
+                        self._paper_note(name, "info", f"{sym} — {title} BUY call: {why}.", mint)
+                    if self.strategy() == name and self._own() and self._held(mint) is None and self.busy != "buy" \
+                            and mint not in self.exiting:
+                        self.pro_buy_px = (mint, read["px"])
+                        out = self._try_buy(pin, time.time())
+                        self.note("buy" if ("sent" in out or "DRY" in out) else "info",
+                                  f"{sym} — {title} BUY call ({why}) → {out}. Plan: target {PT.TARGET_PCT:+.0f}%, "
+                                  f"stop {PT.STOP_PCT:+.0f}%, {PT.TIME_STOP_S:.0f}s max.", mint)
             except Exception:
                 log.debug("mayhem2 pro loop failed", exc_info=True)
 
@@ -1965,6 +1982,7 @@ class Mayhem2:
             "pin": pin, "rows": rows, "signals": signals, "notes": notes, "used": used,
             "marks": marks, "view": view,
             "pro": self.pro if self.pro.get("mint") == (pin or {}).get("mint") else None,
+            "botpredict": self.botp if self.botp.get("mint") == (pin or {}).get("mint") else None,
             "youngS": YOUNG_S, "feed": self.feed(), "nextTurn": MIXED_GROUPS[self.mixed_turn % len(MIXED_GROUPS)],
             "boards": {g: len(self.mixed_rows.get(g) or []) for g in MIXED_GROUPS} if mixed else None,
             "rules": {"profitMin": PROFIT_MIN_PCT, "waitS": WAIT_PROFIT_S, "tp": TAKE_PROFIT_PCT,

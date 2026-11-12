@@ -95,6 +95,14 @@ as `pro`; the Mayhem2 chart draws EMA/VWAP lines, volume, an RSI pane, target/st
 (BUY when flat; SELL at target / stop / time stop, not held back by Sell-only-in-profit; no ladder);
 `/api/candles?ctx=candle` follows the Candles trade; the Candles chart draws the same lines, RSI pane, desk and zones.
 
+**Botpredict (2026-11-13)**: `src/signal/botpredict.py`, Mayhem2 strategy `botpredict` — the bot's own learned
+model (logistic, 22 chart features, weights embedded in `MODEL`) for "price hits +25 % before −5 % within 60 s";
+buys only its top 2 % moments (`thr` ≈ 15 % vs 4.7 % normal); exits +25 % / −5 % / 60 s (shared with pro_trader via
+`CHART_STRATS`). Trained on 43 coins, tested on 52 later unseen coins: +1.3 %/trade (24 trades), +3.6 % entering
+1 candle late; final fit on all 95 coins. Pro Trader's dip setup LOST on those unseen coins (−1.7 %/trade).
+Chart: gold "◆ BP chance" strip, ◆ BP replay tags, Botpredict row in the desk. Retrain = scripts in the session
+scratchpad (not in the repo): features in botpredict.py, label = target-before-stop in 60 s.
+
 **Mayhem2**: strategy `inv_ladder` added (Mayhem_Mode SELL = red buys, lots on reds 1/5/9, BUY = green sells
 all, always). **No circuit breaker** for Mayhem2 or Candles (their losses don't count toward it).
 

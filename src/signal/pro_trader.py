@@ -11,6 +11,8 @@ The setup (chosen by testing, 2026-11-13, 43 pump coins / 10,412 1s candles, spl
   Tested: 83 trades, 44% wins, +2.3% per trade after ~2% fees even entering one candle late; both halves of the
   data were positive. Plain trend-following (EMA 9 > 21, over VWAP, RSI 50-78) lost on every setting tried,
   as momentum did before (memory: Mayhem coin economics). Small sample: no promise, losses will come.
+  OUT OF SAMPLE (2026-11-13, 52 coins recorded later): 121 trades, 22% wins, -1.7% per trade — the edge did
+  not hold. Botpredict (src/signal/botpredict.py) held up on those same coins; prefer it.
 
 The trend / momentum read (EMA 9 / 21, VWAP, RSI, MACD, volume, on-chain flow) is shown as context and as the
 confidence, not as the entry trigger.

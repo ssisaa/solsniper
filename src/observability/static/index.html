@@ -418,6 +418,15 @@ td{padding:8px 6px;border-bottom:1px solid rgba(120,160,210,.08);vertical-align:
 .dk-kv b.g{color:#3ee0a0}.dk-kv b.r{color:#ff5d73}
 .dk-chk{white-space:nowrap;padding:1px 7px;border-radius:999px;border:1px solid rgba(138,160,184,.25);color:var(--muted,#8aa0b8)}
 .dk-chk.ok{border-color:rgba(62,224,160,.55);color:#bff5de;background:rgba(62,224,160,.08)}
+.dk-bp{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;padding:5px 8px;border-radius:8px;border:1px solid rgba(255,204,102,.35);background:linear-gradient(90deg,rgba(255,204,102,.10),rgba(255,204,102,.02));font-size:11.5px;color:var(--muted,#8aa0b8)}
+.dk-bp .nm{color:#ffcc66;font-weight:800;letter-spacing:.03em}
+.dk-bp .cl{font-weight:900;padding:0 8px;border-radius:999px;border:1px solid rgba(255,204,102,.5);color:#ffcc66}
+.dk-bp .cl.BUY,.dk-bp .cl.HOLD{color:#04121e;background:#ffcc66}
+.dk-bp .cl.SELL{color:#04121e;background:#ff5d73;border-color:#ff5d73}
+.dk-bp b{color:var(--text,#e6edf3)}.dk-bp .g{color:#7debc0}.dk-bp .r{color:#ff8fa0}
+.dk-bpbar{position:relative;width:90px;height:6px;border-radius:9px;background:rgba(138,160,184,.18);overflow:hidden}
+.dk-bpbar i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,#8a6b2a,#ffcc66);border-radius:9px}
+.dk-bpbar s{position:absolute;top:-2px;bottom:-2px;width:2px;background:#e6edf3}
 .dk-ctx{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px 14px;color:var(--muted,#8aa0b8);font-size:11px}
 .dk-ctx b{color:var(--text,#e6edf3)}.dk-ctx b.g,.dk-ctx .g{color:#7debc0}.dk-ctx b.r,.dk-ctx .r{color:#ff8fa0}
 #view-mayhem2 .m2-chartbox.expanded .m2-desk,#view-candle .cm-chartbox.expanded .m2-desk{font-size:12.5px}
@@ -4463,7 +4472,7 @@ document.getElementById('cmKillBtn').addEventListener('click',()=>{
   cmPost({kill:!_cmCfg.kill}, 'Kill switch');
 });
 // ---------- Mayhem2: messages panel + 1s chart ----------
-let _m2Pro=null;
+let _m2Pro=null, _m2Bp=null;
 let _m2Notes=[], _m2ChartPin=null, _m2ChartSigs=[], _m2ChartMarks=[], _m2Candles=[], _m2ChartMint='', _m2ChartBusy=false, _m2Hover=null, _m2ChartAt=0;
 const _m2Pref=(()=>{ try{ return JSON.parse(localStorage.getItem('m2Pref')||'{}')||{}; }catch(e){ return {}; } })();
 function m2SavePref(){ try{ localStorage.setItem('m2Pref', JSON.stringify(_m2Pref)); }catch(e){} }
@@ -4520,23 +4529,38 @@ async function m2LoadChart(){
   const pin=_m2ChartPin;
   const msg=document.getElementById('m2ChartMsg');
   document.getElementById('m2ChartSym').innerHTML=pin?'· <b>'+escapeHtml(pin.symbol)+'</b> <a href="https://pump.fun/coin/'+escapeHtml(pin.mint)+'" target="_blank" rel="noopener">↗</a>':'';
-  if(!pin){ _m2Candles=[]; _m2Pro=null; m2PaintDesk(); _m2ChartMint=''; if(msg){ msg.textContent='No coin pinned.'; msg.hidden=false; } m2DrawChart(); return; }
-  if(pin.mint!==_m2ChartMint){ _m2Candles=[]; _m2Pro=null; m2PaintDesk(); _m2ChartMint=pin.mint; _m2Hover=null; if(msg){ msg.textContent='Loading 1s candles…'; msg.hidden=false; } m2DrawChart(); }
+  if(!pin){ _m2Candles=[]; _m2Pro=null; _m2Bp=null; m2PaintDesk(); _m2ChartMint=''; if(msg){ msg.textContent='No coin pinned.'; msg.hidden=false; } m2DrawChart(); return; }
+  if(pin.mint!==_m2ChartMint){ _m2Candles=[]; _m2Pro=null; _m2Bp=null; m2PaintDesk(); _m2ChartMint=pin.mint; _m2Hover=null; if(msg){ msg.textContent='Loading 1s candles…'; msg.hidden=false; } m2DrawChart(); }
   _m2ChartBusy=true;
   try{
     const r=await fetch('/api/candles?mint='+encodeURIComponent(pin.mint),{cache:'no-store'});
     const d=await r.json();
     if(d.mint!==_m2ChartMint) return;
     _m2Candles=(d.candles||[]).filter(c=>c.o>0&&c.c>0);
-    _m2Pro=d.pro||null; m2PaintDesk();
+    _m2Pro=d.pro||null; _m2Bp=d.bp||null; m2PaintDesk();
     _m2ChartAt=Date.now();
     if(msg){ msg.hidden=_m2Candles.length>0; if(!_m2Candles.length) msg.textContent=d.error?('Chart feed: '+d.error):'No trade yet on this coin.'; }
     m2DrawChart();
   }catch(e){ if(msg&&!_m2Candles.length){ msg.textContent='Chart feed unreachable.'; msg.hidden=false; } }
   finally{ _m2ChartBusy=false; }
 }
-function m2PaintDesk(){ paintDesk(document.getElementById('m2Desk'), _m2Pro); }
-function paintDesk(el, a){
+function m2PaintDesk(){ paintDesk(document.getElementById('m2Desk'), _m2Pro, _m2Bp); }
+function bpHtml(bp){
+  if(!bp) return '';
+  if(!bp.ok) return `<div class="dk-bp"><span class="nm">◆ BOTPREDICT</span><span>${escapeHtml(bp.why||'')}</span></div>`;
+  const pc=v=>v==null?'—':((v>0?'+':'')+Number(v).toFixed(1)+'%'), p=Number(bp.prob||0), thr=Number(bp.thr||0.15), full=Math.max(thr*2,p*1.1,0.01);
+  const rp=bp.replay||{};
+  return `<div class="dk-bp" title="Botpredict: the bot's own model, learned from 95 pump coins. It predicts the chance that the price hits +${bp.targetPct}% before ${bp.stopPct}% within ${bp.timeStopS}s from here, and buys only its top 2% most confident moments (≥ ${(thr*100).toFixed(0)}%). Strategy botpredict trades it.">
+    <span class="nm">◆ BOTPREDICT</span><span class="cl ${escapeHtml(bp.call)}">${escapeHtml(bp.call)}</span>
+    <span>chance of +${bp.targetPct}% first <b>${(p*100).toFixed(1)}%</b></span>
+    <span class="dk-bpbar"><i style="width:${Math.min(100,p/full*100)}%"></i><s style="left:${Math.min(100,thr/full*100)}%"></s></span>
+    <span>buys at <b>${(thr*100).toFixed(0)}%</b> · normal <b>${(Number(bp.base||0)*100).toFixed(1)}%</b>${bp.edge?` · <b>${bp.edge}×</b> normal`:''}</span>
+    ${bp.holding?`<span>in trade <b class="${bp.pnlPct>0?'g':(bp.pnlPct<0?'r':'')}">${pc(bp.pnlPct)}</b></span>`:''}
+    ${(bp.pros||[]).map(x=>`<span class="g">▲ ${escapeHtml(x)}</span>`).join('')}${(bp.cons||[]).map(x=>`<span class="r">▼ ${escapeHtml(x)}</span>`).join('')}
+    ${rp.trades!=null?`<span>this chart: <b>${rp.trades}</b> trades · <b>${rp.wins}</b> won · avg <b class="${rp.avgPct>0?'g':(rp.avgPct<0?'r':'')}">${pc(rp.avgPct)}</b></span>`:''}
+  </div>`;
+}
+function paintDesk(el, a, bp){
   if(!el) return;
   if(!a){ const html='<div class="dk-call WAIT"><span class="dk-tag">—</span><span class="dk-sub">no coin</span></div><div class="dk-row muted">Pro Trader reads the pinned coin\'s 1s chart every second.</div>'; if(el._h!==html){ el._h=html; el.innerHTML=html; } return; }
   const call=String(a.call||'WAIT'), conf=Math.max(0,Math.min(100,Number(a.confidence)||0));
@@ -4560,7 +4584,7 @@ function paintDesk(el, a){
   </div>`:'';
   const html=`<div class="dk-call ${escapeHtml(call)}"><span class="dk-tag">${escapeHtml(call)}</span><div class="dk-meter"><i style="width:${conf}%"></i></div><span class="dk-sub">confidence ${conf}</span></div>
     <div class="dk-row"><span class="why">${escapeHtml(a.why||'')}</span>${plan}</div>
-    <div class="dk-row">${checks}</div>${ctx}`;
+    <div class="dk-row">${checks}</div>${bpHtml(bp)}${ctx}`;
   if(el._h!==html){ el._h=html; el.innerHTML=html; }
 }
 function m2DrawChart(){
@@ -4576,7 +4600,8 @@ function m2DrawChart(){
   const expanded=document.getElementById('m2ChartBox').classList.contains('expanded');
   const pro=_m2Pro&&_m2Pro.ok?_m2Pro:null, L=pro&&pro.lines?pro.lines:null;
   const padR=78, padL=8, padT=12, fut=pro?46:10;              // right: price axis; fut: room for the plan
-  const rsiH=L?Math.max(46,Math.round(H*0.17)):0, gapR=L?18:0, timeH=20;
+  const BPd=_m2Bp&&_m2Bp.ok?_m2Bp:null, bpH=BPd?18:0, bpGap=BPd?6:0;
+  const rsiH=L?Math.max(46,Math.round(H*0.17)):0, gapR=(L?18:0)+bpH+bpGap, timeH=20;
   const pw=Math.max(40,W-padR-padL-fut), mainH=Math.max(60,H-padT-timeH-rsiH-gapR);
   const volH=Math.round(mainH*0.18);
   const step=expanded?11:8;
@@ -4688,6 +4713,23 @@ function m2DrawChart(){
     for(const [txt,col] of [['EMA 9',C9],['EMA 21',C21],['VWAP',CV]]){ g.fillStyle=col; g.fillRect(lx,ly0-1,12,2); g.fillText(txt,lx+16,ly0); lx+=g.measureText(txt).width+32; }
     g.fillStyle=MUT; g.fillText('▲▼ trades · outlined = Pro Trader replay · filled = bot', lx, ly0);
   }
+  // Botpredict: chance strip under the candles (gold = at or over its buy level) + its replay tags
+  if(BPd){
+    const s0=padT+mainH+bpGap, thr=Number(BPd.thr||0.15), full=Math.max(thr*2,0.01), pAt={};
+    (BPd.probs||[]).forEach(x=>{ pAt[x.t]=x.p; });
+    g.fillStyle='rgba(255,204,102,.05)'; g.fillRect(padL,s0,pw+fut,bpH);
+    for(const c of vis){ const p=pAt[c.t]; if(p==null) continue; const h=Math.min(1,p/full)*bpH, x=Math.round(X(c.t)), w=Math.max(2,Math.floor(step*0.7));
+      g.fillStyle=p>=thr?'#ffcc66':'rgba(255,204,102,.35)'; g.fillRect(x-Math.floor(w/2), s0+bpH-h, w, h); }
+    const ty=s0+bpH-Math.min(1,thr/full)*bpH; g.strokeStyle='rgba(230,237,243,.5)'; g.setLineDash([2,3]); g.beginPath(); g.moveTo(padL,Math.round(ty)+.5); g.lineTo(xEnd,Math.round(ty)+.5); g.stroke(); g.setLineDash([]);
+    g.font=`bold 9px ${FONT}`; g.fillStyle='#ffcc66'; g.textAlign='left'; g.fillText('◆ BP chance', padL+4, s0+6);
+    const lp=Number(BPd.prob||0); g.fillStyle=lp>=thr?'#ffcc66':'rgba(255,204,102,.6)'; if(g.roundRect){ g.beginPath(); g.roundRect(xEnd+2,s0+1,40,16,4); g.fill(); } else g.fillRect(xEnd+2,s0+1,40,16); g.fillStyle='#04121e'; g.font=`bold 10px ${FONT}`; g.fillText((lp*100).toFixed(1)+'%',xEnd+5,s0+9);
+    for(const m of (BPd.replay||{}).marks||[]){
+      if(m.t<tStart||m.t>tEnd) continue; const c=cs.find(k=>k.t===m.t); if(!c) continue;
+      const buy=m.side==='buy', col=buy?'#ffcc66':(String(m.label).startsWith('+')?UP:DN);
+      pill(X(m.t), buy?Y(c.l)+48:Y(c.h)-48, buy?'◆ BP':'◆ '+m.label, col, buy?Y(c.l)+2:Y(c.h)-2, true);
+    }
+    if(BPd.call==='BUY'){ const lc=cs[cs.length-1]; g.save(); g.shadowColor='#ffcc66'; g.shadowBlur=14; pill(X(lc.t), Y(lc.l)+34, '◆ BP BUY', '#ffcc66', null, false); g.restore(); }
+  }
   // RSI pane
   if(L){
     const r0=padT+mainH+gapR, R=v=>r0+(100-v)/100*rsiH;
@@ -4777,7 +4819,7 @@ async function cmLoadChart(){
                                    fetch('/api/candle/marks?mint='+encodeURIComponent(mint),{cache:'no-store'}).then(r=>r.json())]);
     if(mint!==_cmChart.mint) return;
     _cmChart.candles=(c.candles||[]).filter(x=>x.o>0&&x.c>0); _cmChart.marks=k; _cmChart.pro=c.pro||null;
-    paintDesk(document.getElementById('cmDesk'), _cmChart.pro);
+    paintDesk(document.getElementById('cmDesk'), _cmChart.pro, c.bp||null);
     const h=(k&&k.hint)||{};
     const he=document.getElementById('cmHintEntry'), hx=document.getElementById('cmHintExit');
     if(he){ he.querySelector('.v').textContent=h.entry||'—'; he.title=h.entry||''; }
