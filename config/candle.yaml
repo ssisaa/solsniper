@@ -48,7 +48,7 @@ inflow_window_s: 5.0
 max_below_peak_pct: 85.0
 min_reserve_sol: 0.15
 exit_reserve_sol: 0.0
-max_hold_s: 90.0
+max_hold_s: 150.0
 mints: []
 whitelist_only: false
 blacklist: []

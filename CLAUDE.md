@@ -79,7 +79,10 @@ Max hold 90 s; Exit reserve 0; Min reserve 0.15 SOL (also blocks lots 2+ on very
 **Mayhem2**: strategy `inv_ladder` added (Mayhem_Mode SELL = red buys, lots on reds 1/5/9, BUY = green sells
 all, always). **No circuit breaker** for Mayhem2 or Candles (their losses don't count toward it).
 
-**Other changes in the last sessions**: MayhemMode buys use the local pump build (exactly Max position SOL);
+**Other changes in the last sessions**: MayhemMode, Dayscalp and Launch buys on the pump curve use the local
+pump build (exactly Max position SOL; Lightning once paid 0.005481 for a 0.005 buy); the chart's L1 marker of a
+one-lot trade sits at the real entry price; Clear session empties `logs/run.out` instead of deleting it (and
+keeps `bot.stop` / `run_forever.lock`); `scripts/bot_lib.sh open_trades` reads `logs/open_mints.json` first;
 OpenHolds/CallOuts clicks and Decoded Tokens rows work with Auto Trade off; Decoded Tokens / Launch take
 only pump coins (mint starts or ends with "pump"); Live Trades card shows the whole Candles trade (all lots);
 non-SOL-quoted coins are valued on their own curve × the quote coin's SOL rate.

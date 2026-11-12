@@ -1265,3 +1265,16 @@ def test_dayscalp_pick_is_fed_even_without_buy(monkeypatch):
     e._pick([])
     assert "YENUpump" in e.feeds and e.feeds["YENUpump"].symbol == "yenu"
     DS.LAST_CANDLE_PICK.update(mint="", ts=0.0)
+
+
+def test_clear_session_keeps_live_log_and_stop_files(tmp_path, monkeypatch):
+    import src.observability.action_log as AL
+    for name in ("run.out", "supervisor.log", "run_forever.lock", "bot.stop", "trades.jsonl"):
+        (tmp_path / name).write_text("x")
+    monkeypatch.setattr(AL, "ACTION_PATH", tmp_path / "actions.jsonl")
+    monkeypatch.setattr(AL, "clear_actions", lambda: None)
+    AL.clear_session_logs()
+    assert (tmp_path / "run.out").exists() and (tmp_path / "run.out").read_text() == ""
+    assert (tmp_path / "bot.stop").exists() and (tmp_path / "run_forever.lock").exists()
+    assert (tmp_path / "supervisor.log").exists()
+    assert not (tmp_path / "trades.jsonl").exists()

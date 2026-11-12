@@ -23,6 +23,14 @@ wait_not_sending() {
 # Last open-trade list the bot logged: empty output = flat (or nothing logged yet).
 open_trades() {
   local last
+  # The bot's own list of open coins is the truth; the log line is the fallback. (A dashboard
+  # "Clear session" once deleted run.out and this check then saw no open trade at all.)
+  if [ -s "$BOT_ROOT/logs/open_mints.json" ]; then
+    last=$(tr -d ' \n' < "$BOT_ROOT/logs/open_mints.json")
+    [ "$last" = "[]" ] && return 0
+    echo "$last"
+    return 0
+  fi
   last=$(grep -E "open_mints now" "${1:-$BOT_LOG}" 2>/dev/null | tail -1)
   [ -z "$last" ] && return 0
   echo "$last" | grep -q "now \[\]" && return 0

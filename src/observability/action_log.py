@@ -64,6 +64,16 @@ def clear_session_logs() -> None:
     for path in folder.iterdir():
         if not path.is_file() or path.name in _KEEP_LOGS:
             continue
+        if path.name in ("run.out", "supervisor.log", "run_forever.lock", "bot.stop"):
+            # Open by the running bot / supervisor: deleting it left the bot writing to an invisible file
+            # (2026-11-13). Empty the live log instead; keep the supervisor's files.
+            if path.name == "run.out":
+                try:
+                    with open(path, "r+") as fh:
+                        fh.truncate(0)
+                except Exception:
+                    pass
+            continue
         try:
             path.unlink()
         except Exception:

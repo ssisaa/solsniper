@@ -952,8 +952,12 @@ async def run_swap(trader, side: str, mint: str, sol: float = 0.0, raw: int = 0,
     elif lightning_held(mint):
         order = ["jupiter"]
         log.info("TX %s jupiter mint=%s reason=%s — Lightning off for this coin (%s)", side, mint[:8], reason or "-", lightning_held(mint))
-    elif (str(reason or "").startswith(("mayhem2", "candle")) or (side == "buy" and str(reason or "") == "mayhem")) \
+    elif (str(reason or "").startswith(("mayhem2", "candle"))
+          or (side == "buy" and str(reason or "") in ("mayhem", "dayscalp", "launch"))) \
             and venue == "pump":
+        # Dayscalp / Launch buys too: Lightning paid 0.005481 SOL for a 0.005 buy on a rising coin (GTA,
+        # 2026-11-13) — the token count was priced ~3s before it landed. The local build spends exactly
+        # Max position; a move past the slippage guard is refused (6042) and costs nothing.
         # MayhemMode buys too: the local build spends exactly Max position. Lightning bought a token
         # count priced a moment earlier, so a falling coin cost 0.0023-0.0045 SOL of a 0.005 buy.
         if side == "buy":

@@ -4697,7 +4697,10 @@ function cmDrawChart(){
     if(ib>=0){ const pos=(tr.pct||0)>=0; tri(X(ib), Y(vis[ib].h)-12, false, pos?'#3ee0a0':'#ff5d73', (pos?'+':'')+Number(tr.pct||0).toFixed(0)+'%'); }
   }
   // open lots (a lot bought before the visible window is pinned to the left edge)
-  if(open){ for(const l of (open.lots||[])){ let i=idxAt(l.ts||0), edge=false; if(i<0){ i=0; edge=true; } tri(X(i), Y(vis[i].l)+12, true, edge?'rgba(62,224,160,.6)':'#3ee0a0', (edge?'◂':'')+'L'+(l.n||1)); } }
+  // open lots: a one-lot trade's marker sits at the real entry price (cost vs value), not the candle's low —
+  // a buy that landed above the chart price (slow route, fees) must not look like a cheap entry
+  if(open){ const one=(open.lots||[]).length<=1; for(const l of (open.lots||[])){ let i=idxAt(l.ts||0), edge=false; if(i<0){ i=0; edge=true; }
+    const y=(one&&exact&&avg>0)?Y(avg)+12:Y(vis[i].l)+12; tri(X(i), y, true, edge?'rgba(62,224,160,.6)':'#3ee0a0', (edge?'◂':'')+'L'+(l.n||1)); } }
   // signals the rule saw: filled dot = acted on, hollow = skipped
   for(const sg of (mk.signals||[])){
     const i=idxAt(sg.ts||0); if(i<0) continue; const k=vis[i];
