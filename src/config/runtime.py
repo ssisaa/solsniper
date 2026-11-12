@@ -151,6 +151,10 @@ class RuntimeConfig:
     mayhem2_dry_run: bool = True
     # Mayhem2 rule used for dry-run and live trades: copy | inverse | inverse_tp | inverse_big | inverse_big_tp
     mayhem2_strategy: str = "inverse_tp"
+    # Mayhem2 coin feed: "mayhem" = Mayhem_Mode's coins and its BUY / SELL (unchanged);
+    # "mixed" = pump boards New, then Movers, then Graduated (youngest first in each), every wallet's
+    # BUY / SELL on the pinned coin is the signal.
+    mayhem2_feed: str = "mayhem"
     # Percent, not a fraction. -25 means a Callout trade at -25% may open the next one.
     callout_next_pct: float = -25.0
     # First bank % or sell fraction left empty / 0: Callout and OpenCopy trades hold until the caller
@@ -231,6 +235,10 @@ class RuntimeConfig:
                 elif k == "mayhem2_strategy":
                     v = str(v or "").strip()
                     if v not in ("copy", "inverse", "inverse_tp", "inverse_big", "inverse_big_tp", "ladder", "inv_ladder"):
+                        continue
+                elif k == "mayhem2_feed":
+                    v = str(v or "").strip().lower()
+                    if v not in ("mayhem", "mixed"):
                         continue
                 elif k == "tx_route":
                     v = str(v or "").strip().lower()

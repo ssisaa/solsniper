@@ -1342,6 +1342,8 @@ button.lite:hover{color:#fff;border-color:#eef3fb}
       </div>
       <div class="m2-ctl">
         <label>Strategy <select id="m2Strat"></select></label>
+        <label title="Coins: the Mayhem coins Mayhem_Mode holds; signals: Mayhem_Mode's BUY / SELL (unchanged)."><input type="checkbox" class="m2-feed" data-feed="mayhem"/> Mayhem_Mode</label>
+        <label title="Coins: pump's New board first (under 3 min), then Movers, then Graduated — youngest first in each. Signals: every wallet's BUY / SELL on the pinned coin. Graduated coins are priced by a Jupiter quote."><input type="checkbox" class="m2-feed" data-feed="mixed"/> Mixed (New, Movers, Graduated)</label>
         <button type="button" class="m2-btn" id="m2DryBtn">Dry run …</button>
         <button type="button" class="m2-btn" id="m2AutoBtn">Auto Trade …</button>
         <span class="muted" id="m2CtlHint">To trade live: pick a strategy, switch Dry run OFF, then Auto Trade ON.</span>
@@ -1352,7 +1354,7 @@ button.lite:hover{color:#fff;border-color:#eef3fb}
       <div class="m2-grid">
         <div class="m2-box m2-pin" id="m2Pin"><h3>Pinned</h3><div class="muted">Waiting for the board…</div></div>
         <div class="m2-box">
-          <h3>Mayhem_Mode trades on the pin <span class="muted" id="m2SigN"></span> <span class="m2-view" id="m2SigView"></span></h3>
+          <h3><span id="m2SigTitle">Mayhem_Mode trades on the pin</span> <span class="muted" id="m2SigN"></span> <span class="m2-view" id="m2SigView"></span></h3>
           <ul class="m2-sig" id="m2Sig"></ul>
         </div>
       </div>
@@ -1390,7 +1392,7 @@ button.lite:hover{color:#fff;border-color:#eef3fb}
         </div>
       </div>
       <div class="m2-backdrop" id="m2Backdrop" hidden></div>
-      <h3 class="m2-sec">Coins under 3 minutes (pinned on top)</h3>
+      <h3 class="m2-sec" id="m2CoinsTitle">Coins under 3 minutes (pinned on top)</h3>
       <div class="m2-coins">
         <table>
           <thead><tr>
@@ -4148,6 +4150,12 @@ function m2Send(cfg, title, msg){
 }
 document.addEventListener('change', e=>{
   if(e.target && e.target.id==='m2Strat') m2Send({mayhem2_strategy:e.target.value}, 'Mayhem2 strategy', e.target.value);
+  if(e.target && e.target.classList && e.target.classList.contains('m2-feed')){
+    const f=e.target.dataset.feed;
+    if(!e.target.checked){ e.target.checked=true; return; }      // one feed is always on
+    document.querySelectorAll('.m2-feed').forEach(b=>{ b.checked=(b.dataset.feed===f); });
+    m2Send({mayhem2_feed:f}, 'Mayhem2 feed', f==='mixed'?'Mixed — New, then Movers, then Graduated; every wallet\'s BUY / SELL':'Mayhem_Mode — its coins and its BUY / SELL');
+  }
 });
 document.addEventListener('click', e=>{
   const t=e.target; if(!t) return;
@@ -4185,6 +4193,12 @@ function paintMayhem2(d){
     bd.title=d.error||'';
   }
   window._m2Last=d;
+  const mixed=d.feed==='mixed';
+  document.querySelectorAll('.m2-feed').forEach(b=>{ if(document.activeElement!==b) b.checked=(b.dataset.feed===(d.feed||'mayhem')); });
+  const sec=document.getElementById('m2CoinsTitle');
+  if(sec) sec.textContent=mixed?('Mixed coins: New → Movers → Graduated, youngest first in each (pinned on top)'+(d.boards?' · boards '+d.boards.new+' / '+d.boards.movers+' / '+d.boards.graduated:'')):'Coins under 3 minutes (pinned on top)';
+  const sigT=document.getElementById('m2SigTitle');
+  if(sigT) sigT.textContent=mixed?'All wallets\' trades on the pin':'Mayhem_Mode trades on the pin';
   const sel=document.getElementById('m2Strat');
   if(sel && d.strategies){
     if(!sel.options.length) sel.innerHTML=Object.keys(d.strategies).map(k=>`<option value="${escapeHtml(k)}">${escapeHtml(k)} — ${escapeHtml(d.strategies[k])}</option>`).join('');
@@ -4212,7 +4226,7 @@ function paintMayhem2(d){
   if(mx) mx.textContent='max '+m2Num(d.maxPos,4)+' SOL';
   const pin=d.pin;
   if(!pin){
-    m2Set('m2Pin','<h3>Pinned</h3><div class="muted">No coin pinned. Waiting for an active Mayhem coin under 3 minutes that Mayhem_Mode holds.</div>');
+    m2Set('m2Pin','<h3>Pinned</h3><div class="muted">'+(mixed?'No coin pinned. Waiting for a coin on the New / Movers / Graduated boards.':'No coin pinned. Waiting for an active Mayhem coin under 3 minutes that Mayhem_Mode holds.')+'</div>');
   }else{
     const row=(d.rows||[]).find(x=>x.pinned)||{};
     const bot=pin.bot;
@@ -4224,9 +4238,11 @@ function paintMayhem2(d){
       <div class="m2-coin">${img}<div><div class="sym">${escapeHtml(pin.symbol||'—')}</div><div class="nm">${escapeHtml(pin.name||'')} · <a href="https://pump.fun/coin/${escapeHtml(pin.mint)}" target="_blank" rel="noopener">${escapeHtml(String(pin.mint).slice(0,6))}…</a></div></div>
       <span class="m2-pill ${st==='active'?'on':(st==='paused'?'bad':'')}">${escapeHtml(st||'state …')}</span></div>
       <div class="m2-kv">
-        <div><span>Mayhem_Mode unrealized</span><b class="${m2Cls(row.pnlUsd)}">${m2Usd(row.pnlUsd)}</b></div>
+        ${mixed?`<div><span>Board</span><b>${escapeHtml(pin.grp||row.grp||'—')}</b></div>
+        <div><span>MC $</span><b>${m2Usd(row.mcUsd)}</b></div>
+        <div><span>Tx 5m</span><b>${row.tx5==null?'—':escapeHtml(String(row.tx5))}</b></div>`:`<div><span>Mayhem_Mode unrealized</span><b class="${m2Cls(row.pnlUsd)}">${m2Usd(row.pnlUsd)}</b></div>
         <div><span>Mayhem_Mode %</span><b class="${m2Cls(row.pnlPercentage)}">${m2Pct(row.pnlPercentage)}</b></div>
-        <div><span>MM held</span><b>${m2Held(row.held)}</b></div>
+        <div><span>MM held</span><b>${m2Held(row.held)}</b></div>`}
         <div><span>Last signal</span>${want}</div>
         <div><span>Bot</span>${botTxt}</div>
         <div><span>Bot in</span><b>${bot?m2Num(bot.sol,4)+' SOL':'—'}</b></div>
@@ -4240,7 +4256,7 @@ function paintMayhem2(d){
   ['m2SigView','m2ChartView'].forEach(id=>{ const el=document.getElementById(id); if(el){ el.textContent=viewTxt; el.className='m2-view'+(d.view==='live'?' live':''); el.title=paperView?'Auto Trade and Dry run are off: showing what '+d.strategy+' does on paper (same as its row in Strategies side by side).':'Showing what the bot itself does with '+d.strategy+'.'; } });
   const actOf=s=>paperView?(s.plan||''):(s.act||'');
   const actCls=t=>/^(BUY|LADDER BUY|SELL)|sent/.test(t)?'g':(/wait|holding/.test(t)?'w':'');
-  m2Set('m2Sig', sigs.length?sigs.map(s=>{ const a=actOf(s); return `<li><span class="muted">${m2Clock(s.ts)}</span><span class="side ${s.side==='buy'?'g':'r'}">${String(s.side).toUpperCase()}</span><span>${s.sol!=null?m2Num(s.sol,3)+' SOL':''}${s.usd!=null?' · '+m2Usd(s.usd):''}</span><span class="muted">${escapeHtml(s.src||'')} ${s.seen&&s.ts?'+'+Math.max(0,s.seen-s.ts).toFixed(1)+'s':''}${a?' · <b class="'+actCls(a)+'">'+escapeHtml(a)+'</b>':''}</span></li>`; }).join(''):'<li class="muted">No Mayhem_Mode trade since the pin yet.</li>');
+  m2Set('m2Sig', sigs.length?sigs.map(s=>{ const a=actOf(s); return `<li><span class="muted">${m2Clock(s.ts)}</span><span class="side ${s.side==='buy'?'g':'r'}">${String(s.side).toUpperCase()}</span><span>${s.sol!=null?m2Num(s.sol,3)+' SOL':''}${s.usd!=null?' · '+m2Usd(s.usd):''}</span><span class="muted">${escapeHtml(s.src||'')} ${s.seen&&s.ts?'+'+Math.max(0,s.seen-s.ts).toFixed(1)+'s':''}${a?' · <b class="'+actCls(a)+'">'+escapeHtml(a)+'</b>':''}</span></li>`; }).join(''):'<li class="muted">'+(mixed?'No trade on the pin since it was pinned yet.':'No Mayhem_Mode trade since the pin yet.')+'</li>');
   const notes=d.notes||[];
   _m2Notes=notes; m2PaintNotes();
   _m2ChartPin=d.pin?{mint:d.pin.mint, symbol:d.pin.symbol||String(d.pin.mint).slice(0,6)}:null;
@@ -4249,8 +4265,9 @@ function paintMayhem2(d){
   const rows=d.rows||[];
   m2Set('m2Body', rows.length?rows.map(x=>{
     const st=String(x.state||'');
-    const status=x.pinned?'<b class="g">PINNED</b>':(x.used?`<span class="muted">${escapeHtml(x.used)}</span>`:(st!=='active'?'<span class="muted">not active</span>':(Number(x.held)>0?'candidate':'<span class="muted">MM not holding</span>')));
-    return `<tr class="${x.pinned?'pin':(st!=='active'||x.used?'dim':'')}">
+    const grp=x.grp?(x.grp+(x.graduated?' · graduated':'')):'';
+    const status=x.pinned?'<b class="g">PINNED</b>'+(mixed&&grp?' · '+escapeHtml(grp):''):(x.used?`<span class="muted">${escapeHtml(x.used)}</span>`:(mixed?'candidate · '+escapeHtml(grp):(st!=='active'?'<span class="muted">not active</span>':(Number(x.held)>0?'candidate':'<span class="muted">MM not holding</span>'))));
+    return `<tr class="${x.pinned?'pin':((!mixed&&st!=='active')||x.used?'dim':'')}">
       <td><b>${escapeHtml(x.symbol||'—')}</b></td><td>${escapeHtml(String(x.name||'').slice(0,22))}</td>
       <td>${x.age==null?'—':m2Num(x.age,0)+'s'}</td>
       <td class="${st==='active'?'g':(st==='paused'?'r':'')}">${escapeHtml(st||'—')}</td>
@@ -4259,7 +4276,7 @@ function paintMayhem2(d){
       <td class="${m2Cls(x.pnlUsd)}">${m2Usd(x.pnlUsd)}</td><td class="${m2Cls(x.pnlPercentage)}">${m2Pct(x.pnlPercentage)}</td>
       <td>${status}</td>
       <td><a href="https://pump.fun/coin/${escapeHtml(x.mint)}" target="_blank" rel="noopener">pump ↗</a></td></tr>`;
-  }).join(''):'<tr><td colspan="11" class="muted">No pump Mayhem coin under 3 minutes right now.</td></tr>');
+  }).join(''):'<tr><td colspan="11" class="muted">'+(mixed?'No pump coin on the New / Movers / Graduated boards yet.':'No pump Mayhem coin under 3 minutes right now.')+'</td></tr>');
 }
 // ---------- Candles (paper only) ----------
 let _cmBusy=false, _cmCfg=null, _cmSig={};

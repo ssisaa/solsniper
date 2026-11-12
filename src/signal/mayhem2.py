@@ -30,6 +30,15 @@ BOARD_URL = "https://advanced-indexer.pump.fun/boards/mayhem?tier=web&offset=0&l
 POS_URL = "https://frontend-api-v3.pump.fun/mint-positions/{mint}?sortBy=TOP&pageSize=50"
 TRADES_URL = "https://frontend-api-v3.pump.fun/trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/{mint}?wallets={wallet}"
 STATE_URL = "https://frontend-api-v3.pump.fun/coins-v2/{mint}/mayhem-state"
+# Mixed feed (Mayhem2 page checkbox "Mixed"): New first, then Movers, then Graduated.
+MIXED_BOARDS = (
+    ("new", "https://advanced-indexer.pump.fun/boards/new?tier=web&chains=solana&offset=0&limit=30", 0.8),
+    ("movers", "https://advanced-indexer.pump.fun/boards/movers?tier=web&surface=WEB&platform=WEB&limit=150&chains=solana", 3.0),
+    ("graduated", "https://advanced-indexer.pump.fun/boards/graduated?tier=web&offset=0&limit=30", 3.0),
+)
+MIXED_GROUPS = tuple(g for g, _u, _e in MIXED_BOARDS)
+ALL_TRADES_URL = "https://frontend-api-v3.pump.fun/trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/{mint}"
+JUP_CURVE_S = 1.5        # a coin off pump's curve (graduated) is priced by a Jupiter quote, cached this long
 
 YOUNG_S = 180.0          # discovery window: coins younger than 3 minutes
 TRADES_EVERY = 0.25
@@ -158,6 +167,10 @@ class Mayhem2:
                                                   for k in SHADOWS}
         # The bot's own buys / sells (live or dry run) for the chart: {ts, mint, side, label}.
         self.marks: deque = deque(maxlen=200)
+        self.mixed_rows: Dict[str, List[Dict[str, Any]]] = {g: [] for g in MIXED_GROUPS}
+        self.mixed_at: Dict[str, float] = {g: 0.0 for g in MIXED_GROUPS}
+        self.feed_was = ""
+        self.jup_curve: Dict[str, Any] = {}             # mint -> (pseudo curve, at): coins off pump's curve
         self.started = False
 
     # ---------- switches ----------
@@ -185,6 +198,22 @@ class Mayhem2:
         except Exception:
             name = ""
         return name if name in SHADOWS else "inverse_tp"
+
+    def feed(self) -> str:
+        """Coin feed (Mayhem2 page checkboxes): mayhem = Mayhem_Mode's coins and trades (unchanged);
+        mixed = pump boards New, Movers, Graduated, and every wallet's trades on the pinned coin."""
+        try:
+            from src.config.runtime import get_config
+            v = str(getattr(get_config(), "mayhem2_feed", "") or "").lower()
+        except Exception:
+            v = ""
+        return "mixed" if v == "mixed" else "mayhem"
+
+    def mixed(self) -> bool:
+        return self.feed() == "mixed"
+
+    def _who(self) -> str:
+        return "the coin's traders" if self.mixed() else "Mayhem_Mode"
 
     def paper_ok(self) -> bool:
         try:
@@ -268,12 +297,49 @@ class Mayhem2:
             return p
         return None
 
+    async def _mixed_boards(self) -> None:
+        """Mixed feed: read New every 0.8s, Movers and Graduated every 3s (one request each)."""
+        now = time.time()
+        due = [(g, u) for g, u, every in MIXED_BOARDS if now - self.mixed_at.get(g, 0.0) >= every]
+        if not due:
+            return
+
+        async def one(g: str, u: str):
+            try:
+                body = await asyncio.to_thread(self._get, u, "mayhem2board" + g[:3], 3.0)
+                return g, list((body or {}).get("entries") or []) if isinstance(body, dict) else None, ""
+            except Exception as exc:
+                return g, None, f"{g}: {type(exc).__name__}: {exc}"[:120]
+
+        res = await asyncio.gather(*(one(g, u) for g, u in due))
+        with self.lock:
+            errs = []
+            for g, rows, err in res:
+                if rows is not None:
+                    self.mixed_rows[g] = [dict(r, _grp=g) for r in rows]
+                    self.mixed_at[g] = time.time()
+                elif err:
+                    errs.append(err)
+            self.board = [r for g in MIXED_GROUPS for r in self.mixed_rows.get(g) or []]
+            self.board_at = max(self.mixed_at.values() or [0.0])
+            self.board_err = "; ".join(errs)
+
     async def _board_loop(self) -> None:
         while True:
             if not self.active():
                 await asyncio.sleep(0.5)
                 continue
             t0 = time.time()
+            feed = self.feed()
+            if feed != self.feed_was:
+                self._feed_changed(feed)
+            if feed == "mixed":
+                try:
+                    await self._mixed_boards()
+                except Exception:
+                    log.debug("mayhem2 mixed boards failed", exc_info=True)
+                await asyncio.sleep(max(0.05, BOARD_EVERY - (time.time() - t0)))
+                continue
             try:
                 body = await asyncio.to_thread(self._get, BOARD_URL, "mayhem2board", 1.5)
                 rows = list((body or {}).get("entries") or []) if isinstance(body, dict) else []
@@ -295,8 +361,60 @@ class Mayhem2:
                     self.board_err = f"{type(exc).__name__}: {exc}"[:120]
             await asyncio.sleep(max(0.05, BOARD_EVERY - (time.time() - t0)))
 
+    def _feed_changed(self, feed: str) -> None:
+        """Checkbox switched: drop the other feed's board; a pin with nothing held is let go (not marked used)."""
+        first = not self.feed_was
+        self.feed_was = feed
+        with self.lock:
+            self.board = []
+            self.board_at = 0.0
+            self.board_err = ""
+            for g in MIXED_GROUPS:
+                self.mixed_rows[g] = []
+                self.mixed_at[g] = 0.0
+        if first:
+            return
+        pin = self.pin
+        if pin and self._held(pin["mint"]) is None and self.busy != "buy":
+            self.pin = None
+            self.want = ""
+        self.note("info", "Feed: Mixed — New, then Movers, then Graduated (youngest first in each); every wallet's "
+                  "BUY / SELL on the pinned coin is the signal." if feed == "mixed"
+                  else "Feed: Mayhem_Mode — its Mayhem coins and its BUY / SELL.")
+
+    def _mixed_candidates(self) -> List[Dict[str, Any]]:
+        """Mixed feed: New (under 3 minutes), then Movers, then Graduated; pump coins only; youngest
+        first inside each group; a coin on two boards counts once (its first group)."""
+        now = time.time()
+        with self.lock:
+            groups = {g: list(self.mixed_rows.get(g) or []) for g in MIXED_GROUPS}
+            ats = dict(self.mixed_at)
+            states = dict(self.state)
+        out, seen = [], set()
+        for g in MIXED_GROUPS:
+            shift = max(0.0, now - ats.get(g, 0.0)) if ats.get(g) else 0.0
+            part = []
+            for r in groups[g]:
+                mint = str(r.get("m") or "")
+                if not mint or mint in seen or str(r.get("pg") or "") != "pump":
+                    continue
+                age = float(r.get("age") or 0) + shift
+                if g == "new" and age > YOUNG_S:
+                    continue
+                st = str((states.get(mint) or {}).get("state") or r.get("ms") or "").lower()
+                if st and st != "active":
+                    continue          # a Mayhem coin that is paused / completed
+                part.append(dict(r, _age=age, _grp=g))
+            part.sort(key=lambda r: r["_age"])
+            for r in part:
+                seen.add(r["m"])
+                out.append(r)
+        return out
+
     def candidates(self) -> List[Dict[str, Any]]:
         """Board coins younger than 3 minutes, pump only, active, newest first."""
+        if self.mixed():
+            return self._mixed_candidates()
         now = time.time()
         with self.lock:
             rows = list(self.board)
@@ -320,7 +438,7 @@ class Mayhem2:
     async def _pos_loop(self) -> None:
         turn = 0
         while True:
-            if not self.active():
+            if not self.active() or self.mixed():      # Mayhem_Mode's positions: Mayhem feed only
                 await asyncio.sleep(0.5)
                 continue
             t0 = time.time()
@@ -372,10 +490,10 @@ class Mayhem2:
                 continue
             t0 = time.time()
             mint = pin["mint"]
+            mixed = self.mixed()
             try:
-                body = await asyncio.to_thread(
-                    self._get, TRADES_URL.format(mint=mint, wallet=_wallet()), "mayhem2", 1.0,
-                )
+                url = ALL_TRADES_URL.format(mint=mint) if mixed else TRADES_URL.format(mint=mint, wallet=_wallet())
+                body = await asyncio.to_thread(self._get, url, "mayhem2", 1.0)
                 rows = (body or {}).get("trades") if isinstance(body, dict) else None
                 if rows and self.pin and self.pin["mint"] == mint:
                     fresh = []
@@ -384,7 +502,9 @@ class Mayhem2:
                         side = str(t.get("side") or "").lower()
                         if not tx or side not in ("buy", "sell"):
                             continue
-                        if str((t.get("trader") or {}).get("address") or _wallet()) != _wallet():
+                        if str(t.get("kind") or "swap") != "swap":
+                            continue
+                        if not mixed and str((t.get("trader") or {}).get("address") or _wallet()) != _wallet():
                             continue
                         fresh.append({
                             "tx": tx, "side": side,
@@ -404,7 +524,7 @@ class Mayhem2:
     async def _state_loop(self) -> None:
         while True:
             pin = self.pin
-            if not pin:
+            if not pin or (self.mixed() and not pin.get("mh")):   # mayhem-state exists for Mayhem coins only
                 await asyncio.sleep(0.1)
                 continue
             t0 = time.time()
@@ -426,7 +546,9 @@ class Mayhem2:
     def on_stream(self, ev: Dict[str, Any]) -> None:
         """Caller-stream thread: an on-chain trade. Mayhem_Mode on the pinned coin only."""
         pin = self.pin
-        if not pin or ev.get("mint") != pin["mint"] or ev.get("wallet") != _wallet():
+        if not pin or ev.get("mint") != pin["mint"]:
+            return
+        if not self.mixed() and ev.get("wallet") != _wallet():
             return
         sig = str(ev.get("signature") or "")
         if not sig or self.loop is None:
@@ -959,12 +1081,16 @@ class Mayhem2:
             "image": str(row.get("i") or ""),
             "ts": time.time(),
             "age0": float(row.get("_age") or 0),
+            "grp": str(row.get("_grp") or ""),
+            "mh": bool(row.get("mh")),
+            "feed": self.feed(),
         }
         self.want = ""
         self.want_at = time.time() - 1.0
         self.signals.clear()
         self.gone_reads.pop(mint, None)
-        self.note("ok", f"{self.pin['symbol'] or mint[:6]} — pinned ({why}). Following Mayhem_Mode's BUY / SELL.", mint)
+        self.note("ok", f"{self.pin['symbol'] or mint[:6]} — pinned ({why}). Following "
+                  f"{'every wallet' if self.mixed() else 'Mayhem_Mode'}'s BUY / SELL.", mint)
 
     def _save_used(self) -> None:
         import json
@@ -1043,7 +1169,7 @@ class Mayhem2:
                         # Mayhem run is over for this coin: sell what is held and take the next new coin.
                         self._unpin("Mayhem state is completed", "mayhem2_paused")
                         continue
-                    rec = self.pos.get(mint) or {}
+                    rec = {} if self.mixed() else (self.pos.get(mint) or {})
                     if rec.get("at") and float(rec["at"]) > float(pin["ts"]) and rec.get("held", 0) <= 0:
                         key = int(float(rec["at"]) * 10)
                         if self.gone_reads.get(mint + ":last") != key:
@@ -1060,7 +1186,7 @@ class Mayhem2:
                         continue
                     quiet = time.time() - max(float(pin["ts"]), float(pin.get("last_sig") or 0))
                     if quiet >= IDLE_UNPIN_S and self._held(mint) is None and self.busy != "buy":
-                        self._unpin(f"Mayhem_Mode made no trade on it for {quiet:.0f}s", "mayhem2_sell")
+                        self._unpin(f"{self._who()} made no trade on it for {quiet:.0f}s", "mayhem2_sell")
                         continue
                     self._retry_unpinned()
                     continue
@@ -1074,10 +1200,14 @@ class Mayhem2:
                     if self.pin:
                         self.pin["traded"] = True
                     continue
+                mixed = self.mixed()
                 for row in self.candidates():
                     mint = row["m"]
                     if mint in self.used:
                         continue
+                    if mixed:
+                        self._set_pin(row, f"{row.get('_grp')} board, {row['_age']:.0f}s old")
+                        break
                     rec = self.pos.get(mint) or {}
                     if not rec.get("at"):
                         continue          # its Mayhem_Mode read comes in a moment
@@ -1088,7 +1218,8 @@ class Mayhem2:
                 else:
                     if time.time() - last_wait_note > 60 and self.board_at:
                         last_wait_note = time.time()
-                        self.note("info", "No active Mayhem coin under 3 minutes that Mayhem_Mode holds yet. Watching.")
+                        self.note("info", "No new coin on the New / Movers / Graduated boards yet. Watching." if mixed
+                                  else "No active Mayhem coin under 3 minutes that Mayhem_Mode holds yet. Watching.")
             except Exception:
                 log.debug("mayhem2 brain failed", exc_info=True)
 
@@ -1111,9 +1242,44 @@ class Mayhem2:
         from src.execution import pump_curve as PC
         if fresh:
             PC.forget_curve(mint)
-        curve, _why = await PC._curve(mint)
+        curve, why = await PC._curve(mint)
         _fee, _bb, fee_bps = await PC._fees()
+        if not curve and why in ("graduated", "not_on_curve") and self.mixed():
+            curve = await self._jup_curve(mint)
         return curve, int(fee_bps or 100)
+
+    def _jup(self):
+        jup = getattr(self.manager, "_trader_jup", None) if self.manager is not None else None
+        if jup is None and self.trader is not None:
+            jup = getattr(self.trader, "jup", None)
+        return jup
+
+    async def _jup_curve(self, mint: str):
+        """A coin off pump's curve (graduated, PumpSwap): a flat 'curve' at Jupiter's price for Max position
+        SOL, so the same math values it (tiny next to the pool, so no price impact). Cached 1.5s."""
+        hit = self.jup_curve.get(mint)
+        if hit and time.time() - hit[1] < JUP_CURVE_S:
+            return hit[0]
+        jup = self._jup()
+        if jup is None:
+            return hit[0] if hit else None
+        try:
+            from src.config.runtime import get_config
+            size = float(getattr(get_config(), "max_position_sol", 0.005) or 0.005)
+            q = await asyncio.wait_for(jup.quote_sol_to_token(mint, size, slippage_bps=1000), timeout=2.0)
+            out = int(getattr(q, "out_amount", 0) or 0) if q else 0
+        except Exception:
+            out = 0
+        if out <= 0:
+            return hit[0] if hit and time.time() - hit[1] < 10 else None
+        vs = 10 ** 15                                   # lamports: huge reserves = no price impact
+        vt = int(vs * out / (size * 1e9))
+        curve = {"virtual_sol": vs, "virtual_token": vt, "real_sol": None, "src": "jupiter"}
+        self.jup_curve[mint] = (curve, time.time())
+        if len(self.jup_curve) > 50:
+            for old in sorted(self.jup_curve, key=lambda k: self.jup_curve[k][1])[:20]:
+                self.jup_curve.pop(old, None)
+        return curve
 
     async def _value_loop(self) -> None:
         """Every 0.3s: what pump's curve would pay for each held bag right now (live and dry run).
@@ -1186,11 +1352,15 @@ class Mayhem2:
         try:
             from src.config.runtime import get_config
             size = float(getattr(get_config(), "max_position_sol", 0.015) or 0.015)
-            signed, _minimum, err = await PC.pump_buy_tx(mint, size, quiet=True)
-            if not signed:
-                self.note("warn", f"{sym} — DRY RUN: buy not built ({err}).", mint)
-                return
-            sim_err = await self.trader._simulate_first(signed, 0.9) if self.trader else ""
+            c0, _bps = await self._curve_now(mint)
+            if c0 and c0.get("src") == "jupiter":
+                signed, err, sim_err = "", "", ""          # graduated: priced by Jupiter, no local pump build
+            else:
+                signed, _minimum, err = await PC.pump_buy_tx(mint, size, quiet=True)
+                if not signed:
+                    self.note("warn", f"{sym} — DRY RUN: buy not built ({err}).", mint)
+                    return
+                sim_err = await self.trader._simulate_first(signed, 0.9) if self.trader else ""
             ms = (time.time() - seen) * 1000.0
             self.lat.append(ms)
             if sim_err:
@@ -1244,7 +1414,11 @@ class Mayhem2:
         from src.execution import pump_curve as PC
         t0 = time.time()
         try:
-            signed, _min, err = await PC.pump_sell_tx(pos.mint, int(pos._m2_tokens), quiet=True)
+            c0, _bps = await self._curve_now(pos.mint)
+            if c0 and c0.get("src") == "jupiter":
+                signed = ""                                # graduated: no local pump build
+            else:
+                signed, _min, err = await PC.pump_sell_tx(pos.mint, int(pos._m2_tokens), quiet=True)
             ms = (time.time() - t0) * 1000.0
             await asyncio.sleep(0.45)
             curve, bps = await self._curve_now(pos.mint)
@@ -1575,16 +1749,19 @@ class Mayhem2:
             signals = [dict(s) for s in list(self.signals)[:20]]
         shift = max(0.0, now - board_at) if board_at else 0.0
         pin = dict(self.pin) if self.pin else None
+        mixed = self.mixed()
+        if mixed:
+            board = self._mixed_candidates()[:60]
         rows = []
         for r in board:
             mint = str(r.get("m") or "")
             if not mint or str(r.get("pg") or "") != "pump":
                 continue
-            age = float(r.get("age") or 0) + shift
+            age = float(r["_age"]) if mixed else float(r.get("age") or 0) + shift
             st = states.get(mint) or {}
             state = str(st.get("state") or r.get("ms") or "")
             is_pin = bool(pin and pin["mint"] == mint)
-            if age > YOUNG_S and not is_pin:
+            if age > YOUNG_S and not is_pin and not mixed:
                 continue
             p = posd.get(mint) or {}
             rows.append({
@@ -1594,6 +1771,7 @@ class Mayhem2:
                 "held": p.get("held"), "pnlUsd": p.get("pnlUsd"), "pnlPercentage": p.get("pnlPercentage"),
                 "costBasisUsd": p.get("costBasisUsd"), "posAge": round(now - float(p["at"]), 1) if p.get("at") else None,
                 "pinned": is_pin, "used": (self.used.get(mint) or {}).get("why", ""),
+                "grp": r.get("_grp") or "", "graduated": bool(r.get("gd")),
             })
         rows.sort(key=lambda r: 0 if r["pinned"] else 1)     # the pinned coin always on top
         if pin and not any(r["pinned"] for r in rows):
@@ -1656,7 +1834,8 @@ class Mayhem2:
             "boardAge": round(now - board_at, 1) if board_at else None, "error": err,
             "pin": pin, "rows": rows, "signals": signals, "notes": notes, "used": used,
             "marks": marks, "view": view,
-            "youngS": YOUNG_S,
+            "youngS": YOUNG_S, "feed": self.feed(),
+            "boards": {g: len(self.mixed_rows.get(g) or []) for g in MIXED_GROUPS} if mixed else None,
             "rules": {"profitMin": PROFIT_MIN_PCT, "waitS": WAIT_PROFIT_S, "tp": TAKE_PROFIT_PCT,
                       "trailArm": TRAIL_ARM_PCT, "trailKeep": TRAIL_KEEP, "stop": STOP_PCT, "maxHoldS": MAX_HOLD_S},
         }
