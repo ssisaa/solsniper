@@ -1,7 +1,7 @@
 # Candle-momentum auto-trader (paper only). Edited by the dashboard Candles page too;
 # changes apply within 1s. See src/signal/candle_core.py Config for every field.
 enabled: true
-mode: paper
+mode: live
 rule: inverse
 res: 1s
 count: 300
@@ -30,7 +30,7 @@ auto_follow: mayhem_board
 max_mints: 1
 min_age_s: 3.0
 max_age_s: 180.0
-support_enabled: false
+support_enabled: true
 reuse_coin: false
 ladder_enabled: true
 max_ladder_buys: 3

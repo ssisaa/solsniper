@@ -1221,3 +1221,29 @@ def test_green_target_uses_fast_pace_when_lower(monkeypatch):
     assert e.green_target() == (15.0, "Min profit")
     monkeypatch.setattr(rt, "get_config", lambda: _types.SimpleNamespace(fast_pace_sell=True, fast_pace_margin_pct=20.0))
     assert e.green_target() == (15.0, "Min profit")
+
+
+def test_dayscalp_candle_pick_takes_youngest_passing(monkeypatch):
+    import src.signal.dayscalp as DS
+    now = time.time()
+    rows = [
+        {"mint": "A" * 40 + "pump", "symbol": "OLD", "change_m5_pct": 20.0, "volume_m5_usd": 9000, "created_ts": now - 3600},
+        {"mint": "B" * 40 + "pump", "symbol": "YOUNG", "change_m5_pct": 20.0, "volume_m5_usd": 9000, "created_ts": now - 120},
+        {"mint": "C" * 40 + "pump", "symbol": "NEWBAD", "change_m5_pct": 900.0, "volume_m5_usd": 9000, "created_ts": now - 10},
+    ]
+
+    async def ranked(client, pages=1):
+        return rows
+
+    async def shown(*a, **k):
+        return None
+    monkeypatch.setattr(DS, "fetch_pumpfun_ranked_by_m5", ranked)
+    monkeypatch.setattr(DS, "_show_decoded", shown)
+    monkeypatch.setattr(DS, "_candle_supports_dayscalp", lambda: True)
+    monkeypatch.setattr(DS, "_band", lambda: (5.0, 100.0))
+    monkeypatch.setattr(DS, "_soft_filter_reason", lambda row, cfg, vol: None if row["change_m5_pct"] <= 100 else "m5 too high")
+    cfg = DS.DayScalpConfig()
+    cfg.min_volume_m5_usd = 1000
+    monkeypatch.setattr(DS, "_apply_live_band", lambda c: c)
+    top = asyncio.run(DS.select_top1_dayscalp(cfg))
+    assert top.symbol == "YOUNG" and top.quick_entry is True
