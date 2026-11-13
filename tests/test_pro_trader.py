@@ -143,3 +143,61 @@ def test_candles_pro_hint_and_rule_choice():
     e.cfg.rule = "pro"
     h = e._hint("X")
     assert h.get("pro") and "VWAP" in h["entry"] and h["minProfit"] == 40.0
+
+
+# ---------- Candles rule "pro_hold": buy on the chart BUY, sell only in profit, else at Max hold ----------
+
+def test_pro_hold_buys_on_the_call_but_never_sells_on_the_chart_plan(tmp_path, monkeypatch):
+    from src.signal import candle_core as C
+    e, f, rows, routed = _cm_engine(tmp_path, monkeypatch)
+    e.cfg.rule = "pro_hold"
+    e._evaluate(f, time.time())
+    f.books["pump_rest"].merge(rows[-1:])
+    e._evaluate(f, time.time())
+    assert routed and routed[-1]["side"] == "BUY"
+    entry = rows[-1].close
+    e.positions["MINT"] = {"mint": "MINT", "entry_ts": time.time() - 5, "entry_sol": 0.005, "lots": [{"n": 1}]}
+    f.books["pump_rest"].merge([C.Candle(t=rows[-1].t + 1000, open=entry, high=entry, low=entry * 0.5,
+                                         close=entry * 0.5, volume=5, final=True)])     # -50%: the chart plan would stop out
+    n = len(routed)
+    e._evaluate(f, time.time())
+    assert len(routed) == n                      # no sell in a loss
+    assert e.pro_context("MINT")["holding"] is None
+
+
+def test_pro_hold_sells_once_in_profit(tmp_path, monkeypatch):
+    import asyncio as _a
+    e, f, rows, routed = _cm_engine(tmp_path, monkeypatch)
+    e.cfg.rule = "pro_hold"
+    e.cfg.min_profit_pct = 10.0
+    e.cfg.max_hold_s = 150
+    monkeypatch.setattr(e, "green_target", lambda: (10.0, "Min profit"))
+    e.positions["MINT"] = {"mint": "MINT", "mode": "paper", "tokens": 1000.0, "entry_sol": 0.005,
+                           "entry_ts": time.time() - 5, "symbol": "S", "lots": [{"n": 1}]}
+
+    async def val(mint, tokens):
+        return 0.0062, None, "curve"             # +24% before network fees
+    monkeypatch.setattr(e, "_value", val)
+    sold = []
+
+    async def fx(mint, why):
+        sold.append(why)
+    monkeypatch.setattr(e, "_forced_exit", fx)
+
+    async def go():
+        t = _a.ensure_future(e._value_loop())
+        await _a.sleep(1.3)
+        t.cancel()
+    _a.run(go())
+    assert sold and "in profit" in sold[0]
+
+
+def test_pro_hold_hint_and_choice():
+    from src.signal import candle_core as C
+    from src.signal import candle_momo as CM
+    assert "pro_hold" in C.RULES
+    e = CM.CandleMomo()
+    e.cfg.rule = "pro_hold"
+    e.positions["X"] = {"mint": "X", "upct": -4.0, "lots": [{"n": 1}]}
+    h = e._hint("X")
+    assert h["profitOnly"] and "Max hold" in h["exit"] and not h["ready"]

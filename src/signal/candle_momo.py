@@ -638,7 +638,7 @@ class CandleMomo:
     def pro_context(self, mint: str) -> Dict[str, Any]:
         """The open Candles trade on this coin for the Pro Trader read: entry (chart price) and time held."""
         held = self.positions.get(mint)
-        if not held:
+        if not held or self.cfg.rule == "pro_hold":       # pro_hold exits on profit / max hold, not the chart plan
             return {"flow": None, "holding": None}
         ts = float(held.get("entry_ts") or time.time())
         px = float(self.pro_px.get(mint) or 0)
@@ -672,7 +672,7 @@ class CandleMomo:
         a = PT.analyze(cs, None, ctx["holding"])
         if held is None and a.get("call") == "BUY":
             side = "BUY"
-        elif held is not None and a.get("call") == "SELL":
+        elif held is not None and a.get("call") == "SELL" and self.cfg.rule == "pro":
             side = "SELL"
         else:
             return
@@ -695,7 +695,7 @@ class CandleMomo:
 
     def _evaluate(self, f: Feed, seen: float) -> None:
         cfg = self.cfg
-        if cfg.rule == "pro":
+        if cfg.rule in ("pro", "pro_hold"):
             self._pro_evaluate(f, seen)
             return
         book = f.books[f.using]
@@ -1415,6 +1415,20 @@ class CandleMomo:
         buy_on, sell_on = ("red", "green") if inverse else ("green", "red")
         tgt, tgt_from = self.green_target()
         out: Dict[str, Any] = {"minProfit": tgt, "minProfitFrom": tgt_from, "profitOnly": bool(cfg.sell_only_in_profit)}
+        if cfg.rule == "pro_hold":
+            out.update({"profitOnly": True, "pro": True})
+            if held:
+                up = held.get("upct")
+                out["entry"] = "Pro BUY · sell in profit: one entry per trade (no ladder)"
+                hold_txt = f"in a loss it holds up to Max hold {cfg.max_hold_s:.0f}s" if cfg.max_hold_s else "in a loss it holds (Max hold is off)"
+                out["exit"] = (f"{'now ' + format(up, '+.1f') + '% — ' if up is not None else ''}sells once ≥ {tgt:g}% "
+                               f"after fees ({tgt_from}); {hold_txt}")
+                out["ready"] = bool(up is not None and up >= tgt)
+            else:
+                out["entry"] = ("support mode: the source buys lot 1" if self.support_source()
+                                else "on the chart's Pro Trader BUY (≥10% under VWAP, green, RSI<45, volume ≥1.5x)")
+                out["exit"] = "—"
+            return out
         if cfg.rule == "pro":
             from src.signal import pro_trader as PT
             out.update({"minProfit": PT.TARGET_PCT, "minProfitFrom": "Pro Trader target", "profitOnly": False, "pro": True})
@@ -1980,6 +1994,13 @@ class CandleMomo:
                         pos["value_at"] = time.time()
                         pos["upnl_sol"] = v - pos["entry_sol"] - 2 * self._network_fee_sol()
                         pos["upct"] = pos["upnl_sol"] / pos["entry_sol"] * 100.0 if pos["entry_sol"] else 0.0
+                        if self.cfg.rule == "pro_hold" and not pos.get("closing") and mint not in self.busy:
+                            tgt, tgt_from = self.green_target()
+                            if pos["upct"] >= tgt:
+                                # pro_hold: sell the moment the whole trade is in profit after fees
+                                pos["closing"] = True
+                                asyncio.ensure_future(self._forced_exit(
+                                    mint, f"in profit {pos['upct']:+.1f}% ≥ {tgt:g}% after fees ({tgt_from}) — Pro BUY · sell in profit"))
                         if (self.cfg.stop_loss_pct and pos["upct"] <= -self.cfg.stop_loss_pct
                                 and not pos.get("closing") and mint not in self.busy):
                             pos["closing"] = True

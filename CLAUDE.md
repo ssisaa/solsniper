@@ -101,6 +101,11 @@ then rises over 20–30 candles, so the targets were raised to let it run: **Pro
 old +25 % exits on training coins, fresh coins and late entries (bp +1.2 / +5.6 / +2.8 %/trade; pro +1.1 / +1.8 /
 +1.1). Buying a deeper dip after the call (limit −3…−12 %) did worse.
 
+**Candles rule `pro_hold` (2026-11-14, user's request)**: buy on the chart's Pro Trader BUY; sell only once the whole
+trade is in profit after fees (`green_target()`: Min profit, or Fast Pace margin), checked in the value loop; in a
+loss hold until Max hold, then sell; no stop, no ladder. Backtest on 76 fresh coins: 45–50 % wins but −0.6 … −1.2 %
+per trade (held losers lose more than winners make); rule `pro` did +1.8 % on the same coins. User chose to have it.
+
 **Botpredict (2026-11-13)**: `src/signal/botpredict.py`, Mayhem2 strategy `botpredict` — the bot's own learned
 model (logistic, 22 chart features, weights embedded in `MODEL`) for "price hits +25 % before −5 % within 60 s";
 buys only its top 2 % moments; exits +25 % / **−8 %** / 60 s (own plan in `_pro_exit(…, name)`; pro_trader keeps −5 %).
