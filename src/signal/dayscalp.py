@@ -779,8 +779,9 @@ async def _drop_client(client) -> None:
 # The scan's latest pick under AutoTrade-Candles (top row on Decoded Tokens): Candles feeds it at once,
 # bought or not (Auto Trade off = watch only).
 LAST_CANDLE_PICK: Dict[str, Any] = {"mint": "", "symbol": "", "ts": 0.0}
-# Candles rule pro_hold: it waits for a rare chart setup, so it watches the first few scan tokens, not one.
-PRO_HOLD_WATCH = 3
+# Candles rule pro_hold: one coin at a time (user's choice 2026-11-14) — Candles watches the first scan token and,
+# while it holds a trade, takes no new coin; once the trade completes the next scan token is fed.
+PRO_HOLD_WATCH = 1
 LAST_CANDLE_PICKS: List[Dict[str, Any]] = []
 
 

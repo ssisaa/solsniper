@@ -294,7 +294,7 @@ def test_dayscalp_knows_the_candles_rule(monkeypatch):
     assert DS._candle_rule() == "pro_hold"
 
 
-def test_pro_hold_watches_the_first_three_scan_tokens(monkeypatch):
+def test_pro_hold_watches_the_scan_tokens_it_is_given(monkeypatch):
     from src.signal import candle_momo as CM
     from src.signal import dayscalp as DS
     e = CM.CandleMomo()
@@ -339,3 +339,23 @@ def test_pro_hold_buys_on_botpredict_not_pro_trader(tmp_path, monkeypatch):
     f.pro_was_buy = False
     e._evaluate(f, time.time())
     assert routed and routed[-1]["side"] == "BUY" and "chance" in routed[-1]["pro_why"]
+
+
+def test_pro_hold_one_coin_at_a_time(monkeypatch):
+    from src.signal import candle_momo as CM
+    from src.signal import dayscalp as DS
+    assert DS.PRO_HOLD_WATCH == 1
+    e = CM.CandleMomo()
+    e.cfg.rule = "pro_hold"
+    monkeypatch.setattr(e, "support_source", lambda: "dayscalp")
+    monkeypatch.setattr(e, "_support_sync", lambda src: None)
+    monkeypatch.setattr(e, "_support_held", lambda src: [])
+    held = "H" + "x" * 43
+    e.positions[held] = {"mint": held, "symbol": "HELD", "lots": [{"n": 1}]}
+    nxt = {"mint": "N" + "x" * 43, "symbol": "NEXT", "ts": time.time()}
+    monkeypatch.setattr(DS, "LAST_CANDLE_PICKS", [nxt])
+    e._pick([])
+    assert set(e.feeds) == {held}                 # trading: only the held coin
+    e.positions.clear()
+    e._pick([])
+    assert set(e.feeds) == {nxt["mint"]}          # trade complete: the next scan token

@@ -495,6 +495,8 @@ class CandleMomo:
                         if time.time() - float(gv.get("at") or 0) > 60:
                             self._grab.pop(gm, None)
                     picks = list(_pks) if cfg.rule == "pro_hold" else [_pk]
+                    if cfg.rule == "pro_hold" and self.positions:
+                        picks = []        # one coin at a time: the open trade completes before the next coin is fed
                     for pk in picks:
                         if pk.get("mint") and time.time() - float(pk.get("ts") or 0) < 20:
                             want.setdefault(pk["mint"], "scan")      # Decoded Tokens' top pick(s): watch now
