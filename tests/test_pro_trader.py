@@ -201,3 +201,43 @@ def test_pro_hold_hint_and_choice():
     e.positions["X"] = {"mint": "X", "upct": -4.0, "lots": [{"n": 1}]}
     h = e._hint("X")
     assert h["profitOnly"] and "Max hold" in h["exit"] and not h["ready"]
+
+
+def test_pro_hold_new_signal_buys_again_once(tmp_path, monkeypatch):
+    from src.signal import candle_core as C
+    e, f, rows, routed = _cm_engine(tmp_path, monkeypatch)
+    e.cfg.rule = "pro_hold"
+    e._evaluate(f, time.time())
+    e.positions["MINT"] = {"mint": "MINT", "entry_ts": time.time() - 5, "entry_sol": 0.005, "lots": [{"n": 1}], "mode": "paper"}
+    f.books["pump_rest"].merge(rows[-1:])
+    e._evaluate(f, time.time())                       # a fresh BUY signal while holding -> buys again
+    assert routed and routed[-1]["side"] == "BUY"
+    n = len(routed)
+    last = rows[-1]
+    f.books["pump_rest"].merge([C.Candle(t=last.t + 1000, open=last.close, high=last.close * 1.01, low=last.close,
+                                         close=last.close * 1.01, volume=200, final=True)])
+    e._evaluate(f, time.time())                       # the same signal still on: no second buy
+    assert len(routed) == n or routed[-1]["side"] != "BUY"
+
+
+def test_pro_hold_add_respects_total_cap(tmp_path, monkeypatch):
+    from src.signal import candle_momo as CM
+    from src.signal.candle_store import Store
+    e = CM.CandleMomo()
+    e.store = Store(str(tmp_path / "c.sqlite"), str(tmp_path / "c.jsonl"))
+    e.cfg.rule = "pro_hold"
+    e.cfg.ladder_max_total_sol = 0.015
+    f = CM.Feed("MINT", 10)
+    f.status = "OK"
+    e.feeds["MINT"] = f
+    started = []
+    monkeypatch.setattr(e, "_start", lambda sig: started.append(sig) or "intent")
+    monkeypatch.setattr(e, "_lot_base", lambda mode: 0.005)
+    e.positions["MINT"] = {"mint": "MINT", "entry_sol": 0.010, "lots": [{"n": 1}, {"n": 2}], "mode": "paper"}
+    def sig(i):
+        return {"id": i, "mint": "MINT", "side": "BUY", "pro": True, "symbol": "S", "provider": "pump_rest",
+                "ts": int(time.time() * 1000), "open": 1.0, "prevClose": 1.0, "close": 1.0, "deltaPct": 0.0,
+                "candleTs": 0, "rule": "pro", "feedLagMs": 0}
+    assert e._route(sig("a")) == "intent" and started[-1]["add"] and started[-1]["lot_no"] == 3
+    e.positions["MINT"]["entry_sol"] = 0.015
+    assert e._route(sig("b")) != "intent"

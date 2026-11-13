@@ -670,8 +670,12 @@ class CandleMomo:
         ctx = self.pro_context(f.mint)
         cs = [{"t": c.t, "o": c.open, "h": c.high, "l": c.low, "c": c.close, "v": c.volume} for c in rows]
         a = PT.analyze(cs, None, ctx["holding"])
-        if held is None and a.get("call") == "BUY":
+        was_buy = bool(getattr(f, "pro_was_buy", False))
+        f.pro_was_buy = a.get("call") == "BUY"
+        if a.get("call") == "BUY" and held is None:
             side = "BUY"
+        elif a.get("call") == "BUY" and self.cfg.rule == "pro_hold" and not was_buy:
+            side = "BUY"                     # pro_hold: each new BUY signal buys again into the open trade
         elif held is not None and a.get("call") == "SELL" and self.cfg.rule == "pro":
             side = "SELL"
         else:
@@ -759,7 +763,17 @@ class CandleMomo:
         if (side == "BUY" and held is None and cfg.rule == "inverse" and cfg.max_entry_red_pct > 0
                 and float(sig.get("deltaPct") or 0) < -cfg.max_entry_red_pct):
             return self.skip(sig, "CRASH_CANDLE")          # opening on a -15%+ second buys the crash, not a dip
-        if side == "BUY" and held is not None:
+        if side == "BUY" and held is not None and sig.get("pro") and cfg.rule == "pro_hold":
+            # pro_hold: a new BUY signal buys again (Max position), no red-candle ladder; Total cap still holds
+            from src.signal.candle_core import _fit_cap
+            lots = len(held.get("lots") or []) or 1
+            what, size = _fit_cap(float(held.get("entry_sol") or 0), self._lot_base(held.get("mode") or cfg.mode), cfg)
+            if what != "add":
+                return self.skip(sig, "LADDER_CAP")
+            sig["add"], sig["ladder_size"], sig["lot_no"] = True, size, lots + 1
+            if held.get("mode") == "live" and cfg.mode != "live":
+                return self.skip(sig, "LIVE_NOT_BUILT")
+        elif side == "BUY" and held is not None:
             if not ladder:
                 return self.skip(sig, "ALREADY_LONG")
             base = self._lot_base(held.get("mode") or cfg.mode)
@@ -1419,7 +1433,10 @@ class CandleMomo:
             out.update({"profitOnly": True, "pro": True})
             if held:
                 up = held.get("upct")
-                out["entry"] = "Pro BUY · sell in profit: one entry per trade (no ladder)"
+                n = len(held.get("lots") or []) or 1
+                room = max(0.0, cfg.ladder_max_total_sol - float(held.get("entry_sol") or 0))
+                out["entry"] = (f"buy {n + 1} on the next chart BUY signal (no red-candle lots; {room:.4f} SOL left of Total cap "
+                                f"{cfg.ladder_max_total_sol:g})" if room >= 0.001 else f"Total cap {cfg.ladder_max_total_sol:g} SOL reached")
                 hold_txt = f"in a loss it holds up to Max hold {cfg.max_hold_s:.0f}s" if cfg.max_hold_s else "in a loss it holds (Max hold is off)"
                 out["exit"] = (f"{'now ' + format(up, '+.1f') + '% — ' if up is not None else ''}sells once ≥ {tgt:g}% "
                                f"after fees ({tgt_from}); {hold_txt}")
