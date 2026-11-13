@@ -73,7 +73,7 @@ SHADOW_RULES = {
     "inverse_big": "SELL ≥0.05 SOL→buy, BUY→sell", "inverse_big_tp": "SELL ≥0.05 SOL→buy, exit TP/stop/25s",
     "ladder": "BUY→buy, SELL→sell if in profit, BUY below last buy→buy again (max 3)",
     "pro_trader": "chart trader: BUY on a VWAP dip with volume (≥10% under VWAP, green, RSI<45, vol ≥1.5x); target +25%, stop −5%, 60s time stop",
-    "botpredict": "bot's own prediction: BUY when its learned model gives ≥ ~15% chance of +25% before −5% in 60s (top 2% of moments); target +25%, stop −5%, 60s",
+    "botpredict": "bot's own prediction: BUY when its learned model gives ≥ ~21% chance of +25% before −8% in 60s (top 2% of moments); target +25%, stop −8%, 60s",
     "inv_ladder": "inverse ladder: SELL (red)→buy lot 1, leave 3 reds, next red→next lot below the last buy (lots on reds 1, 5, 9; max 3), BUY (green)→sell all",
 }
 LADDERS = ("ladder", "inv_ladder")
@@ -811,7 +811,7 @@ class Mayhem2:
             ladder = self.strategy() in LADDERS
             why = ""
             if self.strategy() in CHART_STRATS:
-                why = self._pro_exit(since, held)
+                why = self._pro_exit(since, held, self.strategy())
                 if why:
                     self._sell(pos, why)
                 continue
@@ -1703,7 +1703,7 @@ class Mayhem2:
             if not self.pin or self.pin["mint"] != mint:
                 why = "coin unpinned (paused / idle / closed)"
             elif name in CHART_STRATS:
-                why = self._pro_exit(pct, time.time() - pos["at"])
+                why = self._pro_exit(pct, time.time() - pos["at"], name)
             elif pct >= TAKE_PROFIT_PCT:
                 why = f"take profit {pct:+.1f}%"
             elif pos["peak"] >= TRAIL_ARM_PCT and pct <= pos["peak"] * TRAIL_KEEP \
@@ -1749,15 +1749,18 @@ class Mayhem2:
 
     # ---------- Pro Trader (chart read) ----------
     @staticmethod
-    def _pro_exit(pct: Optional[float], held: float) -> str:
-        """Pro Trader exits on the trade's real value % (fees included): target, stop, time stop."""
+    def _pro_exit(pct: Optional[float], held: float, name: str = PRO) -> str:
+        """Chart-strategy exits on the trade's real value % (fees included): target, stop, time stop.
+        Each strategy has its own plan (Botpredict's stop is wider: -8%)."""
+        from src.signal import botpredict as BPm
         from src.signal import pro_trader as PT
-        if pct is not None and pct >= PT.TARGET_PCT - PT.FEE_PCT:
-            return f"Pro Trader target: {pct:+.1f}% (plan {PT.TARGET_PCT:+.0f}%)"
-        if pct is not None and pct <= PT.STOP_PCT - PT.FEE_PCT:
-            return f"Pro Trader stop: {pct:+.1f}% (plan {PT.STOP_PCT:+.0f}% + fees)"
-        if held >= PT.TIME_STOP_S:
-            return f"Pro Trader time stop {PT.TIME_STOP_S:.0f}s ({'n/a' if pct is None else f'{pct:+.1f}%'})"
+        mod, title = (BPm, "Botpredict") if name == BOTP else (PT, "Pro Trader")
+        if pct is not None and pct >= mod.TARGET_PCT - mod.FEE_PCT:
+            return f"{title} target: {pct:+.1f}% (plan {mod.TARGET_PCT:+.0f}%)"
+        if pct is not None and pct <= mod.STOP_PCT - mod.FEE_PCT:
+            return f"{title} stop: {pct:+.1f}% (plan {mod.STOP_PCT:+.0f}% + fees)"
+        if held >= mod.TIME_STOP_S:
+            return f"{title} time stop {mod.TIME_STOP_S:.0f}s ({'n/a' if pct is None else f'{pct:+.1f}%'})"
         return ""
 
     def _pro_mark(self, pos) -> None:
@@ -1839,9 +1842,10 @@ class Mayhem2:
                             and mint not in self.exiting:
                         self.pro_buy_px = (mint, read["px"])
                         out = self._try_buy(pin, time.time())
+                        plan = BP if name == BOTP else PT
                         self.note("buy" if ("sent" in out or "DRY" in out) else "info",
-                                  f"{sym} — {title} BUY call ({why}) → {out}. Plan: target {PT.TARGET_PCT:+.0f}%, "
-                                  f"stop {PT.STOP_PCT:+.0f}%, {PT.TIME_STOP_S:.0f}s max.", mint)
+                                  f"{sym} — {title} BUY call ({why}) → {out}. Plan: target {plan.TARGET_PCT:+.0f}%, "
+                                  f"stop {plan.STOP_PCT:+.0f}%, {plan.TIME_STOP_S:.0f}s max.", mint)
             except Exception:
                 log.debug("mayhem2 pro loop failed", exc_info=True)
 

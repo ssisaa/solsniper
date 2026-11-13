@@ -97,8 +97,10 @@ as `pro`; the Mayhem2 chart draws EMA/VWAP lines, volume, an RSI pane, target/st
 
 **Botpredict (2026-11-13)**: `src/signal/botpredict.py`, Mayhem2 strategy `botpredict` — the bot's own learned
 model (logistic, 22 chart features, weights embedded in `MODEL`) for "price hits +25 % before −5 % within 60 s";
-buys only its top 2 % moments (`thr` ≈ 15 % vs 4.7 % normal); exits +25 % / −5 % / 60 s (shared with pro_trader via
-`CHART_STRATS`). Trained on 43 coins, tested on 52 later unseen coins: +1.3 %/trade (24 trades), +3.6 % entering
+buys only its top 2 % moments; exits +25 % / **−8 %** / 60 s (own plan in `_pro_exit(…, name)`; pro_trader keeps −5 %).
+**Stop widened to −8 % at the user's request (2026-11-14)** after a test on 76 fresh unseen coins showed every wider
+stop did worse (−5 % +4.3 %/trade, −8 % +3.5 %, −10 % +2.4 %, close-based −2.6 %); weights refit for −8 % on 171 coins
+(`thr` ≈ 21 %, normal 5.7 %). Earlier −5 % history: Trained on 43 coins, tested on 52 later unseen coins: +1.3 %/trade (24 trades), +3.6 % entering
 1 candle late; final fit on all 95 coins. Pro Trader's dip setup LOST on those unseen coins (−1.7 %/trade).
 Chart: gold "◆ BP chance" strip, ◆ BP replay tags, Botpredict row in the desk. Retrain = scripts in the session
 scratchpad (not in the repo): features in botpredict.py, label = target-before-stop in 60 s.

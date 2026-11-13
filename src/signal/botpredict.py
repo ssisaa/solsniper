@@ -1,16 +1,18 @@
 """Botpredict: the bot's own prediction for a meme coin's next minute, learned from data.
 
-What it predicts: the chance that, buying at this 1s candle's close, the price reaches +25% before it falls 5%,
+What it predicts: the chance that, buying at this 1s candle's close, the price reaches +25% before it falls 8%,
 within 60 seconds. A logistic model on 22 chart features (returns over 1-30 candles, distance to VWAP / EMA 9 /
 EMA 21, RSI, volume surge, distance from the 30s high / low, candle body and wicks, red / green streaks,
-volatility, share of volume on green candles).
+volatility, share of volume on green candles). It buys only its top 2% most confident moments.
 
-How it was made (2026-11-13): trained on 43 pump coins, then tested on 52 different coins recorded later
-(never seen in training). Buying only the model's top 2% most confident moments: training coins +1.8% per
-trade, unseen coins +1.3% per trade (24 trades), and +3.6% per trade on the unseen coins even when entering one
-candle late; ~30-40% of trades win, the target is 5x the stop. Final weights are fit on all 95 coins
-(19,604 moments, 4.7% of them hit +25% first). Small samples: an edge, not a promise.
-For comparison, the Pro Trader dip setup lost on the same unseen coins (-1.7% per trade).
+History (2026-11-13/14):
+- First built with a -5% stop: trained on 43 coins, +1.3%/trade on 52 later unseen coins; then on 76 more fresh
+  unseen coins +4.3%/trade (197 trades, 39% won), +2.3% entering one candle late.
+- The user asked for a wider stop so 1s wiggles do not hit it. Tested (retrained per stop, same 76 unseen coins):
+  -8% +3.5% (late +1.6%), -10% +2.4%, -12% +1.8%, -15% +1.2%, -20% +1.5%, 3x ATR +1.7%, close-below-stop -2.6%.
+  Every wider stop did worse: a -5% dip right after the entry usually is the turn, not a wiggle. The user chose to
+  widen anyway; -8% is the least costly wider stop. Weights below are fit for -8% on all 171 coins
+  (36,847 moments, 5.7% of them hit +25% first). Small samples: an edge, not a promise.
 
 Pure math, no I/O: the engine, the page and the tests all see the same prediction.
 """
@@ -19,18 +21,18 @@ import math
 from typing import Any, Dict, List, Optional
 
 TARGET_PCT = 25.0
-STOP_PCT = -5.0
+STOP_PCT = -8.0       # widened from -5% at the user's request (2026-11-14); -5% tested better, see the docstring
 TIME_STOP_S = 60.0
 FEE_PCT = 2.0
 MIN_CANDLES = 31
 
 MODEL = {
-    "mu": [-0.000869, -0.002429, -0.00381, -0.006905, -0.014198, -0.060685, -0.005816, -0.013449, -0.007633, 0.488149, 0.683688, 0.515303, -0.134789, 0.132653, -0.000869, 0.019383, 0.024917, 0.180898, 0.195436, 0.023656, 0.267441, 0.479988],
-    "sd": [0.051584, 0.091384, 0.116942, 0.15739, 0.283716, 0.358341, 0.071436, 0.132059, 0.075634, 0.174418, 0.485934, 0.499766, 0.241597, 0.208043, 0.051584, 0.098918, 0.115353, 0.257835, 0.267922, 0.036494, 0.324335, 0.289616],
-    "w": [-0.016727, 0.006342, -0.105316, -0.182635, 0.098756, 0.213225, 0.132238, 0.037152, -0.060029, 0.130844, -0.047482, 0.0134, -0.16254, 0.053702, -0.016727, 0.116854, 0.120712, 0.057636, 0.162397, 0.192244, 0.155523, -0.155123],
-    "b": -3.166801,
-    "thr": 0.145906,      # top 2% of the model's scores
-    "base": 0.0474,      # how often +25% came first at a random moment
+    "mu": [-0.000409, -0.00108, -0.001499, -0.002374, -0.002361, -0.043009, -0.004615, -0.009977, -0.005361, 0.489627, 0.684204, 0.509974, -0.141108, 0.148682, -0.000409, 0.018815, 0.023297, 0.186003, 0.193996, 0.025102, 0.289791, 0.481307],
+    "sd": [0.056367, 0.099685, 0.127808, 0.179045, 0.310874, 0.331385, 0.079871, 0.137293, 0.073247, 0.176144, 0.485411, 0.499901, 0.234437, 0.243424, 0.056367, 0.097099, 0.110887, 0.263133, 0.266176, 0.036871, 0.337098, 0.29111],
+    "w": [-0.007438, -0.046834, -0.092237, -0.199649, -0.011041, 0.105814, 0.178685, 0.100518, -0.006434, 0.058437, 0.015501, -0.003084, -0.102818, 0.092764, -0.007438, 0.121897, 0.125249, 0.001148, 0.106625, 0.288984, 0.138492, -0.086985],
+    "b": -2.982798,
+    "thr": 0.2061,      # top 2% of the model's scores
+    "base": 0.057,      # how often +25% came first at a random moment
 }
 
 LABELS = {

@@ -4550,7 +4550,7 @@ function bpHtml(bp){
   if(!bp.ok) return `<div class="dk-bp"><span class="nm">◆ BOTPREDICT</span><span>${escapeHtml(bp.why||'')}</span></div>`;
   const pc=v=>v==null?'—':((v>0?'+':'')+Number(v).toFixed(1)+'%'), p=Number(bp.prob||0), thr=Number(bp.thr||0.15), full=Math.max(thr*2,p*1.1,0.01);
   const rp=bp.replay||{};
-  return `<div class="dk-bp" title="Botpredict: the bot's own model, learned from 95 pump coins. It predicts the chance that the price hits +${bp.targetPct}% before ${bp.stopPct}% within ${bp.timeStopS}s from here, and buys only its top 2% most confident moments (≥ ${(thr*100).toFixed(0)}%). Strategy botpredict trades it.">
+  return `<div class="dk-bp" title="Botpredict: the bot's own model, learned from 171 pump coins. It predicts the chance that the price hits +${bp.targetPct}% before ${bp.stopPct}% within ${bp.timeStopS}s from here, and buys only its top 2% most confident moments (≥ ${(thr*100).toFixed(0)}%). Strategy botpredict trades it.">
     <span class="nm">◆ BOTPREDICT</span><span class="cl ${escapeHtml(bp.call)}">${escapeHtml(bp.call)}</span>
     <span>chance of +${bp.targetPct}% first <b>${(p*100).toFixed(1)}%</b></span>
     <span class="dk-bpbar"><i style="width:${Math.min(100,p/full*100)}%"></i><s style="left:${Math.min(100,thr/full*100)}%"></s></span>

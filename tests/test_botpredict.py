@@ -54,8 +54,23 @@ def test_strategy_listed_and_shares_exits():
     c = RuntimeConfig()
     c.update_from({"mayhem2_strategy": "botpredict"})
     assert c.mayhem2_strategy == "botpredict" and "botpredict" in M.SHADOWS
-    assert BP.TARGET_PCT == 25.0 and BP.STOP_PCT == -5.0 and BP.TIME_STOP_S == 60.0
+    assert BP.TARGET_PCT == 25.0 and BP.STOP_PCT == -8.0 and BP.TIME_STOP_S == 60.0
     assert "botpredict" in M.CHART_STRATS
+
+
+def test_botpredict_stop_is_wider_than_pro_trader():
+    # -7.5% real value: a Pro Trader stop (-5% - 2% fees) but not a Botpredict one (-8% - 2% fees)
+    assert M.Mayhem2._pro_exit(-7.5, 5, "pro_trader").startswith("Pro Trader stop")
+    assert M.Mayhem2._pro_exit(-7.5, 5, "botpredict") == ""
+    assert M.Mayhem2._pro_exit(-10.5, 5, "botpredict").startswith("Botpredict stop")
+    assert M.Mayhem2._pro_exit(23.5, 5, "botpredict").startswith("Botpredict target")
+
+
+def test_wick_of_six_percent_does_not_stop_botpredict():
+    cs = _chart()
+    entry = cs[-1]["c"] / 0.94           # the last candle sits 6% under the entry
+    a = BP.analyze(cs, holding={"entry": entry, "held": 5})
+    assert a["call"] == "HOLD" and a["stopPct"] == -8.0
 
 
 def test_holding_context_for_botpredict(monkeypatch):
