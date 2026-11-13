@@ -590,8 +590,12 @@ class CallerStream:
         if kind not in ("buy", "sell"):
             return
         if self._raw_listeners:
+            # trade_px: this trade's own SOL / tokens, even before PumpPortal is matched to the chain for the
+            # coin. Candles use it (only ratios matter); a graduated coin was never matched, so its 1s
+            # candles got no trade at all and the feed sat STALE / FALLBACK.
+            trade_px = (sol / tokens) if (sol > 0 and tokens > 0) else 0.0
             raw = {"kind": kind, "mint": mint, "wallet": trader, "sol": sol, "tokens": tokens,
-                   "price_sol": price, "ts": now, "signature": sig}
+                   "price_sol": price, "trade_px": trade_px, "src": src, "ts": now, "signature": sig}
             for fn in list(self._raw_listeners):
                 try:
                     fn(raw)

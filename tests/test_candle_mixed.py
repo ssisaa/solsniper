@@ -68,3 +68,14 @@ def test_config_accepts_mixed():
     from src.signal import candle_core as C
     assert "mixed" in C._CHOICES["auto_follow"]
     assert C.Config().mixed_idle_s == 60.0
+
+
+def test_stream_candles_use_trade_price_when_price_sol_is_zero():
+    import asyncio
+    st = CM.StreamProvider()
+    st.wanted = {"G"}
+    base = int(time.time()) - 5
+    for dt, px in ((0, 1e-7), (1, 1.2e-7), (2, 0.9e-7)):
+        st.on_trade({"mint": "G", "price_sol": 0.0, "trade_px": px, "ts": base + dt, "sol": 0.01})
+    rows = asyncio.run(st.fetch("G", None))
+    assert [round(r.close * 1e8) for r in rows] == [10, 12, 9]

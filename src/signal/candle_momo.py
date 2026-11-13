@@ -87,7 +87,11 @@ class StreamProvider(CandleProvider):
         mint = str(ev.get("mint") or "")
         if mint not in self.wanted:
             return
-        px = float(ev.get("price_sol") or 0)
+        # The trade's own price (SOL / tokens) from whichever source sent it first (PumpPortal or chain logs);
+        # price_sol stays 0 for PumpPortal until it is matched to the chain, which never happens for most
+        # graduated coins: their candles got no trades. Only ratios are used, so the small fee difference
+        # between the two sources does not matter.
+        px = float(ev.get("trade_px") or 0) or float(ev.get("price_sol") or 0)
         if px <= 0:
             return
         t = int(float(ev.get("ts") or time.time())) * 1000
