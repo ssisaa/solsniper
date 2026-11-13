@@ -2189,11 +2189,12 @@ def _stream_targets():
     except Exception:
         pass
     try:
-        # Candle trader's watched coins, so its stream-built fallback candles get every trade.
+        # Candle trader's watched coins (1-3) go FIRST: its 1s candles are built from these trades, and
+        # added last they fell past the 220-coin cap behind OpenHolds / CallOuts coins — the feed sat on
+        # STALE / FALLBACK while the coin traded every second.
         from src.signal.candle_momo import get_engine as _cm
-        for m in _cm().stream_mints():
-            if m and m not in mints:
-                mints.append(m)
+        cm_mints = [m for m in _cm().stream_mints() if m]
+        mints = cm_mints + [m for m in mints if m not in cm_mints]
     except Exception:
         pass
     # CallOuts coins too, so their PnL moves on every trade. Socket only (free); the paid-RPC

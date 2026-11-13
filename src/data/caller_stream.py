@@ -31,6 +31,7 @@ PUMP_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 _TRADE_EVENT = bytes.fromhex("bddb7fd34ee661ee")
 # A caller balance under this many tokens is a full exit (dust left by rounding).
 _DUST_TOKENS = 1.0
+_HEAD_MINTS = 3    # first coins of the targets list (Candles feeds) are never pushed out by caller opens
 _MAX_MINTS = 220   # PumpPortal socket (free): OpenHolds coins plus the CallOuts coins
 _MAX_WALLETS = 60
 _SUBS_PER_TICK = 4   # logsSubscribe requests per 0.5s on the RPC fallback
@@ -327,7 +328,10 @@ class CallerStream:
                 merged.setdefault(w, u)
             self._wallets = merged
             # Coins a caller just bought on the socket first, then the ranked OpenHolds coins.
-            wanted = [m for (_w, m) in self._opens.keys()]
+            # The targets list leads with the few coins that need every trade (Candles' feeds); then the coins
+            # a caller just bought on the socket, then the rest.
+            head = [str(m) for m in (mints or [])[:_HEAD_MINTS] if m]
+            wanted = head + [m for (_w, m) in self._opens.keys() if m not in head]
             wanted += [str(m) for m in (mints or []) if m and str(m) not in wanted]
             keep = set(wanted[:_MAX_MINTS])
             self._mints = keep
