@@ -4427,7 +4427,7 @@ function paintCandle(d){
     <span class="side ${s.side==='BUY'?'g':'r'}">${escapeHtml(s.side)}</span><span>${s.deltaPct>0?'+':''}${Number(s.deltaPct).toFixed(2)}%</span>
     <span class="muted">${escapeHtml(s.action||'')}${s.reason?' '+escapeHtml(s.reason):''} · lag ${s.feedLagMs}ms · ${escapeHtml(s.provider||'')}</span></li>`).join(''):'<li class="muted">No signal yet.</li>');
   cmSet('cmNotes', (d.notes||[]).map(n=>`<li class="${n.level==='bad'?'warn':escapeHtml(n.level)}"><span class="t">${m2Clock(n.ts)}</span><span class="m">${escapeHtml(n.msg)}</span></li>`).join('')||'<li class="muted">—</li>');
-  cmSet('cmTrades', (d.trades||[]).length?(d.trades||[]).map(t=>`<tr><td>${m2Clock(t.exit_ts)}</td><td>${t.mode==='live'?'<b class="r">LIVE</b>':'paper'}</td><td>${escapeHtml(t.symbol||'')}</td><td>${t.lots||1}</td><td>${(t.exit_ts-t.entry_ts).toFixed(1)}s</td>
+  cmSet('cmTrades', (d.trades||[]).length?(d.trades||[]).map(t=>`<tr><td>${m2Clock(t.exit_ts)}</td><td>${t.mode==='live'?'<b class="r">LIVE</b>':'paper'}</td><td>${t.mint?`<a href="https://pump.fun/coin/${encodeURIComponent(t.mint)}" target="_blank" rel="noopener" title="Open ${escapeHtml(t.mint)} on pump.fun">${escapeHtml(t.symbol||t.mint.slice(0,6))}</a>`:escapeHtml(t.symbol||'')}</td><td>${t.lots||1}</td><td>${(t.exit_ts-t.entry_ts).toFixed(1)}s</td>
     <td>${(t.entry_sol||0).toFixed(4)}</td><td>${(t.exit_sol||0).toFixed(5)}</td><td>${(t.costs_sol||0).toFixed(5)}</td>
     <td class="${m2Cls(t.pnl_sol)}">${cmSol(t.pnl_sol)}</td><td class="${m2Cls(t.pct)}">${m2Pct(t.pct)}</td><td>${escapeHtml(t.why||'')}${t.paused_exit?' <span class="w">paused</span>':''}</td></tr>`).join(''):'<tr><td colspan="11" class="muted">No closed trade yet.</td></tr>');
 }
