@@ -114,7 +114,7 @@ False, `supports()` False). OpenCopy / CallOuts / Launch still trade live by the
 trades keep being managed live.
 
 **pro_hold extra entries (2026-11-14, user's request)**: besides ◆ BP, pro_hold also buys (a) a NEW coin (board age
-≤ 60 s, `PRO_FIRST_MAX_AGE_S`) on its first candle (`pro_hold_first`, sig `first`: skips the SOL_OUTFLOW history check
+≤ 60 s, `PRO_FIRST_MAX_AGE_S`) on its first GREEN candle (a red first candle waits for the next green while ≤ 60 s) (`pro_hold_first`, sig `first`: skips the SOL_OUTFLOW history check
 and Min reserve; waits for the Mayhem check), and (b) the chart's green ▲ BUY (Pro Trader call, `pro_hold_pro_buy`).
 Switches on the Candles page ("pro_hold also buys"). Tests on unseen coins with pro_hold exits (15 %): BP 75 % won,
 median +21.6 %; first candle (3 s in) 58 %, +7.6 %; ▲ BUY 47 %, −0.6 % (−1.9 % w/o top 10 %) — data are Mayhem coins,
@@ -127,7 +127,7 @@ pro_hold adds on ◆ BP / ▲ BUY.
 Candles trade on a Mayhem coin (`MAYHEM_COIN` in `_entry_filters`; board `ms` or pump's mayhem-state, checked once per
 coin `_check_mayhem`); Mixed skips Mayhem rows. Reason: pump pauses Mayhem coins and a paused coin can't sell —
 pro_hold 18:06–23:57 on 2026-11-13: take-profit 32 trades +0.131 SOL, coin paused 27 trades −0.174, max hold 10 −0.070.
-The Mayhem board feed is exempt (its own "auto" picks are always traded, `_avoid_mayhem_for`). Trade stream: Candles' coins go first in the
+The Mayhem board feed and the MayhemMode source are exempt (all Mayhem coins by choice, `_avoid_mayhem_for`). Trade stream: Candles' coins go first in the
 220-coin subscription list (`_HEAD_MINTS`); stream candles use each trade's own price (`trade_px`). Graduated
 (PumpSwap) coins still get no stream trades (pump_rest only) — not solved.
 

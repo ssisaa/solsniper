@@ -531,3 +531,32 @@ def test_support_feed_gets_the_scan_tokens_age(monkeypatch):
     e._pick([])
     f = e.feeds[picks[0]["mint"]]
     assert f.age is not None and 6.0 <= f.age < 8.0     # young: the first-candle buy applies
+
+
+def test_pro_hold_first_buy_waits_for_the_first_green_candle(tmp_path, monkeypatch):
+    from src.signal import candle_core as C
+    e, f, routed = _ph_first_engine(tmp_path, monkeypatch, 4)
+    book = f.books["pump_rest"]
+    t = book.rows[-1].t
+    book.rows.clear()
+    book.merge([C.Candle(t=t, open=1.1, high=1.1, low=1.0, close=1.0, volume=3, final=True)])   # red
+    e._evaluate(f, time.time())
+    assert not routed and not getattr(f, "first_done", False)
+    book.merge([C.Candle(t=t + 1000, open=1.0, high=1.2, low=1.0, close=1.15, volume=3, final=True)])  # green
+    e._evaluate(f, time.time())
+    assert routed and routed[0]["first"] and "green" in routed[0]["pro_why"]
+
+
+def test_skip_mayhem_does_not_block_the_mayhemmode_source(monkeypatch):
+    from src.signal import candle_momo as CM
+    e = CM.CandleMomo()
+    e.cfg.avoid_mayhem = True
+    e.cfg.inflow_window_s = 0
+    e.cfg.max_below_peak_pct = 0
+    f = CM.Feed("MM", 10)
+    f.board_state = "active"
+    e.feeds["MM"] = f
+    monkeypatch.setattr(e, "support_source", lambda: "mayhem")
+    assert e._entry_filters("MM")[0] == ""
+    monkeypatch.setattr(e, "support_source", lambda: "opencopy")
+    assert e._entry_filters("MM")[0] == "MAYHEM_COIN"

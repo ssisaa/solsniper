@@ -1025,14 +1025,24 @@ class CandleMomo:
         if (cfg.rule == "pro_hold" and cfg.pro_hold_first and rows and not getattr(f, "first_done", False)
                 and f.mint not in self.positions
                 and not (self._avoid_mayhem_for(f) and self.mayhem_of.get(f.mint) is None and not f.board_state)):
-            # pro_hold: a NEW coin is bought on its first candle (user's choice 2026-11-14; on 74 unseen coins
-            # entering 3s in with pro_hold's exits: 58% won, median +7.6%). Coins older than 60s are not "new".
-            f.first_done = True
-            if f.age is not None and float(f.age) <= PRO_FIRST_MAX_AGE_S:
-                self._pro_emit(f, rows, "BUY", {"call": "BUY", "px": rows[-1].close,
-                                                "why": f"first candle of a new coin (age {float(f.age):.0f}s)"},
-                               seen, first=True)
-                return
+            # pro_hold: a NEW coin is bought on its first GREEN candle (user's choice 2026-11-14; first candle on
+            # 74 unseen coins, 3s in, with pro_hold's exits: 58% won, median +7.6%). A red first candle waits for
+            # the next green one while the coin is still "new" (60s or younger).
+            now = time.time()
+            if not hasattr(f, "first_t0"):
+                f.first_t0, f.first_age0 = now, f.age
+            age_now = None if f.first_age0 is None else float(f.first_age0) + (now - f.first_t0)
+            if age_now is None or age_now > PRO_FIRST_MAX_AGE_S:
+                f.first_done = True
+            elif rows[-1].t != getattr(f, "first_last_t", None):
+                f.first_last_t = rows[-1].t
+                c = rows[-1]
+                if c.close > c.open:
+                    f.first_done = True
+                    self._pro_emit(f, rows, "BUY", {"call": "BUY", "px": c.close,
+                                                    "why": f"first green candle of a new coin (age {age_now:.0f}s)"},
+                                   seen, first=True)
+                    return
         if len(rows) < 2:
             return
         if f.last_eval_t is None:
@@ -2363,6 +2373,8 @@ class CandleMomo:
         if (f is not None and f.origin == "auto" and self.follow() == "mayhem_board"
                 and not self.support_source()):
             return False
+        if self.support_source() == "mayhem":
+            return False          # MayhemMode only has Mayhem coins: choosing it means trading them (user 2026-11-14)
         return True
 
     def _check_mayhem(self, mint: str) -> None:
