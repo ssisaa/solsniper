@@ -113,7 +113,10 @@ scan token and feeds it (`dayscalp._candle_rule() == "pro_hold"` → no Dayscalp
 MayhemMode's young-open grab still buys through MayhemMode.
 Under pro_hold Candles watches **one coin at a time** (user's choice 2026-11-14, `PRO_HOLD_WATCH = 1`): Dayscalp's
 first scan token; while a trade is open no new coin is fed; once it completes the next scan token (Candles' traded
-coins are skipped). Its signals are rare (Botpredict's top 2 % moments), so expect quiet stretches. Backtest on 76 fresh coins: 45–50 % wins but −0.6 … −1.2 %
+coins are skipped). Its signals are rare (Botpredict's top 2 % moments), so expect quiet stretches.
+This holds for every AutoTrade-Candles source (`_one_feed`): one feed = the coin in trade (oldest; a paused coin
+does not count), else the source's next candidate. With MayhemMode as the source, pro_hold also owns entries
+(`pro_hold_owns_entries("mayhem")`): MayhemMode's auto-open does not buy and the young-open grab only feeds. Backtest on 76 fresh coins: 45–50 % wins but −0.6 … −1.2 %
 per trade (held losers lose more than winners make); rule `pro` did +1.8 % on the same coins. User chose to have it.
 
 **Botpredict (2026-11-13)**: `src/signal/botpredict.py`, Mayhem2 strategy `botpredict` — the bot's own learned

@@ -6167,6 +6167,17 @@ async def dayscalp_loop(
                         except Exception:
                             log.debug("paused block note failed", exc_info=True)
                         continue
+                if row.get("auto") and is_mayhem_user(user):
+                    try:
+                        from src.signal.candle_momo import get_engine as _cm_engine
+                        _owns = _cm_engine().pro_hold_owns_entries("mayhem")
+                    except Exception:
+                        _owns = False
+                    if _owns:
+                        # AutoTrade-Candles pro_hold: Candles buys this coin on Botpredict's BUY; MayhemMode only feeds it
+                        cooled[mint] = _time.time() + 120
+                        log.info("OPENHOLDS %s — Candles pro_hold buys on its BUY signal; MayhemMode does not buy.", symbol)
+                        continue
                 set_openhold_status(mint, "BUYING")
                 note_openhold_seen(user, mint)
                 if row.get("auto"):

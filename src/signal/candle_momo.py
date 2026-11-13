@@ -356,6 +356,29 @@ class CandleMomo:
             self.note("info", f"{rec['symbol']} — {src} bought it (lot 1). Candles adds lots and sells it by the {self.cfg.rule} "
                                          f"rule; {src}'s own rule sells only while the trade is in profit — in a loss Candles' rule takes over.", p.mint)
 
+    def pro_hold_owns_entries(self, src: str) -> bool:
+        """pro_hold with AutoTrade-Candles on this source: Candles buys (on Botpredict's BUY); the source only feeds."""
+        return self.cfg.rule == "pro_hold" and self.support_source() == src
+
+    def _one_feed(self, want: Dict[str, str]) -> Dict[str, str]:
+        """pro_hold: one coin at a time. The coin in trade (Candles' own or the source's, oldest first; a coin pump
+        paused cannot sell and does not count), else the source's next candidate."""
+        try:
+            from src.observability.dashboard import mayhem_state_of
+        except Exception:
+            mayhem_state_of = lambda _m: ""
+        held = [m for m in sorted(self.positions, key=lambda k: float(self.positions[k].get("entry_ts") or 0))
+                if mayhem_state_of(m) != "paused"]
+        if held:
+            return {held[0]: want.get(held[0], "held")}
+        for m, origin in want.items():
+            if origin in ("scan", "mayhem-new", "mayhem-watch"):
+                return {m: origin}
+        for m, origin in want.items():
+            if mayhem_state_of(m) != "paused":
+                return {m: origin}
+        return {}
+
     def _mayhem_grab(self) -> List[str]:
         """AutoTrade-Candles for MayhemMode: Mayhem_Mode's youngest open (< 30s old) goes to the feeds at
         once, and MayhemMode buys it (lot 1, pinned and held like a MayhemMode buy) — no waiting for
@@ -381,6 +404,13 @@ class CandleMomo:
         # so the next young coin can still be bought.
         held = len([m for m, r in self.positions.items()
                     if r.get("support") == "mayhem" and mayhem_state_of(m) != "paused"]) + len(grab)
+        if self.cfg.rule == "pro_hold":
+            # pro_hold buys on Botpredict's BUY itself: the youngest open is only watched, and only while flat
+            if held or self.positions:
+                return []
+            young = [str(r.get("coinMint") or "") for r in mayhem_young_opens(MAYHEM_MAX_OPEN_AGE_S)]
+            young = [m for m in young if m and m not in self.traded and m not in self.unusable]
+            return young[:1]
         if held >= max(1, int(self.cfg.max_mints)) or self.cfg.kill or self.cfg.entries_paused:
             return list(grab)
         if not bool(getattr(cfg_now, "trade_enabled", False)):
@@ -503,6 +533,8 @@ class CandleMomo:
                             self._grab.setdefault(pk["mint"], {"at": time.time(), "symbol": pk.get("symbol") or ""})
                 except Exception:
                     pass
+            if cfg.rule == "pro_hold":
+                want = self._one_feed(want)
             for m, origin in want.items():
                 if m not in self.feeds:
                     f = Feed(m, cfg.count)
@@ -510,7 +542,8 @@ class CandleMomo:
                     f.symbol = ((self.positions.get(m) or {}).get("symbol") or (self._grab.get(m) or {}).get("symbol")
                                 or m[:6])
                     self.feeds[m] = f
-                    what = {"mayhem-new": "Mayhem_Mode just opened it — buying",
+                    what = {"mayhem-new": ("Mayhem_Mode just opened it — pro_hold buys it on Botpredict's BUY (◆ BP)"
+                                           if cfg.rule == "pro_hold" else "Mayhem_Mode just opened it — buying"),
                             "scan": ("Dayscalp's top pick on Decoded Tokens — pro_hold buys it on Botpredict's BUY (◆ BP)"
                                      if cfg.rule == "pro_hold" else
                                      "Dayscalp's top pick on Decoded Tokens — bought as lot 1 when Auto Trade is on")}

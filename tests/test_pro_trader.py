@@ -308,7 +308,7 @@ def test_pro_hold_watches_the_scan_tokens_it_is_given(monkeypatch):
     monkeypatch.setitem(DS.LAST_CANDLE_PICK, "mint", picks[0]["mint"])
     monkeypatch.setitem(DS.LAST_CANDLE_PICK, "ts", now)
     e._pick([])
-    assert set(e.feeds) == {p["mint"] for p in picks}
+    assert set(e.feeds) == {picks[0]["mint"]}     # pro_hold: one coin at a time
     e.cfg.rule = "inverse"                       # other rules: only the single top pick
     e.feeds.clear()
     e._pick([])
@@ -359,3 +359,25 @@ def test_pro_hold_one_coin_at_a_time(monkeypatch):
     e.positions.clear()
     e._pick([])
     assert set(e.feeds) == {nxt["mint"]}          # trade complete: the next scan token
+
+
+def test_pro_hold_one_feed_with_mayhem_source(monkeypatch):
+    from src.signal import candle_momo as CM
+    import src.observability.dashboard as DB
+    e = CM.CandleMomo()
+    e.cfg.rule = "pro_hold"
+    monkeypatch.setattr(e, "support_source", lambda: "mayhem")
+    monkeypatch.setattr(e, "_support_sync", lambda src: None)
+    monkeypatch.setattr(e, "_support_held", lambda src: [])
+    a, b, c = ("A" + "x" * 43), ("B" + "x" * 43), ("C" + "x" * 43)
+    e.positions[a] = {"mint": a, "entry_ts": 100.0, "lots": [{"n": 1}], "support": "mayhem"}
+    e.positions[b] = {"mint": b, "entry_ts": 200.0, "lots": [{"n": 1}], "support": "mayhem"}
+    monkeypatch.setattr(DB, "mayhem_state_of", lambda m: "paused" if m == a else "active")
+    monkeypatch.setattr(DB, "mayhem_young_opens", lambda age: [{"coinMint": c, "age": 3}])
+    e._pick([])
+    assert set(e.feeds) == {b}                   # one feed: the tradable held coin (a is paused)
+    e.positions.clear()
+    e.feeds.clear()
+    e._pick([])
+    assert set(e.feeds) == {c}                   # flat: the youngest Mayhem_Mode open, watched (not bought)
+    assert e.pro_hold_owns_entries("mayhem") and not e.pro_hold_owns_entries("dayscalp")
