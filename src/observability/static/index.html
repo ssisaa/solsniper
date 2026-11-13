@@ -691,6 +691,7 @@ header .clear-btn,header .restart-btn,header .auto-btn,header .stop-btn,header .
 button.lite{display:inline-block;vertical-align:middle;margin-left:8px}
 button.lite{width:auto;margin:0;padding:5px 10px;background:transparent;color:#c5d2e2;border:1px solid rgba(142,160,184,.45);border-radius:999px;font-size:11px;font-weight:600;letter-spacing:.04em}
 button.lite:hover{color:#fff;border-color:#eef3fb}
+.cm-sending{opacity:.55;pointer-events:none}
 </style>
 </head>
 <body>
@@ -1248,8 +1249,8 @@ button.lite:hover{color:#fff;border-color:#eef3fb}
           <div class="cm-cbar">
             <div class="cm-ctitle"><h3>1s chart</h3><select id="cmChartSel" title="Coin"></select><a id="cmChartLink" target="_blank" rel="noopener" title="Open on pump.fun">↗</a></div>
             <div class="cm-cact">
-              <button type="button" class="cm-act buy" id="cmEntryBtn" title="Buy now: opens a trade, or adds one lot to the open one">+ Entry</button>
-              <button type="button" class="cm-act sell" id="cmExitBtn" title="Sell every lot now, at any price">Exit all</button>
+              <button type="button" class="cm-act buy" id="cmEntryBtn" title="Buy now, one click, no popup: opens a trade, or adds one lot to the open one (paper or LIVE as the Candles mode)">+ Entry</button>
+              <button type="button" class="cm-act sell" id="cmExitBtn" title="Sell every lot now, one click, no popup, at any price">Exit all</button>
               <button type="button" class="cm-icon" id="cmChartExp" title="Expand (F)" aria-label="Expand chart">⤢</button>
             </div>
           </div>
@@ -5009,18 +5010,28 @@ function cmMaxHold(p, maxS){
 function cmHeld(sec){ sec=Math.max(0,Math.round(sec)); return sec<120?sec+'s':(sec<7200?Math.floor(sec/60)+'m '+(sec%60)+'s':Math.floor(sec/3600)+'h '+Math.floor(sec%3600/60)+'m'); }
 function cmCfgLadder(){ return !!(_cmChart.cfg&&_cmChart.cfg.rule==='inverse'&&_cmChart.cfg.ladder_enabled); }
 function cfgLadderOn(){ return _cmChart.cfg?cmCfgLadder():true; }
+const _cmManualBusy={};
 async function cmManual(action){
   const mint=_cmChart.mint; if(!mint) return;
   const held=(_cmChart.positions||[]).find(p=>p.mint===mint), live=held?held.mode==='live':_cmChart.live;
   const sym=((cmChartCoins().find(c=>c.mint===mint))||{}).symbol||mint.slice(0,6);
-  const what=action==='entry'?(held?`add one lot to ${sym}`:`open a trade on ${sym}`):`sell ALL lots of ${sym} now, at any price`;
-  if(!confirm((live?'LIVE — real SOL.\n\n':'Paper.\n\n')+'Manually '+what+'?')) return;
+  // One click = order sent at once (no popup), paper or live. A second click on the same button while the first
+  // request is in flight is ignored (no double buy / double sell).
+  if(_cmManualBusy[action]) return;
+  _cmManualBusy[action]=true;
+  const btn=document.getElementById(action==='entry'?'cmEntryBtn':'cmExitBtn'), t0=performance.now();
+  if(btn) btn.classList.add('cm-sending');
+  const tag=(live?'LIVE':'paper')+' · '+escapeHtml(sym);
+  cmSet('cmMsg', `<span class="muted">${action==='entry'?'Entry':'Exit'} ${tag} — sending…</span>`);
   try{
     const r=await fetch('/api/candle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,mint})});
-    const d=await r.json();
-    cmSet('cmMsg', d.ok?`<span class="g">${action==='entry'?'Entry':'Exit'} sent.</span>`:`<span class="r">${escapeHtml(d.error||'refused')}</span>`);
+    const d=await r.json(), ms=Math.round(performance.now()-t0);
+    cmSet('cmMsg', d.ok?`<span class="g">${action==='entry'?'Entry':'Exit'} ${tag} sent (${ms} ms).</span>`:`<span class="r">${escapeHtml(d.error||'refused')}</span>`);
   }catch(e){ cmSet('cmMsg','<span class="r">Could not reach the bot.</span>'); }
-  setTimeout(()=>{ loadCandle(); cmLoadChart(); }, 900);
+  finally{ _cmManualBusy[action]=false; if(btn) btn.classList.remove('cm-sending'); }
+  loadCandle(); cmLoadChart();
+  setTimeout(()=>{ loadCandle(); cmLoadChart(); }, 700);
+  setTimeout(()=>{ loadCandle(); cmLoadChart(); }, 2000);
 }
 (function(){
   const cv=document.getElementById('cmChart'); if(!cv) return;
