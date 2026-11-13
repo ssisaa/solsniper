@@ -10,7 +10,7 @@ FORCE=0
 [ "${1:-}" = "--force" ] && { FORCE=1; shift; }
 LOG="${1:-$BOT_LOG}"
 # Never restart mid-trade: wait up to 5 min for every open trade to close (a restart once left one unmanaged).
-if [ -n "$(open_trades "$LOG")" ]; then
+if ! flat_now "$LOG"; then
   echo "a trade is open: $(open_trades "$LOG") — waiting up to 5 min for it to close"
   if ! wait_flat "$LOG" 300 && [ "$FORCE" != "1" ]; then
     echo "NOT restarted: still open: $(open_trades "$LOG"). Try again later, or --force to restart anyway."
@@ -18,6 +18,11 @@ if [ -n "$(open_trades "$LOG")" ]; then
   fi
 fi
 waited=$(wait_not_sending "$LOG")
+# a buy may have opened a trade while we waited: check again right before the kill
+if [ "$FORCE" != "1" ] && ! flat_now "$LOG"; then
+  echo "NOT restarted: a trade opened meanwhile: $(open_trades "$LOG"). Try again later."
+  exit 2
+fi
 rm -f "$BOT_STOP"
 P=$(bot_pids)
 [ -n "$P" ] && kill -9 $P

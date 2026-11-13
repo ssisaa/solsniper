@@ -5,7 +5,7 @@ set -u
 cd /home/user/sol-sniper || exit 1
 . scripts/bot_lib.sh
 waited=$(wait_not_sending)
-if [ "${1:-}" != "--force" ] && [ -n "$(open_trades)" ]; then
+if [ "${1:-}" != "--force" ] && ! flat_now; then
   echo "NOT stopped: a trade is open: $(open_trades). Use --force to stop anyway."
   exit 2
 fi

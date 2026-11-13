@@ -37,11 +37,20 @@ open_trades() {
   echo "$last" | sed 's/.*open_mints now //'
 }
 
+# The open list can be empty for a moment while the bot re-reads the wallet (2026-11-14 15:34:30: a timed-out
+# wallet read dropped GK2Hd4 for ~1s, and a restart went through mid-trade). Flat = empty on two reads 3s apart.
+flat_now() {
+  local log="${1:-$BOT_LOG}"
+  [ -n "$(open_trades "$log")" ] && return 1
+  sleep 3
+  [ -z "$(open_trades "$log")" ]
+}
+
 # Wait (up to $2 seconds, default 300) until no trade is open. Returns 1 if one still is.
 wait_flat() {
   local log="${1:-$BOT_LOG}" limit="${2:-300}" i
   for i in $(seq 1 "$limit"); do
-    [ -z "$(open_trades "$log")" ] && return 0
+    flat_now "$log" && return 0
     sleep 1
   done
   return 1
