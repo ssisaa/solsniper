@@ -90,6 +90,14 @@ youngest first, pump mints only, New < 3 min; a coin stays while held, else unti
 `mixed_idle_s` (60 s) with no trade, then the next board's youngest (a handed-over coin is skipped 5 min). Max mints
 slots (pro_hold: one). Paper / LIVE follow Candles' Live switch. Graduated coins are valued by Jupiter.
 
+**AutoTrade-Candles in Paper (2026-11-14, user's request)**: the Candles Live/Paper button works with AutoTrade-Candles
+on (turning AutoTrade-Candles on still sets Live). In PAPER (`paper_support()`): Candles owns entries for every source
+(`pro_hold_owns_entries` is true) — Dayscalp only feeds its scan token, MayhemMode's grab and auto-open only watch; the
+source's lot 1 is played as a paper buy at once (`_paper_lot1`, sig `mirror`, rules other than pro_hold; pro_hold buys
+on its signals, Auto Trade not needed); live source trades are not taken over (`_support_sync` returns, `_candle_support`
+False, `supports()` False). OpenCopy / CallOuts / Launch still trade live by their own Auto Trade. Live existing support
+trades keep being managed live.
+
 **pro_hold extra entries (2026-11-14, user's request)**: besides ◆ BP, pro_hold also buys (a) a NEW coin (board age
 ≤ 60 s, `PRO_FIRST_MAX_AGE_S`) on its first candle (`pro_hold_first`, sig `first`: skips the SOL_OUTFLOW history check
 and Min reserve; waits for the Mayhem check), and (b) the chart's green ▲ BUY (Pro Trader call, `pro_hold_pro_buy`).

@@ -854,7 +854,12 @@ async def select_top1_dayscalp(cfg: Optional[DayScalpConfig] = None) -> Optional
             except Exception:
                 skip = set()
             now_t = time.time()
-            pro_hold = _candle_rule() == "pro_hold"
+            try:
+                from src.signal.candle_momo import get_engine as _cme
+                # pro_hold, or Candles in PAPER: Dayscalp only picks and feeds; Candles buys (paper or on its signal)
+                pro_hold = _cme().pro_hold_owns_entries("dayscalp")
+            except Exception:
+                pro_hold = _candle_rule() == "pro_hold"
             watch: List[Dict[str, Any]] = []
             for row in pool:
                 mint = str(row.get("mint") or "")

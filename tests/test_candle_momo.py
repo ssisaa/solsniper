@@ -1065,6 +1065,7 @@ def test_last_lot_shrinks_to_fit_total_cap():
 def test_support_turns_off_source_exits_and_revert_restores():
     from src.signal.candle_momo import CandleMomo
     e = CandleMomo()
+    e.cfg.mode = "live"                  # AutoTrade-Candles live (Paper is tested in test_candle_paper_support.py)
     p = _types.SimpleNamespace(mint="M", status="OPEN", source="opencopy", strategy="opencopy", tokens=1.0,
                                entry_sol=0.005, entry_time=time.time(), fees_sol=0.0, symbol="S")
     e.manager = _types.SimpleNamespace(positions={"1": p})
@@ -1099,6 +1100,7 @@ def test_source_sell_gate_profit_only(monkeypatch):
 def test_guard_covers_coin_before_adoption():
     from src.signal.candle_momo import CandleMomo
     e = CandleMomo()
+    e.cfg.mode = "live"                  # AutoTrade-Candles live (Paper is tested in test_candle_paper_support.py)
     e.support_source = lambda: "opencopy"
     fresh = _types.SimpleNamespace(mint="M", source="opencopy", strategy="opencopy")   # bought 1s ago, not adopted
     other = _types.SimpleNamespace(mint="N", source="mayhem2", strategy="mayhem2")
@@ -1111,6 +1113,7 @@ def test_launch_is_a_support_source(monkeypatch):
     import src.config.runtime as rt
     from src.signal.candle_momo import CandleMomo
     e = CandleMomo()
+    e.cfg.mode = "live"                  # AutoTrade-Candles live (Paper is tested in test_candle_paper_support.py)
     e.cfg.support_enabled = True
     monkeypatch.setattr(rt, "get_config", lambda: _types.SimpleNamespace(filter_mode="launch"))
     assert e.support_source() == "launch"
@@ -1167,6 +1170,7 @@ def test_mayhem_support_takes_only_young_opens(monkeypatch):
     import src.config.runtime as rt
     from src.signal.candle_momo import CandleMomo
     e = CandleMomo()
+    e.cfg.mode = "live"                  # AutoTrade-Candles live (Paper is tested in test_candle_paper_support.py)
     e.cfg.support_enabled = True
     monkeypatch.setattr(rt, "get_config", lambda: _types.SimpleNamespace(filter_mode="mayhem"))
     young = _types.SimpleNamespace(mint="Y", status="OPEN", source="mayhem", strategy="mayhem", _open_age=12.0,
@@ -1187,6 +1191,7 @@ def test_dayscalp_is_a_support_source(monkeypatch):
     import src.config.runtime as rt
     from src.signal.candle_momo import CandleMomo
     e = CandleMomo()
+    e.cfg.mode = "live"                  # AutoTrade-Candles live (Paper is tested in test_candle_paper_support.py)
     e.cfg.support_enabled = True
     monkeypatch.setattr(rt, "get_config", lambda: _types.SimpleNamespace(filter_mode="dayscalp"))
     assert e.support_source() == "dayscalp"
@@ -1200,6 +1205,7 @@ def test_mayhem_grab_feeds_and_buys_youngest(monkeypatch):
     import src.observability.dashboard as D
     from src.signal.candle_momo import CandleMomo
     e = CandleMomo()
+    e.cfg.mode = "live"                  # AutoTrade-Candles live (Paper is tested in test_candle_paper_support.py)
     e.store = None
     e.cfg.support_enabled = True
     e.manager = _types.SimpleNamespace(positions={})
@@ -1267,6 +1273,7 @@ def test_dayscalp_pick_is_fed_even_without_buy(monkeypatch):
     import src.signal.dayscalp as DS
     from src.signal.candle_momo import CandleMomo
     e = CandleMomo()
+    e.cfg.mode = "live"                  # AutoTrade-Candles live (Paper is tested in test_candle_paper_support.py)
     e.store = None
     e.cfg.support_enabled = True
     e.manager = _types.SimpleNamespace(positions={})

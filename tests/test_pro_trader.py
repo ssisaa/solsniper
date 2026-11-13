@@ -348,6 +348,7 @@ def test_pro_hold_watches_the_scan_tokens_it_is_given(monkeypatch):
     from src.signal import candle_momo as CM
     from src.signal import dayscalp as DS
     e = CM.CandleMomo()
+    e.cfg.mode = "live"
     e.cfg.rule = "pro_hold"
     monkeypatch.setattr(e, "support_source", lambda: "dayscalp")
     monkeypatch.setattr(e, "_support_sync", lambda src: None)
@@ -517,6 +518,7 @@ def test_support_feed_gets_the_scan_tokens_age(monkeypatch):
     from src.signal import candle_momo as CM
     from src.signal import dayscalp as DS
     e = CM.CandleMomo()
+    e.cfg.mode = "live"
     e.cfg.rule = "pro_hold"
     monkeypatch.setattr(e, "support_source", lambda: "dayscalp")
     monkeypatch.setattr(e, "_support_sync", lambda src: None)

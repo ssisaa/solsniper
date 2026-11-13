@@ -4395,11 +4395,11 @@ function paintCandle(d){
     const n=(d.positions||[]).filter(p=>p.support).length;
     const NMS={launch:'Launch', mayhem:'MayhemMode', dayscalp:'Dayscalp'}, nm=NMS[d.support]||(d.support||''), nmU=NMS[d.support]||(d.support||'').toUpperCase();
     cmSet('cmSupTxt', d.support
-      ? `<b>AutoTrade-Candles · supporting ${escapeHtml(nmU)}</b> (LIVE) — feeds are ${escapeHtml(nm)}'s held coins${d.support==='mayhem'?' (1st token — youngest: Mayhem_Mode\'s open must be &lt;30s old when bought)':(d.support==='dayscalp'?' (the first scan token on Decoded Tokens — bought at once as lot 1)':'')} (${n} now). ${escapeHtml(nm)} buys lot 1 and keeps its own rules; Candles adds ladder lots and sells by the <b>${escapeHtml(c.rule)}</b> rule (green ≥ ${c.min_profit_pct}%). ${escapeHtml(nm)}'s own rule sells while the trade is <b>in profit</b>; in a loss Candles' <b>${escapeHtml(c.rule)}</b> rule takes over and keeps the coin until a green in profit. Candles opens no trades of its own.`
+      ? (c.mode!=='live' ? `<b>AutoTrade-Candles · testing ${escapeHtml(nmU)} on PAPER</b> — feeds are ${escapeHtml(nm)}'s coins (${n} now). Candles plays ${escapeHtml(nm)}'s lot 1 as a paper buy${c.rule==='pro_hold'?' (pro_hold: on its own signals)':''} and adds lots / sells by the <b>${escapeHtml(c.rule)}</b> rule on paper. No live buys are started from Candles, and ${escapeHtml(nm)}'s own live trades are not taken over (its own Auto Trade still applies). Click <b>Live</b> to go back to real trades.` : `<b>AutoTrade-Candles · supporting ${escapeHtml(nmU)}</b> (LIVE) — feeds are ${escapeHtml(nm)}'s held coins${d.support==='mayhem'?' (1st token — youngest: Mayhem_Mode\'s open must be &lt;30s old when bought)':(d.support==='dayscalp'?' (the first scan token on Decoded Tokens — bought at once as lot 1)':'')} (${n} now). ${escapeHtml(nm)} buys lot 1 and keeps its own rules; Candles adds ladder lots and sells by the <b>${escapeHtml(c.rule)}</b> rule (green ≥ ${c.min_profit_pct}%). ${escapeHtml(nm)}'s own rule sells while the trade is <b>in profit</b>; in a loss Candles' <b>${escapeHtml(c.rule)}</b> rule takes over and keeps the coin until a green in profit. Candles opens no trades of its own.`)
       : `<b>AutoTrade-Candles is on, but waiting</b> — the Live Controls source is "${escapeHtml(d.liveSource||'—')}". It works only while the source is opencopy, callout, launch, dayscalp or mayhem.`);
     document.getElementById('cmSupReset').hidden=!(d.support && d.autoTrade);
   } else { supBox.hidden=true; }
-  document.getElementById('cmLiveBtn').disabled=!!d.supportEnabled;
+  document.getElementById('cmLiveBtn').disabled=false;     // Paper works with AutoTrade-Candles too (test a source)
   const mp=document.getElementById('cmMode');
   mp.className='m2-pill '+(live?(blk?'off':'bad'):'on');
   mp.textContent=live?(blk?('LIVE — waiting: '+(blk==='NOT_READY'?'bot starting':(blk==='CIRCUIT_BREAKER'?'circuit breaker':blk))):('LIVE · '+Number(d.maxPositionSol||0).toFixed(4)+' SOL / trade')):'PAPER';
@@ -4478,7 +4478,11 @@ document.getElementById('cmApply').addEventListener('click',()=>{
 document.getElementById('cmEntBtn').addEventListener('click',()=>{ if(_cmCfg) cmPost({entries_paused:!_cmCfg.entries_paused}, 'Entries'); });
 document.getElementById('cmLiveBtn').addEventListener('click',()=>{
   if(!_cmCfg) return;
-  if(_cmCfg.mode==='live'){ cmPost({mode:'paper'}, 'Paper mode'); return; }
+  if(_cmCfg.mode==='live'){ cmPost({mode:'paper'}, _cmCfg.support_enabled?'Paper mode — AutoTrade-Candles now tests the source on paper (no live buys from Candles)':'Paper mode'); return; }
+  if(_cmCfg.support_enabled){
+    if(!confirm('Turn Candles LIVE again?\n\nAutoTrade-Candles goes back to real trades: the source\'s coins are taken over and Candles adds lots / sells them with real SOL.')) return;
+    cmPost({mode:'live'}, 'LIVE mode'); return;
+  }
   if(!confirm('Turn Candles LIVE?\n\nEvery BUY candle spends Max position of real SOL (fast pump route); every SELL candle sells 100%.\nThis switch works on its own (Auto Trade not needed). Paper results so far were negative (about -14% per trade).\n\nSend real trades?')) return;
   cmPost({mode:'live'}, 'LIVE mode');
 });

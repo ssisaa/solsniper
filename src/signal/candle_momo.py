@@ -202,6 +202,7 @@ class CandleMomo:
         self.traded: Dict[str, float] = {}           # mint -> when its last trade closed (one-time-use mode)
         self._mx_rows: Dict[str, List[Dict[str, Any]]] = {}   # Mixed feed: board rows by group
         self._mx_at: Dict[str, float] = {}
+        self._mirrored: Dict[str, float] = {}         # Paper + AutoTrade-Candles: coins given a paper lot 1
         self.mayhem_of: Dict[str, Optional[bool]] = {}  # mint -> Mayhem coin? (None = still checking)
         self._mx_turn = 0                             # index in mayhem2.MIXED_GROUPS whose turn is next
         self._mx_since: Dict[str, float] = {}         # mint -> when Mixed started watching it
@@ -351,7 +352,13 @@ class CandleMomo:
 
     def _support_sync(self, src: str) -> None:
         """The source's held coins become Candles trades (lot 1 = the source's buy). Their source and rules
-        stay; Candles only adds ladder lots and sells by its own rule."""
+        stay; Candles only adds ladder lots and sells by its own rule. In PAPER nothing live is taken over."""
+        if self.cfg.mode != "live":
+            for p in self._support_held(src):
+                rec = self.positions.get(p.mint)
+                if not (rec and rec.get("mode") == "live"):
+                    p._candle_support = False         # the source's own rules sell its live trade as usual
+            return
         for p in self._support_held(src):
             p._candle_support = True        # the source's exit rules stop: Candles sells it by its rule
             if p.mint in self.positions:
@@ -370,9 +377,33 @@ class CandleMomo:
             self.note("info", f"{rec['symbol']} — {src} bought it (lot 1). Candles adds lots and sells it by the {self.cfg.rule} "
                                          f"rule; {src}'s own rule sells only while the trade is in profit — in a loss Candles' rule takes over.", p.mint)
 
+    def _paper_lot1(self, want: Dict[str, str], src: str) -> None:
+        """Paper + AutoTrade-Candles, rules other than pro_hold: the source's lot 1 is played as a paper buy the
+        moment the coin is fed (once per coin), then Candles adds lots and sells it by its rule on paper."""
+        now = time.time()
+        for m in want:
+            if (m in self.positions or m in self.busy or m in self.unusable or m in self._mirrored
+                    or len(self.positions) >= max(1, int(self.cfg.max_mints or 1))):
+                continue
+            self._mirrored[m] = now
+            f = self.feeds.get(m)
+            sig = {"id": f"paper-lot1-{m}-{int(now * 1000)}", "mint": m, "ts": round(now * 1000), "side": "BUY",
+                   "open": 0.0, "prevClose": None, "close": 0.0, "ref": 0.0, "deltaPct": 0.0,
+                   "candleTs": int(now * 1000), "rule": self.cfg.rule, "provider": "paper-support", "feedLagMs": 0,
+                   "seen": now, "mirror": True, "_counted": True, "symbol": (f.symbol if f else m[:6])}
+            self.recent.appendleft(sig)
+            self.note("info", f"{sig['symbol']} — PAPER lot 1 for {src} (what {src} would buy live).", m)
+            self._start(sig)
+
     def pro_hold_owns_entries(self, src: str) -> bool:
         """pro_hold with AutoTrade-Candles on this source: Candles buys (on Botpredict's BUY); the source only feeds."""
-        return self.cfg.rule == "pro_hold" and self.support_source() == src
+        return (self.cfg.rule == "pro_hold" or self.paper_support()) and self.support_source() == src
+
+    def paper_support(self) -> bool:
+        """AutoTrade-Candles on with Candles in PAPER (user 2026-11-14: test a source without real SOL). Candles
+        paper-buys lot 1 itself on the source's coins, the source's picks only feed it (no live buys started by
+        AutoTrade-Candles), and the source's live trades are not taken over or held back."""
+        return self.cfg.mode != "live" and bool(self.support_source())
 
     def _one_feed(self, want: Dict[str, str]) -> Dict[str, str]:
         """pro_hold: one coin at a time. The coin in trade (Candles' own or the source's, oldest first; a coin pump
@@ -418,8 +449,8 @@ class CandleMomo:
         # so the next young coin can still be bought.
         held = len([m for m, r in self.positions.items()
                     if r.get("support") == "mayhem" and mayhem_state_of(m) != "paused"]) + len(grab)
-        if self.cfg.rule == "pro_hold":
-            # pro_hold buys on Botpredict's BUY itself: the youngest open is only watched, and only while flat
+        if self.pro_hold_owns_entries("mayhem"):
+            # pro_hold (or Paper) buys itself: the youngest open is only watched, and only while flat
             if held or self.positions:
                 return []
             young = [str(r.get("coinMint") or "") for r in mayhem_young_opens(MAYHEM_MAX_OPEN_AGE_S)]
@@ -652,8 +683,9 @@ class CandleMomo:
                     for gm, gv in list(self._grab.items()):
                         if time.time() - float(gv.get("at") or 0) > 60:
                             self._grab.pop(gm, None)
-                    picks = list(_pks) if cfg.rule == "pro_hold" else [_pk]
-                    if cfg.rule == "pro_hold" and self.positions:
+                    owns = self.pro_hold_owns_entries("dayscalp")
+                    picks = list(_pks) if owns else [_pk]
+                    if owns and self.positions:
                         picks = []        # one coin at a time: the open trade completes before the next coin is fed
                     for pk in picks:
                         if pk.get("mint") and time.time() - float(pk.get("ts") or 0) < 20:
@@ -687,6 +719,8 @@ class CandleMomo:
                 if m not in want:
                     self.feeds.pop(m, None)
             self.providers["stream"].wanted = set(self.feeds)
+            if self.paper_support() and cfg.rule != "pro_hold":
+                self._paper_lot1(want, src)
             return
         want: Dict[str, Dict[str, Any]] = {}
         for m in cfg.mints:
@@ -1000,14 +1034,15 @@ class CandleMomo:
         if side == "SELL" and ladder and n < cfg.sell_on_green_confirm:
             return self.skip(sig, "GREEN_CONFIRM")
         if side == "BUY" and held is None and self.support_source():
-            if not (cfg.rule == "pro_hold" and sig.get("pro")):
+            if not ((cfg.rule == "pro_hold" and sig.get("pro")) or sig.get("mirror")
+                    or (self.paper_support() and sig.get("pro"))):
                 return self.skip(sig, "SUPPORT_NO_ENTRY")        # the source buys lot 1; Candles only adds / sells
             # pro_hold: Candles buys lot 1 itself on the chart BUY (the source only picks / feeds the coin),
             # and like the source it buys only while Auto Trade is on (off = watch only)
             try:
                 from src.config.runtime import get_config as _rc
-                if not bool(getattr(_rc(), "trade_enabled", False)):
-                    return self.skip(sig, "AUTO_TRADE_OFF")
+                if cfg.mode == "live" and not bool(getattr(_rc(), "trade_enabled", False)):
+                    return self.skip(sig, "AUTO_TRADE_OFF")     # Paper: Auto Trade not needed
             except Exception:
                 pass
         if (side == "BUY" and held is None and cfg.rule == "inverse" and cfg.max_entry_red_pct > 0
@@ -1109,13 +1144,14 @@ class CandleMomo:
         mint = sig["mint"]
         try:
             held = self.positions.get(mint) or {}
-            if sig["side"] == "BUY" and not sig.get("add") and not sig.get("manual"):
+            if sig["side"] == "BUY" and not sig.get("add") and not sig.get("manual") and not sig.get("mirror"):
                 why, detail = self._entry_filters(mint, first=bool(sig.get("first")))
                 if why:
                     self.skip(sig, why)
                     sig["reason"] = f"{why} ({detail})"
                     return
-            if sig["side"] == "BUY" and self.cfg.min_reserve_sol > 0 and not sig.get("manual") and not sig.get("first"):
+            if (sig["side"] == "BUY" and self.cfg.min_reserve_sol > 0 and not sig.get("manual") and not sig.get("first")
+                    and not sig.get("mirror")):
                 try:
                     c, _bps, _why = await self._curve(mint)
                 except Exception:
@@ -1506,6 +1542,9 @@ class CandleMomo:
     def supports(self, pos) -> bool:
         """True for a coin the support source holds while AutoTrade-Candles is on: the guard applies from the
         moment the source's buy lands, not only after Candles' next 2s scan has adopted it."""
+        if self.cfg.mode != "live":
+            rec = self.positions.get(getattr(pos, "mint", ""))
+            return bool(rec and rec.get("mode") == "live" and getattr(pos, "_candle_support", False))
         if getattr(pos, "_candle_support", False):
             return True
         src = self.support_source()
