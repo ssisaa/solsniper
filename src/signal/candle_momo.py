@@ -44,6 +44,7 @@ CANDLE_URL = ("https://frontend-api-v3.pump.fun/candles/solana:5eykt4UsFv8P8NJdT
               "?res={res}&count={count}&measure={measure}")
 BOARD_URL = "https://advanced-indexer.pump.fun/boards/mayhem?tier=web&offset=0&limit=30"
 BASE_FEE_LAMPORTS = 5000
+PRO_FIRST_MAX_AGE_S = 60.0     # pro_hold first-candle buy: only coins this young (a new coin's first candle)
 SKIP_REASONS = ("KILLED", "NO_POSITION", "ALREADY_LONG", "ENTRIES_PAUSED", "FEED_DEGRADED", "STALE_FEED",
                 "BLACKLIST", "NOT_WHITELISTED", "DAILY_LOSS", "RATE_LIMIT", "COOLDOWN", "MAX_EXPOSURE",
                 "MAX_TRADE", "NOT_READY", "CIRCUIT_BREAKER", "BUY_UNRESOLVED", "DUPLICATE", "COALESCED", "STALE", "IN_FLIGHT", "NOT_TRADABLE", "LADDER_WAIT", "LADDER_MAX", "LADDER_CAP", "GREEN_CONFIRM", "NOT_IN_PROFIT", "LOW_RESERVES", "CRASH_CANDLE", "BELOW_BREAKEVEN", "SOL_OUTFLOW",
@@ -842,6 +843,18 @@ class CandleMomo:
         Flat + BUY call -> BUY; holding + SELL call (target / stop / time stop) -> SELL."""
         from src.signal import pro_trader as PT
         rows = f.books[f.using].finals()
+        cfg = self.cfg
+        if (cfg.rule == "pro_hold" and cfg.pro_hold_first and rows and not getattr(f, "first_done", False)
+                and f.mint not in self.positions
+                and not (cfg.avoid_mayhem and self.mayhem_of.get(f.mint) is None and not f.board_state)):
+            # pro_hold: a NEW coin is bought on its first candle (user's choice 2026-11-14; on 74 unseen coins
+            # entering 3s in with pro_hold's exits: 58% won, median +7.6%). Coins older than 60s are not "new".
+            f.first_done = True
+            if f.age is not None and float(f.age) <= PRO_FIRST_MAX_AGE_S:
+                self._pro_emit(f, rows, "BUY", {"call": "BUY", "px": rows[-1].close,
+                                                "why": f"first candle of a new coin (age {float(f.age):.0f}s)"},
+                               seen, first=True)
+                return
         if len(rows) < 2:
             return
         if f.last_eval_t is None:
@@ -863,6 +876,12 @@ class CandleMomo:
             a = BPm.analyze(cs, None)
             if a.get("call") == "SELL":
                 a["call"] = "HOLD"
+            if a.get("call") != "BUY" and cfg.pro_hold_pro_buy:
+                # the chart's green ▲ BUY (Pro Trader) also buys (user's choice 2026-11-14; weaker in tests:
+                # 47% won, -1.9% per trade without the top 10% — switch off on the Candles page if it loses)
+                p = PT.analyze(cs, None, None)
+                if p.get("call") == "BUY":
+                    a = {"call": "BUY", "px": p.get("px"), "why": "▲ Pro Trader BUY — " + str(p.get("why") or "")}
         else:
             a = PT.analyze(cs, None, ctx["holding"])
         was_buy = bool(getattr(f, "pro_was_buy", False))
@@ -883,9 +902,15 @@ class CandleMomo:
                          f"(red candle; peak {float(held.get('pro_peak') or up):+.1f}%)")}
         else:
             return
+        self._pro_emit(f, rows, side, a, seen)
+
+    def _pro_emit(self, f: Feed, rows: List[Candle], side: str, a: Dict[str, Any], seen: float,
+                  first: bool = False) -> None:
+        cur = rows[-1]
         lag_ms = (seen - (cur.t + 1000) / 1000.0) * 1000.0
         sig = {"id": signal_id(f.mint, cur.t, "pro"), "mint": f.mint, "ts": round(seen * 1000),
-               "side": side, "open": cur.open, "prevClose": rows[-2].close, "close": cur.close,
+               "side": side, "open": cur.open, "prevClose": rows[-2].close if len(rows) >= 2 else cur.open,
+               "close": cur.close, "first": first,
                "ref": cur.open, "deltaPct": round((cur.close / cur.open - 1) * 100, 4) if cur.open else 0.0,
                "candleTs": cur.t, "rule": "pro", "provider": f.using, "feedLagMs": round(lag_ms),
                "symbol": f.symbol, "seen": seen, "pro": True, "pro_why": str(a.get("why") or ""),
@@ -1072,12 +1097,12 @@ class CandleMomo:
         try:
             held = self.positions.get(mint) or {}
             if sig["side"] == "BUY" and not sig.get("add") and not sig.get("manual"):
-                why, detail = self._entry_filters(mint)
+                why, detail = self._entry_filters(mint, first=bool(sig.get("first")))
                 if why:
                     self.skip(sig, why)
                     sig["reason"] = f"{why} ({detail})"
                     return
-            if sig["side"] == "BUY" and self.cfg.min_reserve_sol > 0 and not sig.get("manual"):
+            if sig["side"] == "BUY" and self.cfg.min_reserve_sol > 0 and not sig.get("manual") and not sig.get("first"):
                 try:
                     c, _bps, _why = await self._curve(mint)
                 except Exception:
@@ -1656,8 +1681,10 @@ class CandleMomo:
                 out["ready"] = bool(up is not None and up >= tgt)
             else:
                 from src.signal import botpredict as BPm
+                extra = [x for x, on in (("a new coin's first candle", cfg.pro_hold_first),
+                                         ("the green ▲ BUY", cfg.pro_hold_pro_buy)) if on]
                 out["entry"] = (f"pro_hold: lot 1 on Botpredict's BUY (◆ BP — chance of +{BPm.PRED_PCT:.0f}% first "
-                                f"≥ {BPm.MODEL['thr'] * 100:.0f}%)")
+                                f"≥ {BPm.MODEL['thr'] * 100:.0f}%)" + (", " + ", ".join(extra) if extra else ""))
                 out["exit"] = "—"
             return out
         if cfg.rule == "pro":
@@ -2165,7 +2192,7 @@ class CandleMomo:
         except RuntimeError:
             asyncio.run_coroutine_threadsafe(go(), self.loop)
 
-    def _entry_filters(self, mint: str) -> Tuple[str, str]:
+    def _entry_filters(self, mint: str, first: bool = False) -> Tuple[str, str]:
         """New trades only (not ladder lots, not manual): money still flowing in, not far below the peak.
         -> (skip reason, detail) or ("", "")."""
         cfg = self.cfg
@@ -2185,7 +2212,7 @@ class CandleMomo:
                 return "MAYHEM_COIN", "checking whether pump can pause this coin"
             if mh:
                 return "MAYHEM_COIN", "a Mayhem coin — pump can pause it and a paused coin cannot be sold"
-        if cfg.inflow_window_s > 0:
+        if cfg.inflow_window_s > 0 and not first:     # a first-candle buy has no reserve history yet
             now = time.time()
             hist = list(f.reserves)
             old = [r for t, r in hist if now - t >= cfg.inflow_window_s]

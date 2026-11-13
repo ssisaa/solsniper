@@ -376,6 +376,7 @@ def test_pro_hold_buys_on_botpredict_not_pro_trader(tmp_path, monkeypatch):
     from src.signal import botpredict as BPm
     e, f, rows, routed = _cm_engine(tmp_path, monkeypatch)
     e.cfg.rule = "pro_hold"
+    e.cfg.pro_hold_pro_buy = False                        # the ▲ BUY entry switched off: Botpredict only
     monkeypatch.setitem(BPm.MODEL, "thr", 1.01)          # Botpredict never buys
     e._evaluate(f, time.time())
     f.books["pump_rest"].merge(rows[-1:])                 # a Pro Trader BUY setup
@@ -431,3 +432,82 @@ def test_pro_hold_one_feed_with_mayhem_source(monkeypatch):
     e._pick([])
     assert set(e.feeds) == {c}                   # flat: the youngest Mayhem_Mode open, watched (not bought)
     assert e.pro_hold_owns_entries("mayhem") and not e.pro_hold_owns_entries("dayscalp")
+
+
+# ---------- pro_hold extra entries: a new coin's first candle, and the green ▲ BUY (Pro Trader) ----------
+
+def _ph_first_engine(tmp_path, monkeypatch, age):
+    from src.signal import candle_momo as CM
+    from src.signal import candle_core as C
+    from src.signal.candle_store import Store
+    e = CM.CandleMomo()
+    e.store = Store(str(tmp_path / "f.sqlite"), str(tmp_path / "f.jsonl"))
+    e.cfg.rule = "pro_hold"
+    routed = []
+    monkeypatch.setattr(e, "_route", lambda sig: routed.append(sig) or "intent")
+    f = CM.Feed("NEW", 400)
+    f.status, f.using, f.age = "OK", "pump_rest", age
+    e.mayhem_of["NEW"] = False
+    t = int(time.time()) * 1000 - 3000
+    f.books["pump_rest"].merge([C.Candle(t=t, open=1.0, high=1.2, low=1.0, close=1.1, volume=3, final=True)])
+    e.feeds["NEW"] = f
+    return e, f, routed
+
+
+def test_pro_hold_buys_a_new_coin_on_its_first_candle(tmp_path, monkeypatch):
+    e, f, routed = _ph_first_engine(tmp_path, monkeypatch, 4)
+    e._evaluate(f, time.time())
+    assert len(routed) == 1 and routed[0]["side"] == "BUY" and routed[0]["first"]
+    e._evaluate(f, time.time())
+    assert len(routed) == 1                          # once per coin
+
+
+def test_pro_hold_first_candle_only_for_young_coins_and_switch(tmp_path, monkeypatch):
+    e, f, routed = _ph_first_engine(tmp_path, monkeypatch, 500)
+    e._evaluate(f, time.time())
+    assert not routed
+    e, f, routed = _ph_first_engine(tmp_path, monkeypatch, 4)
+    e.cfg.pro_hold_first = False
+    e._evaluate(f, time.time())
+    assert not routed
+
+
+def test_pro_hold_first_candle_waits_for_the_mayhem_check(tmp_path, monkeypatch):
+    e, f, routed = _ph_first_engine(tmp_path, monkeypatch, 4)
+    e.mayhem_of.pop("NEW")
+    e._evaluate(f, time.time())
+    assert not routed and not getattr(f, "first_done", False)
+    e.mayhem_of["NEW"] = False
+    e._evaluate(f, time.time())
+    assert routed and routed[0]["first"]
+
+
+def test_first_candle_buy_skips_history_checks(tmp_path, monkeypatch):
+    from src.signal import candle_momo as CM
+    e = CM.CandleMomo()
+    e.cfg.inflow_window_s = 5
+    e.cfg.max_below_peak_pct = 0
+    e.feeds["X"] = CM.Feed("X", 10)
+    e.mayhem_of["X"] = False
+    assert e._entry_filters("X")[0] == "SOL_OUTFLOW"
+    assert e._entry_filters("X", first=True)[0] == ""
+
+
+def test_pro_hold_buys_on_pro_trader_buy(tmp_path, monkeypatch):
+    from src.signal import botpredict as BPm
+    monkeypatch.setitem(BPm.MODEL, "thr", 2.0)       # Botpredict never calls BUY here
+    e, f, rows, routed = _cm_engine(tmp_path, monkeypatch)
+    e.cfg.rule = "pro_hold"
+    e.cfg.pro_hold_first = False
+    e._evaluate(f, time.time())
+    f.books["pump_rest"].merge(rows[-1:])
+    e._evaluate(f, time.time())
+    assert routed and routed[-1]["side"] == "BUY" and "Pro Trader" in routed[-1]["pro_why"]
+    e2, f2, rows2, routed2 = _cm_engine(tmp_path, monkeypatch)
+    e2.cfg.rule = "pro_hold"
+    e2.cfg.pro_hold_first = False
+    e2.cfg.pro_hold_pro_buy = False
+    e2._evaluate(f2, time.time())
+    f2.books["pump_rest"].merge(rows2[-1:])
+    e2._evaluate(f2, time.time())
+    assert not routed2

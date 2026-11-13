@@ -90,6 +90,13 @@ youngest first, pump mints only, New < 3 min; a coin stays while held, else unti
 `mixed_idle_s` (60 s) with no trade, then the next board's youngest (a handed-over coin is skipped 5 min). Max mints
 slots (pro_hold: one). Paper / LIVE follow Candles' Live switch. Graduated coins are valued by Jupiter.
 
+**pro_hold extra entries (2026-11-14, user's request)**: besides ◆ BP, pro_hold also buys (a) a NEW coin (board age
+≤ 60 s, `PRO_FIRST_MAX_AGE_S`) on its first candle (`pro_hold_first`, sig `first`: skips the SOL_OUTFLOW history check
+and Min reserve; waits for the Mayhem check), and (b) the chart's green ▲ BUY (Pro Trader call, `pro_hold_pro_buy`).
+Switches on the Candles page ("pro_hold also buys"). Tests on unseen coins with pro_hold exits (15 %): BP 75 % won,
+median +21.6 %; first candle (3 s in) 58 %, +7.6 %; ▲ BUY 47 %, −0.6 % (−1.9 % w/o top 10 %) — data are Mayhem coins,
+pauses not modelled.
+
 **Candles avoid_mayhem (2026-11-14, user's request)**: Candles page "Skip Mayhem coins" (default on): no new
 Candles trade on a Mayhem coin (`MAYHEM_COIN` in `_entry_filters`; board `ms` or pump's mayhem-state, checked once per
 coin `_check_mayhem`); Mixed skips Mayhem rows. Reason: pump pauses Mayhem coins and a paused coin can't sell —
