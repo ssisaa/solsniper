@@ -692,6 +692,7 @@ button.lite{display:inline-block;vertical-align:middle;margin-left:8px}
 button.lite{width:auto;margin:0;padding:5px 10px;background:transparent;color:#c5d2e2;border:1px solid rgba(142,160,184,.45);border-radius:999px;font-size:11px;font-weight:600;letter-spacing:.04em}
 button.lite:hover{color:#fff;border-color:#eef3fb}
 .cm-sending{opacity:.55;pointer-events:none}
+#cmChart,#m2Chart{cursor:crosshair}#cmChart.drag,#m2Chart.drag{cursor:grabbing}
 </style>
 </head>
 <body>
@@ -1251,6 +1252,7 @@ button.lite:hover{color:#fff;border-color:#eef3fb}
             <div class="cm-cact">
               <button type="button" class="cm-act buy" id="cmEntryBtn" title="Buy now, one click, no popup: opens a trade, or adds one lot to the open one (paper or LIVE as the Candles mode)">+ Entry</button>
               <button type="button" class="cm-act sell" id="cmExitBtn" title="Sell every lot now, one click, no popup, at any price">Exit all</button>
+              <button type="button" class="cm-icon" id="cmZoomOut" title="Zoom out: more, thinner candles (mouse wheel down)" aria-label="Zoom out">−</button><button type="button" class="cm-icon" id="cmZoomIn" title="Zoom in: fewer, wider candles (mouse wheel up)" aria-label="Zoom in">+</button><button type="button" class="cm-icon" id="cmZoomReset" title="Back to live and normal size (double-click the chart)" aria-label="Reset zoom">⟲</button>
               <button type="button" class="cm-icon" id="cmChartExp" title="Expand (F)" aria-label="Expand chart">⤢</button>
             </div>
           </div>
@@ -1424,6 +1426,7 @@ button.lite:hover{color:#fff;border-color:#eef3fb}
             <h3>1s chart <span id="m2ChartSym"></span> <span class="m2-view" id="m2ChartView"></span></h3>
             <div class="m2-tools">
               <span class="m2-read" id="m2ChartRead"></span>
+              <button type="button" class="m2-icon" id="m2ZoomOut" title="Zoom out: more, thinner candles (mouse wheel down)" aria-label="Zoom out">−</button><button type="button" class="m2-icon" id="m2ZoomIn" title="Zoom in: fewer, wider candles (mouse wheel up)" aria-label="Zoom in">+</button><button type="button" class="m2-icon" id="m2ZoomReset" title="Back to live and normal size (double-click the chart)" aria-label="Reset zoom">⟲</button>
               <button type="button" class="m2-icon" id="m2ChartExp" title="Expand (F)" aria-label="Expand chart">⤢</button>
             </div>
           </div>
@@ -4592,6 +4595,50 @@ function paintDesk(el, a, bp){
     <div class="dk-row">${checks}</div>${bpHtml(bp)}${ctx}`;
   if(el._h!==html){ el._h=html; el.innerHTML=html; }
 }
+// Chart zoom / pan (both 1s charts). step = px per candle (null = default); endT = right-edge candle time
+// (null = follow live). Wheel = zoom at the mouse, drag = pan, double-click / ⟲ = back to live.
+const _cz={cm:{step:null,endT:null,lay:null}, m2:{step:null,endT:null,lay:null}};
+function czStep(k,def){ const z=_cz[k]; return z.step?Math.max(2,Math.min(48,z.step)):def; }
+// Price range from the candles on screen; a level / line is fitted only when it is near them (a sell target
+// 77000% away or a VWAP far above no longer squashes the candles flat). Far ones sit pinned at the edge.
+function czFit(vis, extras){
+  let lo=Math.min(...vis.map(x=>x.l)), hi=Math.max(...vis.map(x=>x.h));
+  if(!(hi>lo)){ hi=hi*1.01||1; lo=lo*0.99; }
+  const r=hi-lo, a=lo-r*0.6, b=hi+r*0.6; let L=lo, H=hi;
+  for(const v of extras) if(v>0&&v>=a&&v<=b){ L=Math.min(L,v); H=Math.max(H,v); }
+  return [L,H];
+}
+function czAttach(k, cv, redraw, candles){
+  const z=_cz[k]; let drag=null;
+  const shift=d=>{                        // d candles: + toward live, - back in time
+    const cs=candles(); if(!cs.length||!d) return;
+    let i=z.endT==null?cs.length-1:cs.findIndex(c=>c.t>z.endT)-1; if(i<-1) i=cs.length-1;
+    if(z.endT!=null&&cs.findIndex(c=>c.t>z.endT)===-1) i=cs.length-1;
+    const lay=z.lay||{span:60}, min=Math.min(cs.length-1, Math.max(0,Math.floor(lay.span/3)));
+    i=Math.max(min, Math.min(cs.length-1, Math.round(i+d)));
+    z.endT=i>=cs.length-1?null:cs[i].t;
+  };
+  const zoom=(f,mx)=>{
+    const lay=z.lay; if(!lay) return; const old=lay.step, nw=Math.max(2,Math.min(48,old*f));
+    if(Math.abs(nw-old)<0.01) return;
+    const right=lay.padL+lay.pw, x=mx==null?right:Math.min(right,mx);
+    const r0=(right-x)/old, r1=(right-x)/nw;
+    z.step=nw; if(z.endT!=null||r1!==r0) shift(r1-r0); redraw();
+  };
+  cv.addEventListener('wheel',e=>{ e.preventDefault(); const r=cv.getBoundingClientRect();
+    if(e.shiftKey||Math.abs(e.deltaX)>Math.abs(e.deltaY)){ const st=(z.lay&&z.lay.step)||8; shift(-(e.shiftKey?e.deltaY:e.deltaX)/st); redraw(); return; }
+    zoom(e.deltaY<0?1.15:1/1.15, e.clientX-r.left); },{passive:false});
+  cv.addEventListener('mousedown',e=>{ if(e.button!==0) return; drag={x:e.clientX,moved:0}; cv.classList.add('drag'); });
+  window.addEventListener('mousemove',e=>{ if(!drag) return; const st=(z.lay&&z.lay.step)||8, dx=e.clientX-drag.x; const d=Math.trunc(dx/st);
+    if(d){ shift(-d); drag.x+=d*st; drag.moved++; redraw(); } });
+  window.addEventListener('mouseup',()=>{ if(drag){ drag=null; cv.classList.remove('drag'); } });
+  cv.addEventListener('dblclick',()=>{ z.step=null; z.endT=null; redraw(); });
+  const b=id=>document.getElementById(k+id);
+  if(b('ZoomIn')) b('ZoomIn').addEventListener('click',()=>zoom(1.3,null));
+  if(b('ZoomOut')) b('ZoomOut').addEventListener('click',()=>zoom(1/1.3,null));
+  if(b('ZoomReset')) b('ZoomReset').addEventListener('click',()=>{ z.step=null; z.endT=null; redraw(); });
+}
+function czNote(k){ const z=_cz[k]; return (z.endT!=null?' · <b style="color:#ffcc66">scrolled back — ⟲ or double-click for live</b>':'')+(z.step?` · zoom ${Math.round(z.step)}px/candle`:''); }
 function m2DrawChart(){
   const cv=document.getElementById('m2Chart'); if(!cv) return;
   const wrap=cv.parentElement, W=wrap.clientWidth, H=wrap.clientHeight; if(!W||!H) return;
@@ -4609,18 +4656,18 @@ function m2DrawChart(){
   const rsiH=L?Math.max(46,Math.round(H*0.17)):0, gapR=(L?18:0)+bpH+bpGap, timeH=20;
   const pw=Math.max(40,W-padR-padL-fut), mainH=Math.max(60,H-padT-timeH-rsiH-gapR);
   const volH=Math.round(mainH*0.18);
-  const step=expanded?11:8;
-  const span=Math.max(10,Math.floor(pw/step));
-  const tEnd=cs[cs.length-1].t, tStart=tEnd-(span-1)*1000;
-  const vis=cs.filter(c=>c.t>=tStart);
+  const step=czStep('m2', expanded?11:8);
+  const span=Math.max(5,Math.floor(pw/step));
+  const lastT=cs[cs.length-1].t, tEnd=_cz.m2.endT==null?lastT:Math.min(lastT,_cz.m2.endT), tStart=tEnd-(span-1)*1000;
+  _cz.m2.lay={padL,pw,step,span};
+  let vis=cs.filter(c=>c.t>=tStart&&c.t<=tEnd); if(!vis.length) vis=cs.slice(-1);
   const lineAt={}; if(L){ L.t.forEach((t,i)=>{ lineAt[t]=i; }); }
-  let lo=Math.min(...vis.map(c=>c.l)), hi=Math.max(...vis.map(c=>c.h));
-  if(pro){ const zs=[pro.stop,pro.target,pro.entry].filter(v=>v>0); if(zs.length){ lo=Math.min(lo,...zs); hi=Math.max(hi,...zs); } }
-  if(L){ for(const c of vis){ const i=lineAt[c.t]; if(i==null) continue; for(const k of ['ema9','ema21','vwap']){ const v=L[k][i]; if(v>0){ lo=Math.min(lo,v); hi=Math.max(hi,v); } } } }
-  if(!(hi>lo)){ hi=hi*1.01; lo=lo*0.99; }
+  const ex=[]; if(pro) ex.push(pro.stop,pro.target,pro.entry);
+  if(L){ for(const c of vis){ const i=lineAt[c.t]; if(i==null) continue; for(const k of ['ema9','ema21','vwap']) ex.push(L[k][i]); } }
+  let [lo,hi]=czFit(vis, ex);
   const pad=(hi-lo)*0.06; lo-=pad; hi+=pad;
   const priceH=mainH-volH*0.35;                                   // volume sits under the candles, overlapping a little
-  const X=t=>padL+((t-tStart)/1000)*step+step/2, Y=p=>padT+(hi-p)/(hi-lo)*priceH;
+  const X=t=>padL+((t-tStart)/1000)*step+step/2, Y=p=>Math.max(padT-6,Math.min(padT+priceH+6, padT+(hi-p)/(hi-lo)*priceH));
   const xEnd=padL+pw+fut;
   // watermark
   if(_m2ChartPin){ g.save(); g.font=`900 ${Math.round(Math.min(64,mainH*0.22))}px ${FONT}`; g.fillStyle='rgba(120,160,210,.05)'; g.textAlign='center'; g.textBaseline='middle'; g.fillText(String(_m2ChartPin.symbol||'').toUpperCase(), padL+(pw+fut)/2, padT+mainH/2); g.restore(); }
@@ -4702,7 +4749,7 @@ function m2DrawChart(){
     pill(x, y, m.label||(buy?'B':'S'), buy?UP:DN, c?(buy?Y(c.l):Y(c.h)):null, false);
   }
   // live call at the last candle
-  if(pro&&(pro.call==='BUY'||pro.call==='SELL')){
+  if(pro&&(pro.call==='BUY'||pro.call==='SELL')&&_cz.m2.endT==null){
     const last=cs[cs.length-1], x=X(last.t), buy=pro.call==='BUY';
     const pulse=.5+.5*Math.sin(Date.now()/220);
     g.save(); g.shadowColor=buy?UP:DN; g.shadowBlur=12+8*pulse; pill(x, buy?Y(last.l)+16:Y(last.h)-16, buy?'BUY NOW':'SELL NOW', buy?UP:DN, null, false); g.restore();
@@ -4733,7 +4780,7 @@ function m2DrawChart(){
       const buy=m.side==='buy', col=buy?'#ffcc66':(String(m.label).startsWith('+')?UP:DN);
       pill(X(m.t), buy?Y(c.l)+48:Y(c.h)-48, buy?'◆ BP':'◆ '+m.label, col, buy?Y(c.l)+2:Y(c.h)-2, true);
     }
-    if(BPd.call==='BUY'){ const lc=cs[cs.length-1]; g.save(); g.shadowColor='#ffcc66'; g.shadowBlur=14; pill(X(lc.t), Y(lc.l)+34, '◆ BP BUY', '#ffcc66', null, false); g.restore(); }
+    if(BPd.call==='BUY'&&_cz.m2.endT==null){ const lc=cs[cs.length-1]; g.save(); g.shadowColor='#ffcc66'; g.shadowBlur=14; pill(X(lc.t), Y(lc.l)+34, '◆ BP BUY', '#ffcc66', null, false); g.restore(); }
   }
   // RSI pane
   if(L){
@@ -4769,13 +4816,14 @@ function m2DrawChart(){
   }
   if(rd){
     const ch=show.o?((show.c/show.o-1)*100):0, age=Math.max(0,(Date.now()-(last.t+1000))/1000);
-    rd.innerHTML=`${new Date(show.t).toTimeString().slice(0,8)} O <b>${m2Px(show.o)}</b> H <b>${m2Px(show.h)}</b> L <b>${m2Px(show.l)}</b> C <b>${m2Px(show.c)}</b> <span class="${ch>0?'g':(ch<0?'r':'')}">${ch>0?'+':''}${ch.toFixed(2)}%</span> · last ${age.toFixed(0)}s ago`;
+    rd.innerHTML=`${new Date(show.t).toTimeString().slice(0,8)} O <b>${m2Px(show.o)}</b> H <b>${m2Px(show.h)}</b> L <b>${m2Px(show.l)}</b> C <b>${m2Px(show.c)}</b> <span class="${ch>0?'g':(ch<0?'r':'')}">${ch>0?'+':''}${ch.toFixed(2)}%</span> · last ${age.toFixed(0)}s ago${czNote('m2')}`;
   }
 }
 (function(){
   const cv=document.getElementById('m2Chart'); if(!cv) return;
   cv.addEventListener('mousemove',e=>{ const r=cv.getBoundingClientRect(); _m2Hover={x:e.clientX-r.left,y:e.clientY-r.top}; m2DrawChart(); });
   cv.addEventListener('mouseleave',()=>{ _m2Hover=null; m2DrawChart(); });
+  czAttach('m2', cv, m2DrawChart, ()=>_m2Candles||[]);
   try{ new ResizeObserver(()=>m2DrawChart()).observe(cv.parentElement); }catch(e){ window.addEventListener('resize', m2DrawChart); }
   const box=document.getElementById('m2ChartBox'), bd=document.getElementById('m2Backdrop'), btn=document.getElementById('m2ChartExp');
   window.m2Expand=function(on){
@@ -4852,11 +4900,14 @@ function cmDrawChart(){
   const rsiH=PL?Math.max(46,Math.round(H*0.16)):0, gapR=PL?16:0;
   const padR=86, padB=24, padT=16, padL=10, pw=Math.max(40,W-padR-padL), ph=Math.max(40,H-padB-padT-rsiH-gapR);
   // Candles sit side by side (quiet seconds without a trade are skipped, as on pump's chart).
-  const step=expanded?11:8, span=Math.max(10,Math.floor(pw/step));
-  const vis=cs.slice(-span), n=vis.length, t0=vis[0].t, tEnd=vis[n-1].t;
+  const step=czStep('cm', expanded?11:8), span=Math.max(5,Math.floor(pw/step));
+  let endI=cs.length-1; if(_cz.cm.endT!=null){ const j=cs.findIndex(c=>c.t>_cz.cm.endT); endI=j<0?cs.length-1:Math.max(0,j-1); if(j<0) _cz.cm.endT=null; }
+  _cz.cm.lay={padL,pw,step,span};
+  const live=endI===cs.length-1;
+  const vis=cs.slice(Math.max(0,endI-span+1), endI+1), n=vis.length, t0=vis[0].t, tEnd=vis[n-1].t;
   const X=i=>padL+i*step+step/2;
   const idxAt=tsSec=>{ const t=Math.floor(tsSec)*1000; if(t<t0) return -1; let lo=0,hi=n-1; while(lo<hi){ const m=(lo+hi+1)>>1; if(vis[m].t<=t) lo=m; else hi=m-1; } return lo; };
-  const last=vis[n-1];
+  const last=cs[cs.length-1];
   // Levels in the chart's own units. With a live valuation they come from real SOL: the price at which
   // the whole holding sells for the cost (break-even) or for cost + Min profit (sell target).
   let avg=null, be=null, tgt=null, exact=false;
@@ -4872,13 +4923,11 @@ function cmDrawChart(){
   if(open){ const ll=(open.lots||[]).slice(-1)[0]; if(ll){ nextLot=ll.px>0?Number(ll.px):null; if(!nextLot){ const i=idxAt(ll.ts||0); if(i>=0) nextLot=vis[i].c; else if((open.lots||[]).length===1) nextLot=avg; } } }
   const lineAt={}; if(PL) PL.t.forEach((t,i)=>{ lineAt[t]=i; });
   const proPlan=pro&&pro.entry>0&&(pro.call==='BUY'||pro.holding)&&_cmChart.cfg&&_cmChart.cfg.rule==='pro';
-  let lo=Math.min(...vis.map(x=>x.l)), hi=Math.max(...vis.map(x=>x.h));
-  for(const v of [avg,tgt,nextLot]) if(v>0){ lo=Math.min(lo,v); hi=Math.max(hi,v); }
-  if(proPlan) for(const v of [pro.stop,pro.target]) if(v>0){ lo=Math.min(lo,v); hi=Math.max(hi,v); }
-  if(PL) for(const x of vis){ const i=lineAt[x.t]; if(i==null) continue; for(const k of ['ema9','ema21','vwap']){ const v=PL[k][i]; if(v>0){ lo=Math.min(lo,v); hi=Math.max(hi,v); } } }
-  if(!(hi>lo)){ hi*=1.01; lo*=0.99; }
+  const ex=[avg,tgt,nextLot]; if(proPlan) ex.push(pro.stop,pro.target);
+  if(PL) for(const x of vis){ const i=lineAt[x.t]; if(i==null) continue; for(const k of ['ema9','ema21','vwap']) ex.push(PL[k][i]); }
+  let [lo,hi]=czFit(vis, ex);
   const pad=(hi-lo)*0.08; lo=Math.max(0,lo-pad); hi+=pad;
-  const Y=p=>padT+(hi-p)/(hi-lo)*ph;
+  const Y=p=>Math.max(padT-6,Math.min(padT+ph+6, padT+(hi-p)/(hi-lo)*ph));
   // watermark
   { const sym=((cmChartCoins().find(c=>c.mint===_cmChart.mint))||{}).symbol||''; g.save(); g.font=`900 ${Math.round(Math.min(64,ph*0.2))}px ${FONT}`; g.fillStyle='rgba(120,160,210,.05)'; g.textAlign='center'; g.textBaseline='middle'; g.fillText(String(sym).toUpperCase(), padL+pw/2, padT+ph/2); g.restore(); }
   g.font='11px system-ui,-apple-system,Segoe UI,sans-serif'; g.textBaseline='middle';
@@ -4935,8 +4984,8 @@ function cmDrawChart(){
   const BPc=_cmChart.bp&&_cmChart.bp.ok?_cmChart.bp:null;
   if(BPc){ for(const m of (BPc.replay||{}).marks||[]){ if(m.t<t0||m.t>tEnd) continue; if(m.side!=='buy') continue; const i=idxAt(m.t/1000); if(i<0||vis[i].t!==m.t) continue;
     pill(X(i), Y(vis[i].l)+58, '◆ BP', '#ffcc66', Y(vis[i].l)+2, true); }   // buys only: pro_hold sells by its own rule
-    if(BPc.call==='BUY'){ const lastC=vis[n-1]; g.save(); g.shadowColor='#ffcc66'; g.shadowBlur=14; pill(X(n-1), Y(lastC.l)+32, '◆ BP BUY', '#ffcc66', null, false); g.restore(); } }
-  if(pro&&(pro.call==='BUY'||pro.call==='SELL')){ const lastC=vis[n-1], buy=pro.call==='BUY'; g.save(); g.shadowColor=buy?UP:DN; g.shadowBlur=14; pill(X(n-1), buy?Y(lastC.l)+18:Y(lastC.h)-18, buy?'BUY NOW':'SELL NOW', buy?UP:DN, null, false); g.restore(); }
+    if(BPc.call==='BUY'&&live){ const lastC=vis[n-1]; g.save(); g.shadowColor='#ffcc66'; g.shadowBlur=14; pill(X(n-1), Y(lastC.l)+32, '◆ BP BUY', '#ffcc66', null, false); g.restore(); } }
+  if(pro&&(pro.call==='BUY'||pro.call==='SELL')&&live){ const lastC=vis[n-1], buy=pro.call==='BUY'; g.save(); g.shadowColor=buy?UP:DN; g.shadowBlur=14; pill(X(n-1), buy?Y(lastC.l)+18:Y(lastC.h)-18, buy?'BUY NOW':'SELL NOW', buy?UP:DN, null, false); g.restore(); }
   if(PL){ g.font=`bold 10px ${FONT}`; let lx=padL+6; const ly0=padT+ph-8; g.textAlign='left';
     for(const [txt,col] of [['EMA 9',C9],['EMA 21',C21],['VWAP',CV]]){ g.fillStyle=col; g.fillRect(lx,ly0-1,12,2); g.fillText(txt,lx+16,ly0); lx+=g.measureText(txt).width+32; }
     g.fillStyle='rgba(160,178,200,.75)'; g.fillText('outlined = Pro Trader replay · gold ◆ = Botpredict (pro_hold buys on it)', lx, ly0); g.font='11px system-ui,-apple-system,Segoe UI,sans-serif'; }
@@ -4997,7 +5046,7 @@ function cmDrawChart(){
       g.fillStyle='rgba(8,13,24,.92)'; g.strokeStyle='rgba(120,160,210,.35)'; g.beginPath(); if(g.roundRect) g.roundRect(bx,by,bwid,bh,8); else g.rect(bx,by,bwid,bh); g.fill(); g.stroke();
       g.textAlign='left'; rows.forEach((r,k)=>{ g.fillStyle=r[1]; g.fillText(r[0],bx+8,by+12+k*15); }); } }
   if(rd){ const ch=show.o?((show.c/show.o-1)*100):0, age=Math.max(0,(Date.now()-(last.t+1000))/1000);
-    rd.innerHTML=`${new Date(show.t).toTimeString().slice(0,8)} · O <b>${m2Px(show.o)}</b> H <b>${m2Px(show.h)}</b> L <b>${m2Px(show.l)}</b> C <b>${m2Px(show.c)}</b> <span class="${ch>0?'g':(ch<0?'r':'')}">${ch>0?'+':''}${ch.toFixed(2)}%</span> · last candle ${age.toFixed(0)}s ago${open&&open.value_src?' · value: '+escapeHtml(open.value_src):''}`; }
+    rd.innerHTML=`${new Date(show.t).toTimeString().slice(0,8)} · O <b>${m2Px(show.o)}</b> H <b>${m2Px(show.h)}</b> L <b>${m2Px(show.l)}</b> C <b>${m2Px(show.c)}</b> <span class="${ch>0?'g':(ch<0?'r':'')}">${ch>0?'+':''}${ch.toFixed(2)}%</span> · last candle ${age.toFixed(0)}s ago${open&&open.value_src?' · value: '+escapeHtml(open.value_src):''}${czNote('cm')}`; }
 }
 function cmMaxHold(p, maxS){
   maxS=Number(maxS)||0;
@@ -5037,8 +5086,9 @@ async function cmManual(action){
   const cv=document.getElementById('cmChart'); if(!cv) return;
   cv.addEventListener('mousemove',e=>{ const r=cv.getBoundingClientRect(); _cmChart.hover={x:e.clientX-r.left,y:e.clientY-r.top}; cmDrawChart(); });
   cv.addEventListener('mouseleave',()=>{ _cmChart.hover=null; cmDrawChart(); });
+  czAttach('cm', cv, cmDrawChart, ()=>_cmChart.candles||[]);
   try{ new ResizeObserver(()=>cmDrawChart()).observe(cv.parentElement); }catch(e){ window.addEventListener('resize', cmDrawChart); }
-  document.getElementById('cmChartSel').addEventListener('change',e=>{ _cmChart.sel=e.target.value; _cmChart.mint=e.target.value; _cmChart.candles=[]; _cmChart.marks=null; cmDrawChart(); cmLoadChart(); });
+  document.getElementById('cmChartSel').addEventListener('change',e=>{ _cmChart.sel=e.target.value; _cmChart.mint=e.target.value; _cmChart.candles=[]; _cz.cm.endT=null; _cmChart.marks=null; cmDrawChart(); cmLoadChart(); });
   document.getElementById('cmEntryBtn').addEventListener('click',()=>cmManual('entry'));
   document.getElementById('cmExitBtn').addEventListener('click',()=>cmManual('exit'));
   const box=document.getElementById('cmChartBox'), bd=document.getElementById('cmBackdrop'), btn=document.getElementById('cmChartExp');
