@@ -44,7 +44,10 @@ CANDLE_URL = ("https://frontend-api-v3.pump.fun/candles/solana:5eykt4UsFv8P8NJdT
               "?res={res}&count={count}&measure={measure}")
 BOARD_URL = "https://advanced-indexer.pump.fun/boards/mayhem?tier=web&offset=0&limit=30"
 BASE_FEE_LAMPORTS = 5000
-FEED_ONLY_SOURCES = ("opencopy", "callout", "mayhem")   # AutoTrade-Candles: these sources only offer tokens
+FEED_ONLY_SOURCES = ("opencopy", "callout", "mayhem")
+SEQ_STEPS = (("launch", "Launch"), ("dayscalp", "Dayscalp"), ("callout", "CallOuts"), ("opencopy", "OpenCopy"),
+             ("mayhem", "MayhemMode"), ("board:mayhem_board", "Candles · Mayhem board"), ("board:mixed", "Candles · Mixed"))
+SEQ_STEP_S = 60.0              # Source Sequence: a step with no trade moves on after this   # AutoTrade-Candles: these sources only offer tokens
 PRO_FIRST_MAX_AGE_S = 60.0     # pro_hold first-candle buy: only coins this young (a new coin's first candle)
 SKIP_REASONS = ("KILLED", "NO_POSITION", "ALREADY_LONG", "ENTRIES_PAUSED", "FEED_DEGRADED", "STALE_FEED",
                 "BLACKLIST", "NOT_WHITELISTED", "DAILY_LOSS", "RATE_LIMIT", "COOLDOWN", "MAX_EXPOSURE",
@@ -203,6 +206,8 @@ class CandleMomo:
         self.traded: Dict[str, float] = {}           # mint -> when its last trade closed (one-time-use mode)
         self._mx_rows: Dict[str, List[Dict[str, Any]]] = {}   # Mixed feed: board rows by group
         self._mx_at: Dict[str, float] = {}
+        self.seq_board = ""                           # Source Sequence board step: "mayhem_board" | "mixed" | ""
+        self.seq: Dict[str, Any] = {"i": -1, "at": 0.0, "trade_at": 0.0, "state": "off"}
         self.offers: Dict[str, Dict[str, Any]] = {}    # AutoTrade-Candles feed-only sources: mint -> offer
         self._mirrored: Dict[str, float] = {}         # Paper + AutoTrade-Candles: coins given a paper lot 1
         self.mayhem_of: Dict[str, Optional[bool]] = {}  # mint -> Mayhem coin? (None = still checking)
@@ -304,10 +309,10 @@ class CandleMomo:
                 if not self.cfg.enabled:
                     continue
                 rows: List[Dict[str, Any]] = []
-                if self.cfg.auto_follow == "mixed" and not self.support_source():
+                if self.follow() == "mixed" and not self.support_source():
                     rows = await self._mixed_boards()
                     self.board, self.board_at = rows, time.time()
-                elif self.cfg.auto_follow == "mayhem_board":
+                elif self.follow() == "mayhem_board":
                     try:
                         from src.signal.mayhem2 import get_engine as _m2
                         m2 = _m2()
@@ -325,15 +330,24 @@ class CandleMomo:
 
     # ---------- support mode (AutoTrade-Candles on OpenHolds / CallOuts)
     def support_source(self) -> str:
-        """'opencopy' / 'callout' / 'launch' while AutoTrade-Candles is on and that is the Live Controls source, else ''."""
-        if not self.cfg.support_enabled:
+        """'opencopy' / 'callout' / 'launch' while AutoTrade-Candles is on and that is the Live Controls source, else ''.
+        A Source Sequence board step (Candles · Mayhem board / Mixed) has no support source: Candles picks itself."""
+        if not self.cfg.support_enabled or self.seq_board:
             return ""
+        src = self.live_filter()
+        return src if src in SUPPORT_SOURCES else ""
+
+    @staticmethod
+    def live_filter() -> str:
         try:
             from src.config.runtime import get_config
-            src = str(getattr(get_config(), "filter_mode", "") or "")
+            return str(getattr(get_config(), "filter_mode", "") or "")
         except Exception:
             return ""
-        return src if src in SUPPORT_SOURCES else ""
+
+    def follow(self) -> str:
+        """Candles' own feed: the Source Sequence board step, else the Feed checkbox."""
+        return self.seq_board or self.cfg.auto_follow
 
     @staticmethod
     def _eligible(p, src: str) -> bool:
@@ -401,7 +415,9 @@ class CandleMomo:
         """AutoTrade-Candles on for CallOuts / OpenCopy / MayhemMode (user 2026-11-14): the source does not buy, pin or
         hold — every new token its callers (or Mayhem_Mode) open is offered to Candles, which buys and sells it by its
         own rule (Live or Paper as the Candles switch). Off: the source follows its own rules, no relation to Candles."""
-        return src in FEED_ONLY_SOURCES and bool(self.cfg.support_enabled) and self.support_source() == src
+        # the Live Controls source itself (not support_source()): on a Source Sequence board step MayhemMode stays
+        # the source and must still only offer, not buy
+        return src in FEED_ONLY_SOURCES and bool(self.cfg.support_enabled) and self.live_filter() == src
 
     def offer(self, src: str, mint: str, symbol: str = "", age: Optional[float] = None) -> bool:
         """A source hands a new token to Candles instead of buying it. True the first time (for logging)."""
@@ -415,6 +431,80 @@ class CandleMomo:
             self.note("info", f"{o['symbol']} — {src} offered it (new token); Candles buys / sells it by its "
                               f"{self.cfg.rule} rule ({self.cfg.mode.upper()}).", mint)
         return first
+
+    # ---------- Source Sequence (Candles page button; user 2026-11-14)
+    def _seq_switch(self, i: int) -> None:
+        """Enter step i: a source step switches the Live Controls source (AutoTrade-Candles on, Candles' data and
+        Live / Paper untouched); a board step lets Candles pick from that board itself."""
+        key, name = SEQ_STEPS[i]
+        now = time.time()
+        self.seq.update(i=i, at=now, trade_at=0.0, state="watching")
+        if key.startswith("board:"):
+            self.seq_board = key.split(":", 1)[1]
+            if not self.cfg.support_enabled:
+                self.update({"support_enabled": True})      # the last source (MayhemMode) only offers meanwhile
+        else:
+            self.seq_board = ""
+            self._seq_apply_source(key)
+            if not self.cfg.support_enabled:
+                self.update({"support_enabled": True})
+        self.feeds.clear()
+        self.providers["stream"].wanted = set()
+        self.note("info", f"Source Sequence: step {i + 1}/{len(SEQ_STEPS)} — {name} ({self.cfg.mode.upper()}).")
+
+    def _seq_apply_source(self, key: str) -> None:
+        patch = {"filter_mode": key, "launch_enabled": key == "launch", "dayscalp_enabled": key == "dayscalp",
+                 "callout_enabled": key == "callout", "opencopy_enabled": key == "opencopy",
+                 "mayhem_enabled": key == "mayhem", "mayhem2_enabled": False, "predict_enabled": False}
+        try:
+            from src.observability.dashboard import bus as _bus
+            if _bus._on_config:
+                res = _bus._on_config(patch)                     # same path as the Settings page source switch
+                if asyncio.iscoroutine(res):
+                    asyncio.ensure_future(res)
+            else:
+                from src.config.runtime import update_config
+                update_config(patch)
+        except Exception:
+            log.warning("Source Sequence: switch to %s failed", key, exc_info=True)
+
+    async def _seq_loop(self) -> None:
+        """Each step: up to SEQ_STEP_S for a Candles trade to open; a trade that opened is waited for until it
+        closes (its sell, or Max hold). Then the next step; after Candles · Mixed, Launch again. Never switches
+        while a Candles trade is open or in flight."""
+        while True:
+            await asyncio.sleep(1.0)
+            try:
+                if not self.cfg.source_seq:
+                    if self.seq["state"] != "off":
+                        self.seq_board = ""
+                        self.seq.update(state="off")
+                        self.note("info", "Source Sequence OFF — the current source stays; sources follow their own rules.")
+                    continue
+                now = time.time()
+                if self.seq["i"] < 0 or self.seq["state"] == "off":
+                    self._seq_switch(0 if self.seq["i"] < 0 else self.seq["i"])
+                    continue
+                busy = bool(self.positions) or bool(self.busy) or bool(self.unresolved)
+                if busy:
+                    if not self.seq["trade_at"]:
+                        self.seq["trade_at"] = now
+                    self.seq["state"] = "trade open — waiting for its sell or Max hold"
+                    continue
+                if self.seq["trade_at"] or now - self.seq["at"] >= SEQ_STEP_S:
+                    self._seq_switch((self.seq["i"] + 1) % len(SEQ_STEPS))
+                else:
+                    self.seq["state"] = "watching"
+            except Exception:
+                log.debug("source sequence failed", exc_info=True)
+
+    def seq_status(self) -> Dict[str, Any]:
+        i = self.seq["i"]
+        on = bool(self.cfg.source_seq) and i >= 0 and self.seq["state"] != "off"
+        return {"on": bool(self.cfg.source_seq), "step": (i + 1) if on else 0, "steps": len(SEQ_STEPS),
+                "name": SEQ_STEPS[i][1] if on else "", "next": SEQ_STEPS[(i + 1) % len(SEQ_STEPS)][1] if on else "",
+                "state": self.seq["state"] if on else "off",
+                "left": max(0, round(SEQ_STEP_S - (time.time() - self.seq["at"]))) if on and not self.seq["trade_at"] else None}
 
     def pro_hold_owns_entries(self, src: str) -> bool:
         """pro_hold with AutoTrade-Candles on this source: Candles buys (on Botpredict's BUY); the source only feeds."""
@@ -768,14 +858,14 @@ class CandleMomo:
             if m not in cfg.blacklist:
                 want[m] = {"origin": "manual"}
         state = {str(r.get("m") or ""): r for r in rows}
-        if cfg.auto_follow == "mixed" and not cfg.whitelist_only:
+        if self.follow() == "mixed" and not cfg.whitelist_only:
             for m, info in self._mixed_want(rows).items():
                 want.setdefault(m, info)
             for m in list(self.feeds):
                 if str(self.feeds[m].origin).startswith("mixed") and m not in want:
                     self._mx_left[m] = time.time()        # handed over: not picked again for 5 minutes
                     self._mx_since.pop(m, None)
-        elif cfg.auto_follow == "mayhem_board" and not cfg.whitelist_only:
+        elif self.follow() == "mayhem_board" and not cfg.whitelist_only:
             now = time.time()
             for r in rows:
                 if r.get("m"):
@@ -2270,7 +2360,7 @@ class CandleMomo:
         Mayhem coins: choosing it means trading them, so its own picks ("auto") are never skipped (user 2026-11-14)."""
         if not self.cfg.avoid_mayhem:
             return False
-        if (f is not None and f.origin == "auto" and self.cfg.auto_follow == "mayhem_board"
+        if (f is not None and f.origin == "auto" and self.follow() == "mayhem_board"
                 and not self.support_source()):
             return False
         return True
@@ -2425,7 +2515,7 @@ class CandleMomo:
             get_stream().add_raw_listener(self.providers["stream"].on_trade)
         except Exception:
             log.debug("candle stream hook failed", exc_info=True)
-        for coro in (self._board_loop(), self._poll_loop(), self._value_loop(), self._reserve_loop()):
+        for coro in (self._board_loop(), self._poll_loop(), self._value_loop(), self._reserve_loop(), self._seq_loop()):
             asyncio.ensure_future(coro)
         self.note("info", f"Candle engine started — {self.cfg.mode.upper()}, rule {self.cfg.rule}, poll {self.cfg.poll_ms} ms.")
 
@@ -2507,7 +2597,7 @@ class CandleMomo:
             src_now = str(getattr(_gc(), "filter_mode", "") or "")
         except Exception:
             src_now = ""
-        return {"ok": True, "support": sup, "supportEnabled": bool(self.cfg.support_enabled), "liveSource": src_now,
+        return {"ok": True, "seq": self.seq_status(), "support": sup, "supportEnabled": bool(self.cfg.support_enabled), "liveSource": src_now,
                 "paperOnly": self.cfg.mode != "live", "live": self.cfg.mode == "live",
                 "liveBlock": self.live_block() if self.cfg.mode == "live" else "", "autoTrade": auto,
                 "maxPositionSol": max_pos, "unresolved": bool(self.unresolved), "config": self.cfg.snapshot(), "configErrors": self.cfg_errors,

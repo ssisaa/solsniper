@@ -1215,6 +1215,8 @@ button.lite:hover{color:#fff;border-color:#eef3fb}
         <button type="button" class="m2-btn" id="cmApply">Apply</button>
         <button type="button" class="m2-btn" id="cmEntBtn">Entries …</button>
         <button type="button" class="m2-btn" id="cmLiveBtn">Live: OFF</button>
+        <button type="button" class="m2-btn" id="cmSeqBtn" title="Source Sequence: Launch → Dayscalp → CallOuts → OpenCopy → MayhemMode → Candles · Mayhem board → Candles · Mixed → Launch … Each step waits up to 60 s for a Candles trade; a trade that opened is waited for until it sells or hits Max hold, then the next step. Sources use AutoTrade-Candles. Paper or Live as the Live button.">Source Sequence: OFF</button>
+        <span class="muted" id="cmSeqInfo"></span>
         <button type="button" class="m2-btn bad" id="cmKillBtn">Kill switch</button>
         <button type="button" class="m2-btn" id="cmResetBtn" title="Clear results, trades, signals and paper positions. Settings are kept.">Reset data</button>
         <span class="muted" id="cmMsg"></span>
@@ -4403,6 +4405,9 @@ function paintCandle(d){
   const mp=document.getElementById('cmMode');
   mp.className='m2-pill '+(live?(blk?'off':'bad'):'on');
   mp.textContent=live?(blk?('LIVE — waiting: '+(blk==='NOT_READY'?'bot starting':(blk==='CIRCUIT_BREAKER'?'circuit breaker':blk))):('LIVE · '+Number(d.maxPositionSol||0).toFixed(4)+' SOL / trade')):'PAPER';
+  { const sq=d.seq||{}, sb=document.getElementById('cmSeqBtn');
+    sb.textContent='Source Sequence: '+(sq.on?'ON':'OFF'); sb.className='m2-btn'+(sq.on?' on':'');
+    cmSet('cmSeqInfo', sq.on&&sq.step?`step <b>${sq.step}/${sq.steps}</b> · <b>${escapeHtml(sq.name)}</b> · ${escapeHtml(sq.state)}${sq.left!=null?' · next in '+sq.left+'s':''} · then ${escapeHtml(sq.next)}`:''); }
   const lb=document.getElementById('cmLiveBtn'); lb.className='m2-btn'+(live?' bad':''); lb.textContent=live?'Live: ON (click for paper)':'Live: OFF';
   cmSet('cmDigest','cfg '+escapeHtml(d.digest||'')+((d.configErrors||[]).length?' · <span class="w">'+escapeHtml(d.configErrors.join('; '))+'</span>':''));
   document.getElementById('cmEntBtn').textContent=c.entries_paused?'Resume entries':'Pause entries';
@@ -4476,6 +4481,12 @@ document.getElementById('cmApply').addEventListener('click',()=>{
           inflow_window_s:document.getElementById('cmInflow').value, max_below_peak_pct:document.getElementById('cmBelowPeak').value, exit_reserve_sol:document.getElementById('cmExitRes').value}, 'Settings');
 });
 document.getElementById('cmEntBtn').addEventListener('click',()=>{ if(_cmCfg) cmPost({entries_paused:!_cmCfg.entries_paused}, 'Entries'); });
+document.getElementById('cmSeqBtn').addEventListener('click',()=>{
+  if(!_cmCfg) return;
+  const on=!_cmCfg.source_seq;
+  if(on&&!confirm('Source Sequence ON?\n\nEvery step switches the Live Controls source in turn: Launch → Dayscalp → CallOuts → OpenCopy → MayhemMode → Candles · Mayhem board → Candles · Mixed → again. AutoTrade-Candles stays on; each step waits up to 60 s for a Candles trade, and a trade that opened is waited for until it sells or hits Max hold.\n\nCandles is '+(_cmCfg.mode==='live'?'LIVE — real SOL.':'in PAPER.'))) return;
+  cmPost({source_seq:on}, on?'Source Sequence ON':'Source Sequence OFF — the current source stays');
+});
 document.getElementById('cmLiveBtn').addEventListener('click',()=>{
   if(!_cmCfg) return;
   if(_cmCfg.mode==='live'){ cmPost({mode:'paper'}, _cmCfg.support_enabled?'Paper mode — AutoTrade-Candles now tests the source on paper (no live buys from Candles)':'Paper mode'); return; }

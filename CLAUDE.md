@@ -90,6 +90,14 @@ youngest first, pump mints only, New < 3 min; a coin stays while held, else unti
 `mixed_idle_s` (60 s) with no trade, then the next board's youngest (a handed-over coin is skipped 5 min). Max mints
 slots (pro_hold: one). Paper / LIVE follow Candles' Live switch. Graduated coins are valued by Jupiter.
 
+**Source Sequence (2026-11-14, user's request)**: Candles page button (`source_seq`, default off). On: `_seq_loop` steps
+through `SEQ_STEPS` Launch → Dayscalp → CallOuts → OpenCopy → MayhemMode → Candles · Mayhem board → Candles · Mixed →
+again. Source steps switch the Live Controls source through the dashboard config handler (`_seq_apply_source`, same as
+the Settings page) with AutoTrade-Candles on (`update`, no wipe, Live/Paper untouched); board steps set `seq_board`
+(`support_source()` = "", `follow()` = the board) while MayhemMode stays the source and only offers. A step waits up to
+`SEQ_STEP_S` 60 s for a Candles trade; an opened trade is waited for until it closes (sell / Max hold), then next step
+at once. Never switches while a Candles trade is open / in flight. Off: the current source stays.
+
 **AutoTrade-Candles feed-only sources (2026-11-14, user's request)**: with AutoTrade-Candles on, CallOuts / OpenCopy /
 MayhemMode (`FEED_ONLY_SOURCES`, `feeds_only()`) do not buy, pin or hold: OpenHolds' auto rows (callers' new opens,
 Mayhem_Mode opens) and CallOuts' auto buy call `CandleMomo.offer(src, mint)` instead (main.py); Candles feeds the newest

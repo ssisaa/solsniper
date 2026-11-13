@@ -68,6 +68,7 @@ def _fo(monkeypatch, src="callout", rule="inverse", mode="live"):
     e = CM.CandleMomo()
     e.cfg.rule, e.cfg.mode, e.cfg.support_enabled, e.cfg.avoid_mayhem = rule, mode, True, False
     monkeypatch.setattr(e, "support_source", lambda: src)
+    monkeypatch.setattr(CM.CandleMomo, "live_filter", staticmethod(lambda: src))
     monkeypatch.setattr(e, "_support_held", lambda s: [])
     return e
 
