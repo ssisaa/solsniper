@@ -288,3 +288,31 @@ def test_dayscalp_knows_the_candles_rule(monkeypatch):
     eng = CM.get_engine()
     monkeypatch.setattr(eng.cfg, "rule", "pro_hold")
     assert DS._candle_rule() == "pro_hold"
+
+
+def test_pro_hold_watches_the_first_three_scan_tokens(monkeypatch):
+    from src.signal import candle_momo as CM
+    from src.signal import dayscalp as DS
+    e = CM.CandleMomo()
+    e.cfg.rule = "pro_hold"
+    monkeypatch.setattr(e, "support_source", lambda: "dayscalp")
+    monkeypatch.setattr(e, "_support_sync", lambda src: None)
+    monkeypatch.setattr(e, "_support_held", lambda src: [])
+    now = time.time()
+    picks = [{"mint": f"M{i}" + "x" * 40, "symbol": f"S{i}", "ts": now} for i in range(3)]
+    monkeypatch.setattr(DS, "LAST_CANDLE_PICKS", picks)
+    monkeypatch.setitem(DS.LAST_CANDLE_PICK, "mint", picks[0]["mint"])
+    monkeypatch.setitem(DS.LAST_CANDLE_PICK, "ts", now)
+    e._pick([])
+    assert set(e.feeds) == {p["mint"] for p in picks}
+    e.cfg.rule = "inverse"                       # other rules: only the single top pick
+    e.feeds.clear()
+    e._pick([])
+    assert set(e.feeds) == {picks[0]["mint"]}
+
+
+def test_pro_hold_entry_text_names_the_rule():
+    from src.signal import candle_momo as CM
+    e = CM.CandleMomo()
+    e.cfg.rule = "pro_hold"
+    assert e._hint("X")["entry"].startswith("pro_hold:")

@@ -779,6 +779,9 @@ async def _drop_client(client) -> None:
 # The scan's latest pick under AutoTrade-Candles (top row on Decoded Tokens): Candles feeds it at once,
 # bought or not (Auto Trade off = watch only).
 LAST_CANDLE_PICK: Dict[str, Any] = {"mint": "", "symbol": "", "ts": 0.0}
+# Candles rule pro_hold: it waits for a rare chart setup, so it watches the first few scan tokens, not one.
+PRO_HOLD_WATCH = 3
+LAST_CANDLE_PICKS: List[Dict[str, Any]] = []
 
 
 def _candle_rule() -> str:
@@ -850,10 +853,25 @@ async def select_top1_dayscalp(cfg: Optional[DayScalpConfig] = None) -> Optional
             except Exception:
                 skip = set()
             now_t = time.time()
+            pro_hold = _candle_rule() == "pro_hold"
+            watch: List[Dict[str, Any]] = []
             for row in pool:
                 mint = str(row.get("mint") or "")
                 if (len(mint) < 32 or mint in skip or not (mint.endswith("pump") or mint.startswith("pump"))
                         or _blacklisted(row.get("symbol") or "", row.get("name") or "", cfg)):
+                    continue
+                if pro_hold:
+                    # pro_hold: Dayscalp only picks; Candles watches the first PRO_HOLD_WATCH scan tokens and buys
+                    # one of them on its chart BUY signal
+                    watch.append({"mint": mint, "symbol": str(row.get("symbol") or ""), "ts": now_t})
+                    if len(watch) == 1:
+                        LAST_CANDLE_PICK.update(mint=mint, symbol=str(row.get("symbol") or ""), ts=now_t)
+                    log.info("DAYSCALP candle watch %d %s m5=%+.1f%% mint=%s", len(watch), row.get("symbol") or "?",
+                             _num(row.get("change_m5_pct")), mint[:8])
+                    await _show_decoded(row, "WATCH", f"AutoTrade-Candles pro_hold: scan token {len(watch)} of "
+                                                      f"{PRO_HOLD_WATCH} — Candles buys it on its chart BUY signal")
+                    if len(watch) >= PRO_HOLD_WATCH:
+                        break
                     continue
                 m5 = _num(row.get("change_m5_pct"))
                 age = (now_t - float(row["created_ts"])) if row.get("created_ts") else None
@@ -861,11 +879,6 @@ async def select_top1_dayscalp(cfg: Optional[DayScalpConfig] = None) -> Optional
                 why = f"AutoTrade-Candles: first scan token ({age_txt}) — bought now as lot 1"
                 log.info("DAYSCALP candle pick %s m5=%+.1f%% %s mint=%s", row.get("symbol") or "?", m5, age_txt, mint[:8])
                 LAST_CANDLE_PICK.update(mint=mint, symbol=str(row.get("symbol") or ""), ts=now_t)
-                if _candle_rule() == "pro_hold":
-                    # Candles rule pro_hold buys lot 1 itself, on its chart BUY signal: Dayscalp only picks the coin.
-                    await _show_decoded(row, "WATCH", f"AutoTrade-Candles pro_hold: first scan token ({age_txt}) — "
-                                                      "Candles buys it on its chart BUY signal")
-                    return None
                 await _show_decoded(row, "BUYING", why)
                 return DayScalpCandidate(
                     mint=mint, symbol=row.get("symbol") or "", name=row.get("name") or "",
@@ -877,6 +890,9 @@ async def select_top1_dayscalp(cfg: Optional[DayScalpConfig] = None) -> Optional
                     reasons=[why, f"m5={m5:+.1f}%", f"vol_m5=${_num(row.get('volume_m5_usd')):.0f}"],
                     quick_entry=True,      # buy now: skip the 1s / 1m re-check before the buy (RugCheck still runs)
                 )
+            if pro_hold:
+                LAST_CANDLE_PICKS[:] = watch
+                return None
             log.info("DAYSCALP candle pick — no new scan token")
         for i, row in enumerate(show, start=1):
             m5 = _num(row.get("change_m5_pct"))

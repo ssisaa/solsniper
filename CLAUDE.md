@@ -108,7 +108,9 @@ the open trade up to Total cap (`_fit_cap`); a signal that stays on for several 
 With AutoTrade-Candles on, **pro_hold buys lot 1 itself** (user's choice 2026-11-14): Dayscalp only picks the first
 scan token and feeds it (`dayscalp._candle_rule() == "pro_hold"` → no Dayscalp buy); Candles buys on the chart BUY
 (live, Auto Trade must be on, else `AUTO_TRADE_OFF`). Other rules keep `SUPPORT_NO_ENTRY` (the source buys lot 1).
-MayhemMode's young-open grab still buys through MayhemMode. Backtest on 76 fresh coins: 45–50 % wins but −0.6 … −1.2 %
+MayhemMode's young-open grab still buys through MayhemMode.
+pro_hold signals are rare (the 4-point setup ≈ once a minute per active coin; `inverse` signals on every red), so
+under pro_hold Dayscalp feeds its **first 3** scan tokens (`PRO_HOLD_WATCH`, `LAST_CANDLE_PICKS`), not one. Backtest on 76 fresh coins: 45–50 % wins but −0.6 … −1.2 %
 per trade (held losers lose more than winners make); rule `pro` did +1.8 % on the same coins. User chose to have it.
 
 **Botpredict (2026-11-13)**: `src/signal/botpredict.py`, Mayhem2 strategy `botpredict` — the bot's own learned

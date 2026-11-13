@@ -490,13 +490,15 @@ class CandleMomo:
                     want.setdefault(m, "mayhem-new")
             if src == "dayscalp":
                 try:
-                    from src.signal.dayscalp import LAST_CANDLE_PICK as _pk
+                    from src.signal.dayscalp import LAST_CANDLE_PICK as _pk, LAST_CANDLE_PICKS as _pks
                     for gm, gv in list(self._grab.items()):
                         if time.time() - float(gv.get("at") or 0) > 60:
                             self._grab.pop(gm, None)
-                    if _pk.get("mint") and time.time() - float(_pk.get("ts") or 0) < 20:
-                        want.setdefault(_pk["mint"], "scan")      # Decoded Tokens' top pick: watch it now
-                        self._grab.setdefault(_pk["mint"], {"at": time.time(), "symbol": _pk.get("symbol") or ""})
+                    picks = list(_pks) if cfg.rule == "pro_hold" else [_pk]
+                    for pk in picks:
+                        if pk.get("mint") and time.time() - float(pk.get("ts") or 0) < 20:
+                            want.setdefault(pk["mint"], "scan")      # Decoded Tokens' top pick(s): watch now
+                            self._grab.setdefault(pk["mint"], {"at": time.time(), "symbol": pk.get("symbol") or ""})
                 except Exception:
                     pass
             for m, origin in want.items():
@@ -1446,14 +1448,14 @@ class CandleMomo:
                 up = held.get("upct")
                 n = len(held.get("lots") or []) or 1
                 room = max(0.0, cfg.ladder_max_total_sol - float(held.get("entry_sol") or 0))
-                out["entry"] = (f"buy {n + 1} on the next chart BUY signal (no red-candle lots; {room:.4f} SOL left of Total cap "
+                out["entry"] = (f"pro_hold: buy {n + 1} on the next chart BUY signal (no red-candle lots; {room:.4f} SOL left of Total cap "
                                 f"{cfg.ladder_max_total_sol:g})" if room >= 0.001 else f"Total cap {cfg.ladder_max_total_sol:g} SOL reached")
                 hold_txt = f"in a loss it holds up to Max hold {cfg.max_hold_s:.0f}s" if cfg.max_hold_s else "in a loss it holds (Max hold is off)"
                 out["exit"] = (f"{'now ' + format(up, '+.1f') + '% — ' if up is not None else ''}sells once ≥ {tgt:g}% "
                                f"after fees ({tgt_from}); {hold_txt}")
                 out["ready"] = bool(up is not None and up >= tgt)
             else:
-                out["entry"] = "lot 1 on the chart's Pro Trader BUY (≥10% under VWAP, green, RSI<45, volume ≥1.5x)"
+                out["entry"] = "pro_hold: lot 1 on the chart BUY signal (≥10% under VWAP, green, RSI<45, volume ≥1.5x)"
                 out["exit"] = "—"
             return out
         if cfg.rule == "pro":
