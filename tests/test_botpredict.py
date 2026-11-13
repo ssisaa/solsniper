@@ -54,7 +54,7 @@ def test_strategy_listed_and_shares_exits():
     c = RuntimeConfig()
     c.update_from({"mayhem2_strategy": "botpredict"})
     assert c.mayhem2_strategy == "botpredict" and "botpredict" in M.SHADOWS
-    assert BP.TARGET_PCT == 25.0 and BP.STOP_PCT == -8.0 and BP.TIME_STOP_S == 60.0
+    assert BP.TARGET_PCT == 40.0 and BP.PRED_PCT == 25.0 and BP.STOP_PCT == -8.0 and BP.TIME_STOP_S == 60.0
     assert "botpredict" in M.CHART_STRATS
 
 
@@ -63,7 +63,8 @@ def test_botpredict_stop_is_wider_than_pro_trader():
     assert M.Mayhem2._pro_exit(-7.5, 5, "pro_trader").startswith("Pro Trader stop")
     assert M.Mayhem2._pro_exit(-7.5, 5, "botpredict") == ""
     assert M.Mayhem2._pro_exit(-10.5, 5, "botpredict").startswith("Botpredict stop")
-    assert M.Mayhem2._pro_exit(23.5, 5, "botpredict").startswith("Botpredict target")
+    assert M.Mayhem2._pro_exit(38.5, 5, "botpredict").startswith("Botpredict target")
+    assert M.Mayhem2._pro_exit(23.5, 5, "botpredict") == ""
 
 
 def test_wick_of_six_percent_does_not_stop_botpredict():

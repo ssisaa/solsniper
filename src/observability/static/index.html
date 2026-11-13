@@ -1190,7 +1190,7 @@ button.lite:hover{color:#fff;border-color:#eef3fb}
         </div>
       </div>
       <div class="m2-ctl">
-        <label>Rule <select id="cmRuleSel"><option value="own_candle">own_candle (close vs open)</option><option value="inverse">inverse (buy red, sell green)</option><option value="literal">literal (open vs prev close)</option><option value="pro">pro — Pro Trader (VWAP dip with volume; +25% / −5% / 60s)</option></select></label>
+        <label>Rule <select id="cmRuleSel"><option value="own_candle">own_candle (close vs open)</option><option value="inverse">inverse (buy red, sell green)</option><option value="literal">literal (open vs prev close)</option><option value="pro">pro — Pro Trader (VWAP dip with volume; +40% / −5% / 120s)</option></select></label>
         <label>Min Δ % <input class="cm-in" id="cmDelta" type="number" step="0.1" min="0"/></label>
         <label>Buy SOL <input class="cm-in" id="cmSize" type="number" step="0.001" min="0.0001"/></label>
         <label>Coins <input class="cm-in" id="cmMax" type="number" step="1" min="0" max="10"/></label>
@@ -4550,9 +4550,9 @@ function bpHtml(bp){
   if(!bp.ok) return `<div class="dk-bp"><span class="nm">◆ BOTPREDICT</span><span>${escapeHtml(bp.why||'')}</span></div>`;
   const pc=v=>v==null?'—':((v>0?'+':'')+Number(v).toFixed(1)+'%'), p=Number(bp.prob||0), thr=Number(bp.thr||0.15), full=Math.max(thr*2,p*1.1,0.01);
   const rp=bp.replay||{};
-  return `<div class="dk-bp" title="Botpredict: the bot's own model, learned from 171 pump coins. It predicts the chance that the price hits +${bp.targetPct}% before ${bp.stopPct}% within ${bp.timeStopS}s from here, and buys only its top 2% most confident moments (≥ ${(thr*100).toFixed(0)}%). Strategy botpredict trades it.">
+  return `<div class="dk-bp" title="Botpredict: the bot's own model, learned from 171 pump coins. It predicts the chance that the price hits +${bp.predPct||25}% before ${bp.stopPct}% within ${bp.timeStopS}s from here, and buys only its top 2% most confident moments (≥ ${(thr*100).toFixed(0)}%). Strategy botpredict trades it.">
     <span class="nm">◆ BOTPREDICT</span><span class="cl ${escapeHtml(bp.call)}">${escapeHtml(bp.call)}</span>
-    <span>chance of +${bp.targetPct}% first <b>${(p*100).toFixed(1)}%</b></span>
+    <span>chance of +${bp.predPct||25}% first <b>${(p*100).toFixed(1)}%</b> · sells at +${bp.targetPct}%</span>
     <span class="dk-bpbar"><i style="width:${Math.min(100,p/full*100)}%"></i><s style="left:${Math.min(100,thr/full*100)}%"></s></span>
     <span>buys at <b>${(thr*100).toFixed(0)}%</b> · normal <b>${(Number(bp.base||0)*100).toFixed(1)}%</b>${bp.edge?` · <b>${bp.edge}×</b> normal`:''}</span>
     ${bp.holding?`<span>in trade <b class="${bp.pnlPct>0?'g':(bp.pnlPct<0?'r':'')}">${pc(bp.pnlPct)}</b></span>`:''}

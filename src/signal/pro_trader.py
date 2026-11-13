@@ -13,6 +13,10 @@ The setup (chosen by testing, 2026-11-13, 43 pump coins / 10,412 1s candles, spl
   as momentum did before (memory: Mayhem coin economics). Small sample: no promise, losses will come.
   OUT OF SAMPLE (2026-11-13, 52 coins recorded later): 121 trades, 22% wins, -1.7% per trade — the edge did
   not hold. Botpredict (src/signal/botpredict.py) held up on those same coins; prefer it.
+  EXITS (2026-11-14, 76 fresh coins, exits only): after a BUY call the price dips first (median low -2.6% in 10
+  candles, bottom ~4th candle) then rises (median +5.9% after 30 candles; 45% reach +25% within 60). Target +40% /
+  stop -5% / 120s: +1.1% per trade on training coins, +1.8% on fresh coins, +1.1% entering late (was +0.4 / +0.4 /
+  -0.1 with +25% / 60s). Buying a deeper dip after the call (limit -3..-12%) did worse.
 
 The trend / momentum read (EMA 9 / 21, VWAP, RSI, MACD, volume, on-chain flow) is shown as context and as the
 confidence, not as the entry trigger.
@@ -31,9 +35,10 @@ MIN_CANDLES = 25
 DIP_PCT = 10.0          # close at least this far under VWAP
 DIP_RSI = 45.0          # RSI under this
 VOL_X = 1.5             # last 5 candles' volume vs the 20 before
-TARGET_PCT = 25.0
+TARGET_PCT = 40.0      # 2026-11-14: was +25% / 60s. After a BUY call the price usually dips (bottom ~4th candle)
+                       # and rises over 20-30 candles; +40% / 120s let that run (see EXITS in the docstring)
 STOP_PCT = -5.0
-TIME_STOP_S = 60.0
+TIME_STOP_S = 120.0
 FEE_PCT = 2.0           # round trip, for the replay
 
 

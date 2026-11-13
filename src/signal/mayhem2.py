@@ -72,14 +72,14 @@ SHADOW_RULES = {
     "copy": "BUY→buy, SELL→sell", "inverse": "SELL→buy, BUY→sell", "inverse_tp": "SELL→buy, exit TP/stop/25s",
     "inverse_big": "SELL ≥0.05 SOL→buy, BUY→sell", "inverse_big_tp": "SELL ≥0.05 SOL→buy, exit TP/stop/25s",
     "ladder": "BUY→buy, SELL→sell if in profit, BUY below last buy→buy again (max 3)",
-    "pro_trader": "chart trader: BUY on a VWAP dip with volume (≥10% under VWAP, green, RSI<45, vol ≥1.5x); target +25%, stop −5%, 60s time stop",
-    "botpredict": "bot's own prediction: BUY when its learned model gives ≥ ~21% chance of +25% before −8% in 60s (top 2% of moments); target +25%, stop −8%, 60s",
+    "pro_trader": "chart trader: BUY on a VWAP dip with volume (≥10% under VWAP, green, RSI<45, vol ≥1.5x); target +40%, stop −5%, 120s time stop",
+    "botpredict": "bot's own prediction: BUY when its learned model gives ≥ ~21% chance of +25% before −8% in 60s (top 2% of moments); target +40%, stop −8%, 60s",
     "inv_ladder": "inverse ladder: SELL (red)→buy lot 1, leave 3 reds, next red→next lot below the last buy (lots on reds 1, 5, 9; max 3), BUY (green)→sell all",
 }
 LADDERS = ("ladder", "inv_ladder")
 PRO = "pro_trader"
 BOTP = "botpredict"
-CHART_STRATS = (PRO, BOTP)              # strategies that trade a chart read: same +25% / -5% / 60s exits
+CHART_STRATS = (PRO, BOTP)              # strategies that trade a chart read (own plans: pro +40/-5/120s, bp +40/-8/60s)
 PRO_EVERY = 1.0                         # chart read for the pinned coin      # multi-buy strategies: no stop, no max hold
 INV_REDS_PER_LOT = 4                    # inv_ladder: after a lot, leave 3 reds, buy on the 4th (lots on reds 1, 5, 9)
 # Ladder: up to this many buys into one trade. A SELL signal sells only at PROFIT_MIN_PCT or better

@@ -95,6 +95,12 @@ as `pro`; the Mayhem2 chart draws EMA/VWAP lines, volume, an RSI pane, target/st
 (BUY when flat; SELL at target / stop / time stop, not held back by Sell-only-in-profit; no ladder);
 `/api/candles?ctx=candle` follows the Candles trade; the Candles chart draws the same lines, RSI pane, desk and zones.
 
+**Chart-strategy exits (2026-11-14)**: after a BUY call the price usually dips first (bottom ~3rd–4th candle) and
+then rises over 20–30 candles, so the targets were raised to let it run: **Pro Trader +40 % / −5 % / 120 s**,
+**Botpredict +40 % / −8 % / 60 s** (model still predicts +25 % first: `PRED_PCT`). On 76 fresh coins this beat the
+old +25 % exits on training coins, fresh coins and late entries (bp +1.2 / +5.6 / +2.8 %/trade; pro +1.1 / +1.8 /
++1.1). Buying a deeper dip after the call (limit −3…−12 %) did worse.
+
 **Botpredict (2026-11-13)**: `src/signal/botpredict.py`, Mayhem2 strategy `botpredict` — the bot's own learned
 model (logistic, 22 chart features, weights embedded in `MODEL`) for "price hits +25 % before −5 % within 60 s";
 buys only its top 2 % moments; exits +25 % / **−8 %** / 60 s (own plan in `_pro_exit(…, name)`; pro_trader keeps −5 %).

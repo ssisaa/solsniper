@@ -14,13 +14,19 @@ History (2026-11-13/14):
   widen anyway; -8% is the least costly wider stop. Weights below are fit for -8% on all 171 coins
   (36,847 moments, 5.7% of them hit +25% first). Small samples: an edge, not a promise.
 
+- Exits (2026-11-14, 76 fresh coins): the price after a BUY call usually dips first (bottom ~3rd candle) and then
+  runs (median +3.3% after 10 candles, +41% after 30; 73% reach +25% within 60). Selling at +40% instead of +25%
+  (same -8% stop, 60s): +1.2% / +5.6% / +2.8% per trade on training coins / fresh coins / fresh entering late, vs
+  +0.1% / +3.6% / +1.7%. The model still predicts +25% first (PRED_PCT); only the sell target moved.
+
 Pure math, no I/O: the engine, the page and the tests all see the same prediction.
 """
 
 import math
 from typing import Any, Dict, List, Optional
 
-TARGET_PCT = 25.0
+PRED_PCT = 25.0        # what the model predicts: +25% before the stop within 60s (its training label)
+TARGET_PCT = 40.0      # where it sells (2026-11-14): after a BUY the move usually keeps going; +40% let it run
 STOP_PCT = -8.0       # widened from -5% at the user's request (2026-11-14); -5% tested better, see the docstring
 TIME_STOP_S = 60.0
 FEE_PCT = 2.0
@@ -194,7 +200,7 @@ def analyze(cs: List[Dict[str, float]], holding: Optional[Dict[str, Any]] = None
         why = _exit(cs, i, entry, float(holding.get("held") or 0))
         call, text = ("SELL", why) if why else ("HOLD", f"in the trade — target {TARGET_PCT:+.0f}%, stop {STOP_PCT:+.0f}%, {TIME_STOP_S:.0f}s max")
     elif p >= thr:
-        call, text = "BUY", f"{p * 100:.0f}% chance of +{TARGET_PCT:.0f}% before {STOP_PCT:.0f}% (normal {MODEL['base'] * 100:.0f}%)"
+        call, text = "BUY", f"{p * 100:.0f}% chance of +{PRED_PCT:.0f}% before {STOP_PCT:.0f}% (normal {MODEL['base'] * 100:.0f}%) — sells at +{TARGET_PCT:.0f}%"
     else:
         call, text = "WAIT", f"{p * 100:.1f}% chance — buys at {thr * 100:.0f}%+"
     wins = sum(1 for x in trades if x > 0)
@@ -203,7 +209,7 @@ def analyze(cs: List[Dict[str, float]], holding: Optional[Dict[str, Any]] = None
         "edge": round(p / MODEL["base"], 2) if MODEL["base"] else None,
         "pros": pros, "cons": cons, "px": px, "entry": entry,
         "target": entry * (1 + TARGET_PCT / 100), "stop": entry * (1 + STOP_PCT / 100),
-        "targetPct": TARGET_PCT, "stopPct": STOP_PCT, "timeStopS": TIME_STOP_S, "holding": bool(holding),
+        "targetPct": TARGET_PCT, "predPct": PRED_PCT, "stopPct": STOP_PCT, "timeStopS": TIME_STOP_S, "holding": bool(holding),
         "pnlPct": round((px / entry - 1) * 100, 2) if holding else None,
         "probs": [{"t": cs[k]["t"], "p": round(v, 4)} for k, v in sorted(probs.items())][-180:],
         "replay": {"marks": marks, "trades": len(trades), "wins": wins, "sumPct": round(sum(trades), 1),
