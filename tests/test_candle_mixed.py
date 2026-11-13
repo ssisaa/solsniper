@@ -79,3 +79,22 @@ def test_stream_candles_use_trade_price_when_price_sol_is_zero():
         st.on_trade({"mint": "G", "price_sol": 0.0, "trade_px": px, "ts": base + dt, "sol": 0.01})
     rows = asyncio.run(st.fetch("G", None))
     assert [round(r.close * 1e8) for r in rows] == [10, 12, 9]
+
+
+def test_avoid_mayhem_skips_mayhem_rows_and_blocks_buys():
+    e = _eng()
+    rows = _rows() + [{"m": "MAYHpump", "t": "M", "_grp": "new", "_age": 1, "c": "solana", "ms": "active"}]
+    assert "MAYHpump" not in [r["m"] for r in e._mixed_candidates(rows)]
+    e.cfg.avoid_mayhem = False
+    assert "MAYHpump" in [r["m"] for r in e._mixed_candidates(rows)]
+    e.cfg.avoid_mayhem = True
+    e.cfg.inflow_window_s = 0
+    e.cfg.max_below_peak_pct = 0
+    e.feeds["X"] = CM.Feed("X", 10)
+    e.mayhem_of["X"] = True
+    assert e._entry_filters("X")[0] == "MAYHEM_COIN"
+    e.mayhem_of["X"] = False
+    assert e._entry_filters("X")[0] == ""
+    e.mayhem_of.pop("X")
+    e.feeds["X"].board_state = "active"
+    assert e._entry_filters("X")[0] == "MAYHEM_COIN"

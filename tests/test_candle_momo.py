@@ -12,6 +12,16 @@ from src.signal.candle_store import Store
 FIX = os.path.join(os.path.dirname(__file__), "fixtures", "candles_mayhem_20261110.json")
 
 
+
+import pytest as _pytest
+
+
+@_pytest.fixture(autouse=True)
+def _normal_coins(monkeypatch):
+    """These tests use made-up coins: answer 'not a Mayhem coin' at once (no pump request)."""
+    from src.signal import candle_momo as _CM
+    monkeypatch.setattr(_CM.CandleMomo, "_check_mayhem", lambda self, mint: self.mayhem_of.setdefault(mint, False))
+
 def K(t, o, c, final=True):
     return C.Candle(t=t, open=o, high=max(o, c), low=min(o, c), close=c, volume=1.0, final=final)
 

@@ -90,6 +90,14 @@ youngest first, pump mints only, New < 3 min; a coin stays while held, else unti
 `mixed_idle_s` (60 s) with no trade, then the next board's youngest (a handed-over coin is skipped 5 min). Max mints
 slots (pro_hold: one). Paper / LIVE follow Candles' Live switch. Graduated coins are valued by Jupiter.
 
+**Candles avoid_mayhem (2026-11-14, user's request)**: Candles page "Skip Mayhem coins" (default on): no new
+Candles trade on a Mayhem coin (`MAYHEM_COIN` in `_entry_filters`; board `ms` or pump's mayhem-state, checked once per
+coin `_check_mayhem`); Mixed skips Mayhem rows. Reason: pump pauses Mayhem coins and a paused coin can't sell —
+pro_hold 18:06–23:57 on 2026-11-13: take-profit 32 trades +0.131 SOL, coin paused 27 trades −0.174, max hold 10 −0.070.
+With feed Mayhem board (all Mayhem coins) it never buys while this is on. Trade stream: Candles' coins go first in the
+220-coin subscription list (`_HEAD_MINTS`); stream candles use each trade's own price (`trade_px`). Graduated
+(PumpSwap) coins still get no stream trades (pump_rest only) — not solved.
+
 **Pro Trader (2026-11-13)**: `src/signal/pro_trader.py` reads the pinned coin's 1s candles (EMA 9/21, VWAP, RSI,
 MACD, volume, 15 s BUY/SELL flow) → call BUY / SELL / HOLD / WAIT / AVOID with entry, target, stop, checklist and a
 replay of the rules on the chart. Entry = "VWAP dip with volume" (≥10 % under VWAP, green candle, RSI < 45, last-5

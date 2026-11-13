@@ -47,7 +47,7 @@ BASE_FEE_LAMPORTS = 5000
 SKIP_REASONS = ("KILLED", "NO_POSITION", "ALREADY_LONG", "ENTRIES_PAUSED", "FEED_DEGRADED", "STALE_FEED",
                 "BLACKLIST", "NOT_WHITELISTED", "DAILY_LOSS", "RATE_LIMIT", "COOLDOWN", "MAX_EXPOSURE",
                 "MAX_TRADE", "NOT_READY", "CIRCUIT_BREAKER", "BUY_UNRESOLVED", "DUPLICATE", "COALESCED", "STALE", "IN_FLIGHT", "NOT_TRADABLE", "LADDER_WAIT", "LADDER_MAX", "LADDER_CAP", "GREEN_CONFIRM", "NOT_IN_PROFIT", "LOW_RESERVES", "CRASH_CANDLE", "BELOW_BREAKEVEN", "SOL_OUTFLOW",
-                "FAR_BELOW_PEAK", "LADDER_ABOVE", "SUPPORT_NO_ENTRY", "AUTO_TRADE_OFF")
+                "FAR_BELOW_PEAK", "LADDER_ABOVE", "SUPPORT_NO_ENTRY", "AUTO_TRADE_OFF", "MAYHEM_COIN")
 
 
 # ---------------------------------------------------------------- providers
@@ -201,6 +201,7 @@ class CandleMomo:
         self.traded: Dict[str, float] = {}           # mint -> when its last trade closed (one-time-use mode)
         self._mx_rows: Dict[str, List[Dict[str, Any]]] = {}   # Mixed feed: board rows by group
         self._mx_at: Dict[str, float] = {}
+        self.mayhem_of: Dict[str, Optional[bool]] = {}  # mint -> Mayhem coin? (None = still checking)
         self._mx_turn = 0                             # index in mayhem2.MIXED_GROUPS whose turn is next
         self._mx_since: Dict[str, float] = {}         # mint -> when Mixed started watching it
         self._mx_left: Dict[str, float] = {}          # mint -> when Mixed handed it over
@@ -575,8 +576,8 @@ class CandleMomo:
                 if g == "new" and r["_age"] > min(YOUNG_S, cfg.max_age_s):
                     continue
                 ms = str(r.get("ms") or "").lower()
-                if ms and ms not in ("active", "enabled"):
-                    continue
+                if ms and (cfg.avoid_mayhem or ms not in ("active", "enabled")):
+                    continue                      # a Mayhem coin (pump can pause it), or one already paused
                 if m in cfg.blacklist or m in self.unusable or (not cfg.reuse_coin and m in self.traded):
                     continue
                 part.append(r)
@@ -654,6 +655,8 @@ class CandleMomo:
             if cfg.rule == "pro_hold":
                 want = self._one_feed(want)
             for m, origin in want.items():
+                if cfg.avoid_mayhem and m not in self.mayhem_of:
+                    self._check_mayhem(m)
                 if m not in self.feeds:
                     f = Feed(m, cfg.count)
                     f.origin = src
@@ -716,6 +719,10 @@ class CandleMomo:
                 self.note("info", f"Watching {r0.get('t') or mint[:6]} ({what}).", mint)
             f = self.feeds[mint]
             r = state.get(mint)
+            if r and r.get("ms"):
+                self.mayhem_of[mint] = True
+            if cfg.avoid_mayhem and mint not in self.mayhem_of:
+                self._check_mayhem(mint)
             if r:
                 f.symbol = str(r.get("t") or f.symbol)
                 f.board_state = str(r.get("ms") or "").lower()
@@ -2138,6 +2145,26 @@ class CandleMomo:
             except Exception:
                 log.debug("candle reserve read failed", exc_info=True)
 
+    def _check_mayhem(self, mint: str) -> None:
+        """Ask pump once whether this coin is a Mayhem coin (its mayhem-state is null for a normal coin)."""
+        if mint in self.mayhem_of or not self.loop:
+            return
+        self.mayhem_of[mint] = None
+
+        async def go() -> None:
+            from src.data.fast_get import mayhem2_get
+            from src.signal.mayhem2 import STATE_URL
+            try:
+                body = await asyncio.to_thread(mayhem2_get, STATE_URL.format(mint=mint), "candlemayhem", 3.0)
+                self.mayhem_of[mint] = bool(isinstance(body, dict) and body.get("state"))
+            except Exception:
+                self.mayhem_of.pop(mint, None)          # try again on the next signal
+        try:
+            asyncio.get_running_loop()
+            asyncio.ensure_future(go())
+        except RuntimeError:
+            asyncio.run_coroutine_threadsafe(go(), self.loop)
+
     def _entry_filters(self, mint: str) -> Tuple[str, str]:
         """New trades only (not ladder lots, not manual): money still flowing in, not far below the peak.
         -> (skip reason, detail) or ("", "")."""
@@ -2145,6 +2172,19 @@ class CandleMomo:
         f = self.feeds.get(mint)
         if f is None:
             return "", ""
+        if cfg.avoid_mayhem:
+            # pump pauses Mayhem coins (89% within ~1 min) and a paused coin cannot be sold: 27 pro_hold trades
+            # held in a loss were frozen there (-0.174 SOL, 2026-11-13 18:09-22:50). Normal coins are never paused.
+            mh = self.mayhem_of.get(mint)
+            if mh is None and f.board_state:
+                mh = True
+            if mh is None:
+                self._check_mayhem(mint)
+                mh = self.mayhem_of.get(mint)
+            if mh is None:
+                return "MAYHEM_COIN", "checking whether pump can pause this coin"
+            if mh:
+                return "MAYHEM_COIN", "a Mayhem coin — pump can pause it and a paused coin cannot be sold"
         if cfg.inflow_window_s > 0:
             now = time.time()
             hist = list(f.reserves)

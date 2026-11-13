@@ -176,6 +176,7 @@ class Config:
     provider: str = "pump_rest"              # pump_rest | stream
     fallback: str = "stream"                 # "" | stream | pump_rest
     auto_follow: str = "mayhem_board"        # none | mayhem_board | mixed (New -> Movers -> Graduated, youngest first)
+    avoid_mayhem: bool = True                # never buy a Mayhem coin (pump can pause it; a paused coin cannot sell)
     mixed_idle_s: float = 60.0               # mixed: a watched coin with no trade for this long hands over to the next turn
     max_mints: int = 1
     min_age_s: float = 3.0

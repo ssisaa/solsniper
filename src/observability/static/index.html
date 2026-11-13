@@ -1204,6 +1204,7 @@ button.lite:hover{color:#fff;border-color:#eef3fb}
         <label title="On: keep trading the same coin until it is paused or completed. Off: one trade per coin (win or loss), then move on to a new coin"><input type="checkbox" id="cmReuse"/> Reuse same coin</label>
         <span class="cm-feeds" title="Where Candles gets its coins when AutoTrade-Candles is off. Paper or LIVE follows the Live switch.">Feed:
           <label title="Mayhem_Mode's board: young Mayhem coins"><input type="checkbox" class="cm-feed" data-feed="mayhem_board"/> Mayhem board</label>
+          <label title="On: Candles never buys a Mayhem coin. Pump pauses Mayhem coins (most within a minute) and a paused coin cannot be sold — 27 pro_hold trades were frozen that way. Normal coins are never paused."><input type="checkbox" id="cmAvoidMayhem"/> Skip Mayhem coins</label>
           <label title="Takes turns New → Movers → Graduated → New …, the youngest coin of each board (pump mints only). The coin stays while a trade is open; after its trade completes, or 60 s with no trade, the next board's youngest is fed."><input type="checkbox" class="cm-feed" data-feed="mixed"/> Mixed (New, Movers, Graduated)</label>
         </span>
         <label>Pinned mints <input class="cm-mints" id="cmMints" placeholder="mint mint …"/></label>
@@ -4355,6 +4356,7 @@ function paintCandle(d){
       document.getElementById('cmSize').value=c.buy_size_sol;
       document.getElementById('cmMax').value=c.max_mints;
       document.getElementById('cmReuse').checked=c.reuse_coin!==false;
+      document.getElementById('cmAvoidMayhem').checked=c.avoid_mayhem!==false;
       document.querySelectorAll('.cm-feed').forEach(b=>{ b.checked=(b.dataset.feed===(c.auto_follow||'mayhem_board')); });
       document.getElementById('cmMints').value=(c.mints||[]).join(' ');
       document.getElementById('cmLadOn').checked=!!c.ladder_enabled;
@@ -4440,6 +4442,9 @@ function paintCandle(d){
     <td>${(t.entry_sol||0).toFixed(4)}</td><td>${(t.exit_sol||0).toFixed(5)}</td><td>${(t.costs_sol||0).toFixed(5)}</td>
     <td class="${m2Cls(t.pnl_sol)}">${cmSol(t.pnl_sol)}</td><td class="${m2Cls(t.pct)}">${m2Pct(t.pct)}</td><td>${escapeHtml(t.why||'')}${t.paused_exit?' <span class="w">paused</span>':''}</td></tr>`).join(''):'<tr><td colspan="11" class="muted">No closed trade yet.</td></tr>');
 }
+document.getElementById('cmAvoidMayhem').addEventListener('change',e=>{
+  cmPost({avoid_mayhem:e.target.checked}, e.target.checked?'Skip Mayhem coins: on (never buys a coin pump can pause)':'Skip Mayhem coins: off');
+});
 document.addEventListener('change', e=>{
   if(!(e.target&&e.target.classList&&e.target.classList.contains('cm-feed'))) return;
   const f=e.target.dataset.feed;
