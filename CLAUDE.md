@@ -104,8 +104,11 @@ old +25 % exits on training coins, fresh coins and late entries (bp +1.2 / +5.6 
 **Candles rule `pro_hold` (2026-11-14, user's request)**: buys on **Botpredict's BUY** (◆ BP; user's choice after a
 test with sell-in-profit +10 % / Max hold 300 s on 76 unseen coins: Botpredict trigger +5.0 %/trade, 84 % won, late
 +4.4 %; Pro Trader setup −0.7 %; either +2.0 %). Earlier it bought on the chart's Pro Trader BUY; sell only once the whole
-trade is in profit after fees (`green_target()`: Min profit, or Fast Pace margin), checked in the value loop; in a
-loss hold until Max hold, then sell; no stop, no red-candle ladder. **Every new BUY signal buys again** (Max position) into
+trade is in profit after fees (`green_target()`: Min profit, or Fast Pace margin); **SELL signal (2026-11-13, user's
+request)**: once the trade is ≥ that target the value loop only arms it (`pro_armed`, `pro_peak`) and the chart makes a
+SELL signal on the first red 1s candle while still ≥ target (`_pro_hold_take`, fresh value ≤ 3 s, re-checked by
+`_in_profit` before the sell; below target no SELL ever) — tested on 76 unseen coins at 15 %: median +21.6 % vs +20.1 %
+selling at once, late entry +14.4 % vs +12.8 %; in a loss hold until Max hold, then sell; no stop, no red-candle ladder. **Every new BUY signal buys again** (Max position) into
 the open trade up to Total cap (`_fit_cap`); a signal that stays on for several candles buys once (`f.pro_was_buy`).
 With AutoTrade-Candles on, **pro_hold buys lot 1 itself** (user's choice 2026-11-14): Dayscalp only picks the first
 scan token and feeds it (`dayscalp._candle_rule() == "pro_hold"` → no Dayscalp buy); Candles buys on the chart BUY

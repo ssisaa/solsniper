@@ -689,6 +689,17 @@ class CandleMomo:
             px = float(self._px_at(f, ts) or 0)
         return {"flow": None, "holding": {"entry": px, "held": time.time() - ts} if px > 0 else None}
 
+    def _pro_hold_take(self, held: Dict[str, Any], cur) -> Optional[tuple]:
+        """pro_hold take-profit read: (trade %, target, from) when the trade is in profit after fees and this
+        1s candle is red, else None. Never on the loss side: below the target it keeps holding (Max hold)."""
+        up = held.get("upct")
+        if up is None or held.get("closing") or not (cur.close < cur.open):
+            return None
+        if time.time() - float(held.get("value_at") or 0) > 3:
+            return None                      # stale value: no sell signal on an old price
+        tgt, tgt_from = self.green_target()
+        return (float(up), tgt, tgt_from) if float(up) >= tgt else None
+
     def _pro_evaluate(self, f: Feed, seen: float) -> None:
         """Rule "pro": a day trader's read of the 1s chart (src/signal/pro_trader.py) once per new candle.
         Flat + BUY call -> BUY; holding + SELL call (target / stop / time stop) -> SELL."""
@@ -725,6 +736,14 @@ class CandleMomo:
             side = "BUY"                     # pro_hold: each new BUY signal buys again into the open trade
         elif held is not None and a.get("call") == "SELL" and self.cfg.rule == "pro":
             side = "SELL"
+        elif held is not None and self.cfg.rule == "pro_hold" and self._pro_hold_take(held, cur) is not None:
+            # pro_hold SELL signal, profit side only: the whole trade is >= target after fees and the green run
+            # just ended (a red 1s candle). Tested on 76 unseen coins: beat selling at once at the target.
+            side = "SELL"
+            up, tgt, tgt_from = self._pro_hold_take(held, cur)
+            a = {"call": "SELL", "px": cur.close,
+                 "why": (f"take profit — trade {up:+.1f}% ≥ {tgt:g}% after fees ({tgt_from}), green run ended "
+                         f"(red candle; peak {float(held.get('pro_peak') or up):+.1f}%)")}
         else:
             return
         lag_ms = (seen - (cur.t + 1000) / 1000.0) * 1000.0
@@ -733,7 +752,7 @@ class CandleMomo:
                "ref": cur.open, "deltaPct": round((cur.close / cur.open - 1) * 100, 4) if cur.open else 0.0,
                "candleTs": cur.t, "rule": "pro", "provider": f.using, "feedLagMs": round(lag_ms),
                "symbol": f.symbol, "seen": seen, "pro": True, "pro_why": str(a.get("why") or ""),
-               "pro_px": float(a.get("px") or 0)}
+               "pro_px": float(a.get("px") or 0), "pro_hold_sell": side == "SELL" and self.cfg.rule == "pro_hold"}
         self.feed_lag_ms.append(lag_ms)
         self.m["signals_buy" if side == "BUY" else "signals_sell"] += 1
         self.recent.appendleft(sig)
@@ -941,8 +960,8 @@ class CandleMomo:
                     await self._live_buy(sig)
                 else:
                     await self._paper_buy(sig)
-            elif (self.cfg.sell_only_in_profit and not sig.get("manual") and not sig.get("pro")
-                  and not await self._in_profit(sig)):
+            elif (((self.cfg.sell_only_in_profit and not sig.get("pro")) or sig.get("pro_hold_sell"))
+                  and not sig.get("manual") and not await self._in_profit(sig)):
                 pass                                 # skipped NOT_IN_PROFIT: keep holding, wait for a better green
             else:
                 why = ("manual Exit all (chart button) — sold at the market, not a rule sell" if sig.get("manual")
@@ -1494,8 +1513,9 @@ class CandleMomo:
                 out["entry"] = (f"pro_hold: buy {n + 1} on the next Botpredict BUY (◆ BP) (no red-candle lots; {room:.4f} SOL left of Total cap "
                                 f"{cfg.ladder_max_total_sol:g})" if room >= 0.001 else f"Total cap {cfg.ladder_max_total_sol:g} SOL reached")
                 hold_txt = f"in a loss it holds up to Max hold {cfg.max_hold_s:.0f}s" if cfg.max_hold_s else "in a loss it holds (Max hold is off)"
-                out["exit"] = (f"{'now ' + format(up, '+.1f') + '% — ' if up is not None else ''}sells once ≥ {tgt:g}% "
-                               f"after fees ({tgt_from}); {hold_txt}")
+                out["exit"] = (f"{'now ' + format(up, '+.1f') + '% — ' if up is not None else ''}SELL signal on the first red "
+                               f"candle while the trade is ≥ {tgt:g}% after fees ({tgt_from}) — rides the green run; "
+                               f"{hold_txt}")
                 out["ready"] = bool(up is not None and up >= tgt)
             else:
                 from src.signal import botpredict as BPm
@@ -2070,11 +2090,13 @@ class CandleMomo:
                         pos["upct"] = pos["upnl_sol"] / pos["entry_sol"] * 100.0 if pos["entry_sol"] else 0.0
                         if self.cfg.rule == "pro_hold" and not pos.get("closing") and mint not in self.busy:
                             tgt, tgt_from = self.green_target()
-                            if pos["upct"] >= tgt:
-                                # pro_hold: sell the moment the whole trade is in profit after fees
-                                pos["closing"] = True
-                                asyncio.ensure_future(self._forced_exit(
-                                    mint, f"in profit {pos['upct']:+.1f}% ≥ {tgt:g}% after fees ({tgt_from}) — Pro BUY · sell in profit"))
+                            if pos["upct"] >= tgt and not pos.get("pro_armed"):
+                                # pro_hold: in profit after fees -> ride the green run; the chart's SELL signal
+                                # (first red candle while still >= target, _pro_evaluate) takes the profit
+                                pos["pro_armed"] = True
+                                pos["pro_peak"] = pos["upct"]
+                            if pos.get("pro_armed"):
+                                pos["pro_peak"] = max(float(pos.get("pro_peak") or 0), pos["upct"])
                         if (self.cfg.stop_loss_pct and pos["upct"] <= -self.cfg.stop_loss_pct
                                 and not pos.get("closing") and mint not in self.busy):
                             pos["closing"] = True

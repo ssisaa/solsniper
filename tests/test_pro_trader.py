@@ -167,11 +167,10 @@ def test_pro_hold_buys_on_the_call_but_never_sells_on_the_chart_plan(tmp_path, m
     assert e.pro_context("MINT")["holding"] is None
 
 
-def test_pro_hold_sells_once_in_profit(tmp_path, monkeypatch):
+def test_pro_hold_value_loop_arms_but_does_not_sell_at_once(tmp_path, monkeypatch):
     import asyncio as _a
     e, f, rows, routed = _cm_engine(tmp_path, monkeypatch)
     e.cfg.rule = "pro_hold"
-    e.cfg.min_profit_pct = 10.0
     e.cfg.max_hold_s = 150
     monkeypatch.setattr(e, "green_target", lambda: (10.0, "Min profit"))
     e.positions["MINT"] = {"mint": "MINT", "mode": "paper", "tokens": 1000.0, "entry_sol": 0.005,
@@ -191,7 +190,58 @@ def test_pro_hold_sells_once_in_profit(tmp_path, monkeypatch):
         await _a.sleep(1.3)
         t.cancel()
     _a.run(go())
-    assert sold and "in profit" in sold[0]
+    assert not sold                              # rides the green run; the chart SELL signal takes the profit
+    assert e.positions["MINT"]["pro_armed"] and e.positions["MINT"]["pro_peak"] > 10
+
+
+def _held_pro_hold(tmp_path, monkeypatch, upct):
+    e, f, rows, routed = _cm_engine(tmp_path, monkeypatch)
+    e.cfg.rule = "pro_hold"
+    monkeypatch.setattr(e, "green_target", lambda: (15.0, "Min profit"))
+    e._evaluate(f, time.time())
+    f.books["pump_rest"].merge(rows[-1:])
+    e.positions["MINT"] = {"mint": "MINT", "mode": "paper", "tokens": 1000.0, "entry_sol": 0.005,
+                           "entry_ts": time.time() - 5, "symbol": "S", "lots": [{"n": 1}],
+                           "upct": upct, "value_at": time.time(), "pro_peak": upct}
+    e._evaluate(f, time.time())
+    return e, f, rows, routed
+
+
+def _next(f, rows, k, red):
+    from src.signal import candle_core as C
+    px = rows[-1].close
+    o, c = (px * 1.1, px) if red else (px, px * 1.1)
+    f.books["pump_rest"].merge([C.Candle(t=rows[-1].t + 1000 * k, open=o, high=max(o, c), low=min(o, c),
+                                         close=c, volume=5, final=True)])
+
+
+def test_pro_hold_sell_signal_on_red_candle_in_profit(tmp_path, monkeypatch):
+    e, f, rows, routed = _held_pro_hold(tmp_path, monkeypatch, 22.0)
+    n = len(routed)
+    _next(f, rows, 1, red=False)                 # green: keep riding
+    e._evaluate(f, time.time())
+    assert not [r for r in routed[n:] if r["side"] == "SELL"]
+    _next(f, rows, 2, red=True)                  # red while +22% >= 15%: SELL signal
+    e._evaluate(f, time.time())
+    sells = [r for r in routed[n:] if r["side"] == "SELL"]
+    assert sells and sells[0]["pro_hold_sell"] and "take profit" in sells[0]["pro_why"]
+
+
+def test_pro_hold_no_sell_signal_below_target(tmp_path, monkeypatch):
+    e, f, rows, routed = _held_pro_hold(tmp_path, monkeypatch, 8.0)
+    n = len(routed)
+    _next(f, rows, 1, red=True)                  # red but only +8%: hold (never sells on the loss side)
+    e._evaluate(f, time.time())
+    assert not [r for r in routed[n:] if r["side"] == "SELL"]
+
+
+def test_pro_hold_no_sell_signal_on_stale_value(tmp_path, monkeypatch):
+    e, f, rows, routed = _held_pro_hold(tmp_path, monkeypatch, 30.0)
+    e.positions["MINT"]["value_at"] = time.time() - 10
+    n = len(routed)
+    _next(f, rows, 1, red=True)
+    e._evaluate(f, time.time())
+    assert not [r for r in routed[n:] if r["side"] == "SELL"]
 
 
 def test_pro_hold_hint_and_choice():
