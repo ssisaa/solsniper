@@ -869,7 +869,7 @@ async def select_top1_dayscalp(cfg: Optional[DayScalpConfig] = None) -> Optional
                     log.info("DAYSCALP candle watch %d %s m5=%+.1f%% mint=%s", len(watch), row.get("symbol") or "?",
                              _num(row.get("change_m5_pct")), mint[:8])
                     await _show_decoded(row, "WATCH", f"AutoTrade-Candles pro_hold: scan token {len(watch)} of "
-                                                      f"{PRO_HOLD_WATCH} — Candles buys it on its chart BUY signal")
+                                                      f"{PRO_HOLD_WATCH} — Candles pro_hold buys it on Botpredict's BUY")
                     if len(watch) >= PRO_HOLD_WATCH:
                         break
                     continue

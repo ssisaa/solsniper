@@ -20,7 +20,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 RULES = ("own_candle", "inverse", "literal", "pro", "pro_hold")
-# pro: src/signal/pro_trader.py chart read (+40 / -5 / 120s). pro_hold: buy on the same chart BUY, sell only once the
+# pro: src/signal/pro_trader.py chart read (+40 / -5 / 120s). pro_hold: buy on Botpredict's BUY (botpredict.py), sell only once the
 # whole trade is in profit (Min profit / Fast Pace after fees); in a loss hold until Max hold, then sell.
 MODES = ("paper", "live")
 _NS = uuid.UUID("6f1e0c52-6c1b-4b8e-9d0e-2c6a1d0b7a11")

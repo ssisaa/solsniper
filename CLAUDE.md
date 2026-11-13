@@ -101,7 +101,9 @@ then rises over 20–30 candles, so the targets were raised to let it run: **Pro
 old +25 % exits on training coins, fresh coins and late entries (bp +1.2 / +5.6 / +2.8 %/trade; pro +1.1 / +1.8 /
 +1.1). Buying a deeper dip after the call (limit −3…−12 %) did worse.
 
-**Candles rule `pro_hold` (2026-11-14, user's request)**: buy on the chart's Pro Trader BUY; sell only once the whole
+**Candles rule `pro_hold` (2026-11-14, user's request)**: buys on **Botpredict's BUY** (◆ BP; user's choice after a
+test with sell-in-profit +10 % / Max hold 300 s on 76 unseen coins: Botpredict trigger +5.0 %/trade, 84 % won, late
++4.4 %; Pro Trader setup −0.7 %; either +2.0 %). Earlier it bought on the chart's Pro Trader BUY; sell only once the whole
 trade is in profit after fees (`green_target()`: Min profit, or Fast Pace margin), checked in the value loop; in a
 loss hold until Max hold, then sell; no stop, no red-candle ladder. **Every new BUY signal buys again** (Max position) into
 the open trade up to Total cap (`_fit_cap`); a signal that stays on for several candles buys once (`f.pro_was_buy`).

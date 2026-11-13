@@ -509,7 +509,7 @@ class CandleMomo:
                                 or m[:6])
                     self.feeds[m] = f
                     what = {"mayhem-new": "Mayhem_Mode just opened it — buying",
-                            "scan": ("Dayscalp's top pick on Decoded Tokens — pro_hold buys it on the chart BUY signal"
+                            "scan": ("Dayscalp's top pick on Decoded Tokens — pro_hold buys it on Botpredict's BUY (◆ BP)"
                                      if cfg.rule == "pro_hold" else
                                      "Dayscalp's top pick on Decoded Tokens — bought as lot 1 when Auto Trade is on")}
                     self.note("info", f"Watching {f.symbol} ({what.get(origin, src + ' holds it')}).", m)
@@ -673,7 +673,15 @@ class CandleMomo:
             self.pro_px.pop(f.mint, None)
         ctx = self.pro_context(f.mint)
         cs = [{"t": c.t, "o": c.open, "h": c.high, "l": c.low, "c": c.close, "v": c.volume} for c in rows]
-        a = PT.analyze(cs, None, ctx["holding"])
+        if self.cfg.rule == "pro_hold":
+            # pro_hold buys on Botpredict's call (user's choice 2026-11-14: tested +5.0%/trade on unseen coins with
+            # sell-in-profit / Max hold, vs -0.7% on the Pro Trader setup); its own exits are profit / Max hold
+            from src.signal import botpredict as BPm
+            a = BPm.analyze(cs, None)
+            if a.get("call") == "SELL":
+                a["call"] = "HOLD"
+        else:
+            a = PT.analyze(cs, None, ctx["holding"])
         was_buy = bool(getattr(f, "pro_was_buy", False))
         f.pro_was_buy = a.get("call") == "BUY"
         if a.get("call") == "BUY" and held is None:
@@ -1448,14 +1456,16 @@ class CandleMomo:
                 up = held.get("upct")
                 n = len(held.get("lots") or []) or 1
                 room = max(0.0, cfg.ladder_max_total_sol - float(held.get("entry_sol") or 0))
-                out["entry"] = (f"pro_hold: buy {n + 1} on the next chart BUY signal (no red-candle lots; {room:.4f} SOL left of Total cap "
+                out["entry"] = (f"pro_hold: buy {n + 1} on the next Botpredict BUY (◆ BP) (no red-candle lots; {room:.4f} SOL left of Total cap "
                                 f"{cfg.ladder_max_total_sol:g})" if room >= 0.001 else f"Total cap {cfg.ladder_max_total_sol:g} SOL reached")
                 hold_txt = f"in a loss it holds up to Max hold {cfg.max_hold_s:.0f}s" if cfg.max_hold_s else "in a loss it holds (Max hold is off)"
                 out["exit"] = (f"{'now ' + format(up, '+.1f') + '% — ' if up is not None else ''}sells once ≥ {tgt:g}% "
                                f"after fees ({tgt_from}); {hold_txt}")
                 out["ready"] = bool(up is not None and up >= tgt)
             else:
-                out["entry"] = "pro_hold: lot 1 on the chart BUY signal (≥10% under VWAP, green, RSI<45, volume ≥1.5x)"
+                from src.signal import botpredict as BPm
+                out["entry"] = (f"pro_hold: lot 1 on Botpredict's BUY (◆ BP — chance of +{BPm.PRED_PCT:.0f}% first "
+                                f"≥ {BPm.MODEL['thr'] * 100:.0f}%)")
                 out["exit"] = "—"
             return out
         if cfg.rule == "pro":

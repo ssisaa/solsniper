@@ -148,6 +148,8 @@ def test_candles_pro_hint_and_rule_choice():
 # ---------- Candles rule "pro_hold": buy on the chart BUY, sell only in profit, else at Max hold ----------
 
 def test_pro_hold_buys_on_the_call_but_never_sells_on_the_chart_plan(tmp_path, monkeypatch):
+    from src.signal import botpredict as BPm
+    monkeypatch.setitem(BPm.MODEL, "thr", 0.0)
     from src.signal import candle_core as C
     e, f, rows, routed = _cm_engine(tmp_path, monkeypatch)
     e.cfg.rule = "pro_hold"
@@ -204,6 +206,8 @@ def test_pro_hold_hint_and_choice():
 
 
 def test_pro_hold_new_signal_buys_again_once(tmp_path, monkeypatch):
+    from src.signal import botpredict as BPm
+    monkeypatch.setitem(BPm.MODEL, "thr", 0.0)
     from src.signal import candle_core as C
     e, f, rows, routed = _cm_engine(tmp_path, monkeypatch)
     e.cfg.rule = "pro_hold"
@@ -316,3 +320,22 @@ def test_pro_hold_entry_text_names_the_rule():
     e = CM.CandleMomo()
     e.cfg.rule = "pro_hold"
     assert e._hint("X")["entry"].startswith("pro_hold:")
+
+
+def test_pro_hold_buys_on_botpredict_not_pro_trader(tmp_path, monkeypatch):
+    from src.signal import botpredict as BPm
+    e, f, rows, routed = _cm_engine(tmp_path, monkeypatch)
+    e.cfg.rule = "pro_hold"
+    monkeypatch.setitem(BPm.MODEL, "thr", 1.01)          # Botpredict never buys
+    e._evaluate(f, time.time())
+    f.books["pump_rest"].merge(rows[-1:])                 # a Pro Trader BUY setup
+    e._evaluate(f, time.time())
+    assert not routed
+    monkeypatch.setitem(BPm.MODEL, "thr", 0.0)            # Botpredict always buys
+    from src.signal import candle_core as C
+    last = rows[-1]
+    f.books["pump_rest"].merge([C.Candle(t=last.t + 1000, open=last.close, high=last.close, low=last.close,
+                                         close=last.close, volume=1, final=True)])
+    f.pro_was_buy = False
+    e._evaluate(f, time.time())
+    assert routed and routed[-1]["side"] == "BUY" and "chance" in routed[-1]["pro_why"]

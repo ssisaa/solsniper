@@ -1194,7 +1194,7 @@ button.lite:hover{color:#fff;border-color:#eef3fb}
         </div>
       </div>
       <div class="m2-ctl">
-        <label>Rule <select id="cmRuleSel"><option value="own_candle">own_candle (close vs open)</option><option value="inverse">inverse (buy red, sell green)</option><option value="literal">literal (open vs prev close)</option><option value="pro">pro — Pro Trader (VWAP dip with volume; +40% / −5% / 120s)</option><option value="pro_hold">pro_hold — buy on every chart BUY (up to Total cap), sell only in profit (Min profit after fees); in a loss hold to Max hold</option></select></label>
+        <label>Rule <select id="cmRuleSel"><option value="own_candle">own_candle (close vs open)</option><option value="inverse">inverse (buy red, sell green)</option><option value="literal">literal (open vs prev close)</option><option value="pro">pro — Pro Trader (VWAP dip with volume; +40% / −5% / 120s)</option><option value="pro_hold">pro_hold — buy on every Botpredict BUY (◆ BP, up to Total cap), sell only in profit (Min profit after fees); in a loss hold to Max hold</option></select></label>
         <label>Min Δ % <input class="cm-in" id="cmDelta" type="number" step="0.1" min="0"/></label>
         <label>Buy SOL <input class="cm-in" id="cmSize" type="number" step="0.001" min="0.0001"/></label>
         <label>Coins <input class="cm-in" id="cmMax" type="number" step="1" min="0" max="10"/></label>
@@ -4822,7 +4822,7 @@ async function cmLoadChart(){
     const [c,k]=await Promise.all([fetch('/api/candles?ctx=candle&mint='+encodeURIComponent(mint),{cache:'no-store'}).then(r=>r.json()),
                                    fetch('/api/candle/marks?mint='+encodeURIComponent(mint),{cache:'no-store'}).then(r=>r.json())]);
     if(mint!==_cmChart.mint) return;
-    _cmChart.candles=(c.candles||[]).filter(x=>x.o>0&&x.c>0); _cmChart.marks=k; _cmChart.pro=c.pro||null;
+    _cmChart.candles=(c.candles||[]).filter(x=>x.o>0&&x.c>0); _cmChart.marks=k; _cmChart.pro=c.pro||null; _cmChart.bp=c.bp||null;
     paintDesk(document.getElementById('cmDesk'), _cmChart.pro, c.bp||null);
     const h=(k&&k.hint)||{};
     const he=document.getElementById('cmHintEntry'), hx=document.getElementById('cmHintExit');
@@ -4930,10 +4930,15 @@ function cmDrawChart(){
     g.textAlign='center'; g.fillText(txt,x,y+.5); g.font='11px system-ui,-apple-system,Segoe UI,sans-serif'; };
   if(pro&&pro.replay){ for(const m of pro.replay.marks||[]){ if(m.t<t0||m.t>tEnd) continue; const i=idxAt(m.t/1000); if(i<0||vis[i].t!==m.t) continue; const buy=m.side==='buy', col=buy?UP:(String(m.label).startsWith('+')?UP:DN);
     pill(X(i), buy?Y(vis[i].l)+40:Y(vis[i].h)-40, buy?'▲ BUY':'▼ '+m.label, col, buy?Y(vis[i].l)+2:Y(vis[i].h)-2, true); } }
+  // Botpredict (pro_hold buys on it): gold ◆ BP replay tags + the live call
+  const BPc=_cmChart.bp&&_cmChart.bp.ok?_cmChart.bp:null;
+  if(BPc){ for(const m of (BPc.replay||{}).marks||[]){ if(m.t<t0||m.t>tEnd) continue; if(m.side!=='buy') continue; const i=idxAt(m.t/1000); if(i<0||vis[i].t!==m.t) continue;
+    pill(X(i), Y(vis[i].l)+58, '◆ BP', '#ffcc66', Y(vis[i].l)+2, true); }   // buys only: pro_hold sells by its own rule
+    if(BPc.call==='BUY'){ const lastC=vis[n-1]; g.save(); g.shadowColor='#ffcc66'; g.shadowBlur=14; pill(X(n-1), Y(lastC.l)+32, '◆ BP BUY', '#ffcc66', null, false); g.restore(); } }
   if(pro&&(pro.call==='BUY'||pro.call==='SELL')){ const lastC=vis[n-1], buy=pro.call==='BUY'; g.save(); g.shadowColor=buy?UP:DN; g.shadowBlur=14; pill(X(n-1), buy?Y(lastC.l)+18:Y(lastC.h)-18, buy?'BUY NOW':'SELL NOW', buy?UP:DN, null, false); g.restore(); }
   if(PL){ g.font=`bold 10px ${FONT}`; let lx=padL+6; const ly0=padT+ph-8; g.textAlign='left';
     for(const [txt,col] of [['EMA 9',C9],['EMA 21',C21],['VWAP',CV]]){ g.fillStyle=col; g.fillRect(lx,ly0-1,12,2); g.fillText(txt,lx+16,ly0); lx+=g.measureText(txt).width+32; }
-    g.fillStyle='rgba(160,178,200,.75)'; g.fillText('outlined = Pro Trader replay', lx, ly0); g.font='11px system-ui,-apple-system,Segoe UI,sans-serif'; }
+    g.fillStyle='rgba(160,178,200,.75)'; g.fillText('outlined = Pro Trader replay · gold ◆ = Botpredict (pro_hold buys on it)', lx, ly0); g.font='11px system-ui,-apple-system,Segoe UI,sans-serif'; }
   const tri=(x,y,upw,col,label)=>{ y=Math.max(padT+6,Math.min(padT+ph-6,y)); g.fillStyle=col; g.beginPath(); if(upw){ g.moveTo(x,y-6); g.lineTo(x-6,y+5); g.lineTo(x+6,y+5); } else { g.moveTo(x,y+6); g.lineTo(x-6,y-5); g.lineTo(x+6,y-5); } g.closePath(); g.fill(); if(label){ g.font='bold 10px system-ui,sans-serif'; g.textAlign='center'; g.fillStyle=col; g.fillText(label,x,upw?Math.min(padT+ph-2,y+15):Math.max(padT+2,y-15)); g.font='11px system-ui,-apple-system,Segoe UI,sans-serif'; } };
   // closed entries / exits
   for(const tr of (mk.closed||[])){
