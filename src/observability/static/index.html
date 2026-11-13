@@ -4611,6 +4611,10 @@ function paintDesk(el, a, bp){
 // Chart zoom / pan (both 1s charts). step = px per candle (null = default); endT = right-edge candle time
 // (null = follow live). Wheel = zoom at the mouse, drag = pan, double-click / ⟲ = back to live.
 const _cz={cm:{step:null,endT:null,lay:null}, m2:{step:null,endT:null,lay:null}};
+// A new coin, or a scroll point before this coin's first candle, goes back to live (the view had stayed
+// "scrolled back" from the last coin and showed only one candle of the new one).
+function czCoin(k,mint,cs){ const z=_cz[k]; if(z.mint!==mint){ z.mint=mint; z.endT=null; }
+  if(z.endT!=null&&(!cs.length||z.endT<cs[0].t||z.endT>=cs[cs.length-1].t)) z.endT=null; }
 function czStep(k,def){ const z=_cz[k]; return z.step?Math.max(2,Math.min(48,z.step)):def; }
 // Price range from the candles on screen; a level / line is fitted only when it is near them (a sell target
 // 77000% away or a VWAP far above no longer squashes the candles flat). Far ones sit pinned at the edge.
@@ -4669,6 +4673,7 @@ function m2DrawChart(){
   const rsiH=L?Math.max(46,Math.round(H*0.17)):0, gapR=(L?18:0)+bpH+bpGap, timeH=20;
   const pw=Math.max(40,W-padR-padL-fut), mainH=Math.max(60,H-padT-timeH-rsiH-gapR);
   const volH=Math.round(mainH*0.18);
+  czCoin('m2', _m2ChartMint, cs);
   const step=czStep('m2', expanded?11:8);
   const span=Math.max(5,Math.floor(pw/step));
   const lastT=cs[cs.length-1].t, tEnd=_cz.m2.endT==null?lastT:Math.min(lastT,_cz.m2.endT), tStart=tEnd-(span-1)*1000;
@@ -4913,6 +4918,7 @@ function cmDrawChart(){
   const rsiH=PL?Math.max(46,Math.round(H*0.16)):0, gapR=PL?16:0;
   const padR=86, padB=24, padT=16, padL=10, pw=Math.max(40,W-padR-padL), ph=Math.max(40,H-padB-padT-rsiH-gapR);
   // Candles sit side by side (quiet seconds without a trade are skipped, as on pump's chart).
+  czCoin('cm', _cmChart.mint, cs);
   const step=czStep('cm', expanded?11:8), span=Math.max(5,Math.floor(pw/step));
   let endI=cs.length-1; if(_cz.cm.endT!=null){ const j=cs.findIndex(c=>c.t>_cz.cm.endT); endI=j<0?cs.length-1:Math.max(0,j-1); if(j<0) _cz.cm.endT=null; }
   _cz.cm.lay={padL,pw,step,span};
