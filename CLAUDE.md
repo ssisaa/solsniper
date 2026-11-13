@@ -104,7 +104,7 @@ pro_hold adds on ◆ BP / ▲ BUY.
 Candles trade on a Mayhem coin (`MAYHEM_COIN` in `_entry_filters`; board `ms` or pump's mayhem-state, checked once per
 coin `_check_mayhem`); Mixed skips Mayhem rows. Reason: pump pauses Mayhem coins and a paused coin can't sell —
 pro_hold 18:06–23:57 on 2026-11-13: take-profit 32 trades +0.131 SOL, coin paused 27 trades −0.174, max hold 10 −0.070.
-With feed Mayhem board (all Mayhem coins) it never buys while this is on. Trade stream: Candles' coins go first in the
+The Mayhem board feed is exempt (its own "auto" picks are always traded, `_avoid_mayhem_for`). Trade stream: Candles' coins go first in the
 220-coin subscription list (`_HEAD_MINTS`); stream candles use each trade's own price (`trade_px`). Graduated
 (PumpSwap) coins still get no stream trades (pump_rest only) — not solved.
 

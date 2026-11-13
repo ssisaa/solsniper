@@ -98,3 +98,17 @@ def test_avoid_mayhem_skips_mayhem_rows_and_blocks_buys():
     e.mayhem_of.pop("X")
     e.feeds["X"].board_state = "active"
     assert e._entry_filters("X")[0] == "MAYHEM_COIN"
+
+
+def test_mayhem_board_feed_is_not_skipped():
+    e = _eng()
+    e.cfg.avoid_mayhem = True
+    e.cfg.inflow_window_s = 0
+    e.cfg.max_below_peak_pct = 0
+    f = CM.Feed("MB", 10)
+    f.origin, f.board_state = "auto", "active"
+    e.feeds["MB"] = f
+    e.cfg.auto_follow = "mayhem_board"
+    assert e._entry_filters("MB")[0] == ""            # Mayhem board: its Mayhem coins are traded
+    e.cfg.auto_follow = "mixed"
+    assert e._entry_filters("MB")[0] == "MAYHEM_COIN"

@@ -859,7 +859,7 @@ class CandleMomo:
         cfg = self.cfg
         if (cfg.rule == "pro_hold" and cfg.pro_hold_first and rows and not getattr(f, "first_done", False)
                 and f.mint not in self.positions
-                and not (cfg.avoid_mayhem and self.mayhem_of.get(f.mint) is None and not f.board_state)):
+                and not (self._avoid_mayhem_for(f) and self.mayhem_of.get(f.mint) is None and not f.board_state)):
             # pro_hold: a NEW coin is bought on its first candle (user's choice 2026-11-14; on 74 unseen coins
             # entering 3s in with pro_hold's exits: 58% won, median +7.6%). Coins older than 60s are not "new".
             f.first_done = True
@@ -2185,6 +2185,16 @@ class CandleMomo:
             except Exception:
                 log.debug("candle reserve read failed", exc_info=True)
 
+    def _avoid_mayhem_for(self, f: Optional[Feed]) -> bool:
+        """Skip Mayhem coins applies to Mixed and the AutoTrade-Candles sources. The Mayhem board feed lists only
+        Mayhem coins: choosing it means trading them, so its own picks ("auto") are never skipped (user 2026-11-14)."""
+        if not self.cfg.avoid_mayhem:
+            return False
+        if (f is not None and f.origin == "auto" and self.cfg.auto_follow == "mayhem_board"
+                and not self.support_source()):
+            return False
+        return True
+
     def _check_mayhem(self, mint: str) -> None:
         """Ask pump once whether this coin is a Mayhem coin (its mayhem-state is null for a normal coin)."""
         if mint in self.mayhem_of or not self.loop:
@@ -2212,7 +2222,7 @@ class CandleMomo:
         f = self.feeds.get(mint)
         if f is None:
             return "", ""
-        if cfg.avoid_mayhem:
+        if self._avoid_mayhem_for(f):
             # pump pauses Mayhem coins (89% within ~1 min) and a paused coin cannot be sold: 27 pro_hold trades
             # held in a loss were frozen there (-0.174 SOL, 2026-11-13 18:09-22:50). Normal coins are never paused.
             mh = self.mayhem_of.get(mint)
