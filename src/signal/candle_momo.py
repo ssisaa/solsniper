@@ -1022,7 +1022,8 @@ class CandleMomo:
         from src.signal import pro_trader as PT
         rows = f.books[f.using].finals()
         cfg = self.cfg
-        if (cfg.rule == "pro_hold" and cfg.pro_hold_first and rows and not getattr(f, "first_done", False)
+        live_rows = f.books[f.using].rows           # finals + the candle still forming this second
+        if (cfg.rule == "pro_hold" and cfg.pro_hold_first and live_rows and not getattr(f, "first_done", False)
                 and f.mint not in self.positions
                 and not (self._avoid_mayhem_for(f) and self.mayhem_of.get(f.mint) is None and not f.board_state)):
             # pro_hold: a NEW coin is bought on its first GREEN candle (user's choice 2026-11-14; first candle on
@@ -1034,13 +1035,16 @@ class CandleMomo:
             age_now = None if f.first_age0 is None else float(f.first_age0) + (now - f.first_t0)
             if age_now is None or age_now > PRO_FIRST_MAX_AGE_S:
                 f.first_done = True
-            elif rows[-1].t != getattr(f, "first_last_t", None):
-                f.first_last_t = rows[-1].t
-                c = rows[-1]
+            else:
+                # The turn: the red ends and the price starts up. Checked on the candle still FORMING (every poll,
+                # 0.5s): it opens at the last close, so trading above its open = the first green has begun —
+                # bought then, not 1s later when it closes (user 2026-11-14).
+                c = live_rows[-1]
                 if c.close > c.open:
                     f.first_done = True
-                    self._pro_emit(f, rows, "BUY", {"call": "BUY", "px": c.close,
-                                                    "why": f"first green candle of a new coin (age {age_now:.0f}s)"},
+                    self._pro_emit(f, live_rows, "BUY", {"call": "BUY", "px": c.close,
+                                                         "why": f"first green starting — a new coin (age {age_now:.0f}s)"
+                                                                + ("" if c.final else ", candle still forming")},
                                    seen, first=True)
                     return
         if len(rows) < 2:

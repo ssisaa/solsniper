@@ -560,3 +560,17 @@ def test_skip_mayhem_does_not_block_the_mayhemmode_source(monkeypatch):
     assert e._entry_filters("MM")[0] == ""
     monkeypatch.setattr(e, "support_source", lambda: "opencopy")
     assert e._entry_filters("MM")[0] == "MAYHEM_COIN"
+
+
+def test_pro_hold_first_buy_fires_while_the_green_candle_is_forming(tmp_path, monkeypatch):
+    from src.signal import candle_core as C
+    e, f, routed = _ph_first_engine(tmp_path, monkeypatch, 4)
+    book = f.books["pump_rest"]
+    t = book.rows[-1].t
+    book.rows.clear()
+    book.merge([C.Candle(t=t, open=1.1, high=1.1, low=1.0, close=1.0, volume=3, final=True)])   # red
+    e._evaluate(f, time.time())
+    assert not routed
+    book.merge([C.Candle(t=t + 1000, open=1.0, high=1.03, low=1.0, close=1.03, volume=1, final=False)])
+    e._evaluate(f, time.time())
+    assert routed and routed[0]["first"] and "forming" in routed[0]["pro_why"]
