@@ -238,6 +238,15 @@ async def launch_entry(mint: str) -> tuple[bool, str, float | None]:
     return True, f"1s {pct:+.2f}%", pct
 
 
+# Wallet reconcile never adopts these as an open trade (leftovers of routes / swaps, not coins the bot bought).
+NOT_A_TRADE_MINTS = {
+    "So11111111111111111111111111111111111111112",    # wrapped SOL
+    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",   # USDC
+    "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",   # USDT
+}
+RECONCILE_DUST_SOL = 0.0002   # a leftover worth less than this is dust, not an open trade (Max position ~0.005)
+
+
 def is_pump_mint(mint: str) -> bool:
     """A pump.fun coin: its mint address starts or ends with 'pump' (pump.fun's vanity addresses)."""
     m = str(mint or "")
@@ -3505,13 +3514,17 @@ async def live_feed_demo(
                     continue
                 if ui <= 0:
                     continue
+                if mint in NOT_A_TRADE_MINTS:
+                    skipped += 1
+                    log.info("RECONCILE skip mint=%s — stablecoin / wrapped SOL, never a trade", mint[:8])
+                    continue
                 # Quote sell value — skip dust / illiquid junk that would stuck the bot
                 try:
                     q = await trader.jup.quote_token_to_sol(mint, raw, slippage_bps=800)
                     sol_val = (q.out_amount / 1_000_000_000) if q else None
                 except Exception:
                     sol_val = None
-                if sol_val is not None and sol_val < 0.000001:
+                if sol_val is not None and sol_val < RECONCILE_DUST_SOL:
                     skipped += 1
                     log.info(
                         "RECONCILE skip mint=%s ui=%.4g sol_out=%.6f — dust, not an open trade",
