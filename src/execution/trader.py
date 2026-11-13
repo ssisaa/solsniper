@@ -1032,7 +1032,9 @@ class Trader:
             )
         if held is not None and int(held.get("raw") or 0) > 0:
             raw_amt = int(held["raw"]) if full else min(int(raw_amt), int(held["raw"]))
+        t_pre = time.perf_counter()
         routed = await run_swap(self, "sell", mint, raw=int(raw_amt), reason=reason, full=full)
+        t_swap = time.perf_counter()
         if not routed.get("ok"):
             err = str(routed.get("err") or "sell_failed")
             log.warning("SELL routes exhausted mint=%s reason=%s err=%s", mint[:8], reason, err[:160])
@@ -1043,13 +1045,17 @@ class Trader:
                 signature=str(routed.get("sig") or "") or None,
                 route=str(routed.get("route") or ""),
             )
-        try:
-            held = await asyncio.wait_for(
-                get_token_holding(pk, mint, fast=True, confirm_empty=1),
-                timeout=0.8,
-            ) if pk else None
-        except Exception:
-            held = None
+        # The chain fill already shows the coins left the wallet: no extra wallet read (it cost up to 0.8s).
+        sold_on_chain = bool(routed.get("measured")) and int(routed.get("tokens") or 0) >= max(1, int(raw_amt) // 2)
+        held = None
+        if not sold_on_chain:
+            try:
+                held = await asyncio.wait_for(
+                    get_token_holding(pk, mint, fast=True, confirm_empty=1),
+                    timeout=0.8,
+                ) if pk else None
+            except Exception:
+                held = None
         # The chain is the wallet. A failed Lightning tx still holds the coins.
         if held is not None and int(held.get("raw") or 0) > max(1, int(raw_amt) // 2):
             log.warning(
@@ -1085,7 +1091,20 @@ class Trader:
             mint[:8], booked, raw_amt, str(routed.get("sig") or "")[:16], reason, routed.get("route"),
             exit_fee, " (from chain)" if measured else " (quote/estimate)",
         )
-        if full and pk:
+        t_check = time.perf_counter()
+        rent_sol = 0.0
+        if full and pk and measured:
+            # The rent deposit is not sale PnL when the fill is read from chain: close the empty token
+            # account in the background, the sale is done now (it held the sell up ~0.9s).
+            async def _rent_later(_pk=pk, _mint=mint):
+                try:
+                    got = await self._return_token_rent(_pk, _mint)
+                    if got > 0:
+                        log.info("SELL rent back mint=%s +%.6f SOL — deposit returned, not added to the sale", _mint[:8], got)
+                except Exception:
+                    log.debug("rent return failed", exc_info=True)
+            asyncio.ensure_future(_rent_later())
+        elif full and pk:
             try:
                 rent_sol = await self._return_token_rent(pk, mint)
             except Exception:
@@ -1107,6 +1126,12 @@ class Trader:
         except Exception:
             log.debug("sell balance bump failed", exc_info=True)
         sold_raw = int(routed.get("tokens") or 0) if measured else 0
+        t_end = time.perf_counter()
+        log.info(
+            "SELL timing mint=%s reason=%s — wallet read %d ms · build+send+land+fill %d ms · check %d ms · rest %d ms · total %d ms",
+            mint[:8], reason, (t_pre - t0) * 1000, (t_swap - t_pre) * 1000, (t_check - t_swap) * 1000,
+            (t_end - t_check) * 1000, (t_end - t0) * 1000,
+        )
         return FillResult(
             ok=True, mode="live", mint=mint, sol_in=booked, tokens_out=float(sold_raw or raw_amt),
             effective_price=0.0, fees_sol=round(exit_fee, 9), signature=str(routed.get("sig") or ""),

@@ -934,6 +934,7 @@ async def _sell_landed_anyway(trader, sig: str, mint: str) -> bool:
 
 async def run_swap(trader, side: str, mint: str, sol: float = 0.0, raw: int = 0, reason: str = "", full: bool = True) -> Dict[str, Any]:
     """Ending pump uses the bonding curve. Starting pump uses pump-amm. Every other coin uses Jupiter."""
+    t_route0 = time.perf_counter()
     venue = mint_venue(mint)
     if not venue:
         log.warning("TX %s skip mint=%s — not a Solana coin", side, (mint or "")[:14])
@@ -1196,7 +1197,10 @@ async def run_swap(trader, side: str, mint: str, sol: float = 0.0, raw: int = 0,
         if isinstance(got, dict):
             got.pop("stop", None)
             if got.get("ok") and got.get("sig"):
+                t_land = time.perf_counter()
                 await _apply_chain_fill(got, side, mint, failed_sigs)
+                log.info("TX %s timing mint=%s — landed %d ms after the route started, fill read %d ms",
+                         side, mint[:8], (t_land - t_route0) * 1000, (time.perf_counter() - t_land) * 1000)
             return got
         if name == "pump" and side == "buy" and off_curve(mint) and "lightning" not in names:
             # the curve turned out to be gone (graduated): not a price refusal, so the buy may still go via the pool
