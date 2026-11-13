@@ -960,6 +960,7 @@ async def run_swap(trader, side: str, mint: str, sol: float = 0.0, raw: int = 0,
         # Max position; a move past the slippage guard is refused (6042) and costs nothing.
         # MayhemMode buys too: the local build spends exactly Max position. Lightning bought a token
         # count priced a moment earlier, so a falling coin cost 0.0023-0.0045 SOL of a 0.005 buy.
+        curve_why = ""
         if side == "buy":
             # Mayhem coins move 15%+ in a second: the minimum-tokens guard must come from the curve as
             # it is now, not the up-to-3s-old cached read (that was most of the 6042 refusals).
@@ -970,6 +971,7 @@ async def run_swap(trader, side: str, mint: str, sol: float = 0.0, raw: int = 0,
                 _PC.forget_curve(mint)
                 try:
                     fresh, _why = await asyncio.wait_for(_PC._curve(mint), timeout=0.45)
+                    curve_why = str(_why or "")
                 except Exception:
                     fresh = None
                 if not fresh and cached and cached.get("curve"):
@@ -983,7 +985,14 @@ async def run_swap(trader, side: str, mint: str, sol: float = 0.0, raw: int = 0,
         order = ["pump"] if side == "buy" else ["pump", "lightning"]
         if side == "sell" and _SELL_FLOOR.get(mint):
             order = ["pump"]          # only the local build can enforce the floor; others sell at any price
-        log.info("TX %s local pump mint=%s reason=%s", side, mint[:8], reason or "-")
+        if side == "buy" and (off_curve(mint) or curve_why in ("graduated", "not_on_curve")):
+            # Graduated (PumpSwap) or never on the curve: the local build cannot buy it. Lightning routes the
+            # pump-amm pool and hands a refusal to Jupiter (AMD 2026-11-14: "no_route" before this).
+            order = ["lightning"]
+            ensure_lightning_warm()
+            log.info("TX buy mint=%s reason=%s — off the pump curve, buying through Lightning / Jupiter", mint[:8], reason or "-")
+        else:
+            log.info("TX %s local pump mint=%s reason=%s", side, mint[:8], reason or "-")
     else:
         order = ["lightning"]
         log.info("TX %s pool=%s mint=%s reason=%s", side, venue, mint[:8], reason or "-")
@@ -1189,6 +1198,11 @@ async def run_swap(trader, side: str, mint: str, sol: float = 0.0, raw: int = 0,
             if got.get("ok") and got.get("sig"):
                 await _apply_chain_fill(got, side, mint, failed_sigs)
             return got
+        if name == "pump" and side == "buy" and off_curve(mint) and "lightning" not in names:
+            # the curve turned out to be gone (graduated): not a price refusal, so the buy may still go via the pool
+            names.append("lightning")
+            ensure_lightning_warm()
+            log.info("TX buy mint=%s — pump curve gone, trying Lightning / Jupiter", mint[:8])
         if name == "lightning":
             missed = str(last)
             # A sell always gets Jupiter after Lightning. A buy gets Jupiter when the
