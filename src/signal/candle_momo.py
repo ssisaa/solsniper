@@ -633,11 +633,19 @@ class CandleMomo:
             # Support mode: feeds = the source's held coins (plus anything Candles still holds). No board picks.
             self._support_sync(src)
             want = {p.mint: "support" for p in self._support_held(src)}
+            ages: Dict[str, float] = {}           # coin age where the source knows it (first-candle buy)
             for m in self.positions:
                 want.setdefault(m, "held")
             if src == "mayhem":
                 for m in self._mayhem_grab():
                     want.setdefault(m, "mayhem-new")
+                try:
+                    from src.observability.dashboard import mayhem_young_opens
+                    for r in mayhem_young_opens(MAYHEM_MAX_OPEN_AGE_S):
+                        # Mayhem_Mode opened it < 30s ago on a fresh coin: its open age stands for the coin's age
+                        ages.setdefault(str(r.get("coinMint") or ""), float(r.get("age") or 0))
+                except Exception:
+                    pass
             if src == "dayscalp":
                 try:
                     from src.signal.dayscalp import LAST_CANDLE_PICK as _pk, LAST_CANDLE_PICKS as _pks
@@ -650,6 +658,8 @@ class CandleMomo:
                     for pk in picks:
                         if pk.get("mint") and time.time() - float(pk.get("ts") or 0) < 20:
                             want.setdefault(pk["mint"], "scan")      # Decoded Tokens' top pick(s): watch now
+                            if pk.get("age") is not None:
+                                ages[pk["mint"]] = float(pk["age"]) + (time.time() - float(pk.get("ts") or time.time()))
                             self._grab.setdefault(pk["mint"], {"at": time.time(), "symbol": pk.get("symbol") or ""})
                 except Exception:
                     pass
@@ -658,9 +668,12 @@ class CandleMomo:
             for m, origin in want.items():
                 if cfg.avoid_mayhem and m not in self.mayhem_of:
                     self._check_mayhem(m)
+                if m in ages and m in self.feeds and self.feeds[m].age is None:
+                    self.feeds[m].age = ages[m]
                 if m not in self.feeds:
                     f = Feed(m, cfg.count)
                     f.origin = src
+                    f.age = ages.get(m)
                     f.symbol = ((self.positions.get(m) or {}).get("symbol") or (self._grab.get(m) or {}).get("symbol")
                                 or m[:6])
                     self.feeds[m] = f

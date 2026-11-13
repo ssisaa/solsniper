@@ -864,7 +864,9 @@ async def select_top1_dayscalp(cfg: Optional[DayScalpConfig] = None) -> Optional
                 if pro_hold:
                     # pro_hold: Dayscalp only picks; Candles watches the first PRO_HOLD_WATCH scan tokens and buys
                     # one of them on its chart BUY signal
-                    watch.append({"mint": mint, "symbol": str(row.get("symbol") or ""), "ts": now_t})
+                    c_ts = float(row.get("created_ts") or 0)
+                    watch.append({"mint": mint, "symbol": str(row.get("symbol") or ""), "ts": now_t,
+                                  "age": (now_t - c_ts) if c_ts > 0 else None})
                     if len(watch) == 1:
                         LAST_CANDLE_PICK.update(mint=mint, symbol=str(row.get("symbol") or ""), ts=now_t)
                     log.info("DAYSCALP candle watch %d %s m5=%+.1f%% mint=%s", len(watch), row.get("symbol") or "?",

@@ -511,3 +511,21 @@ def test_pro_hold_buys_on_pro_trader_buy(tmp_path, monkeypatch):
     f2.books["pump_rest"].merge(rows2[-1:])
     e2._evaluate(f2, time.time())
     assert not routed2
+
+
+def test_support_feed_gets_the_scan_tokens_age(monkeypatch):
+    from src.signal import candle_momo as CM
+    from src.signal import dayscalp as DS
+    e = CM.CandleMomo()
+    e.cfg.rule = "pro_hold"
+    monkeypatch.setattr(e, "support_source", lambda: "dayscalp")
+    monkeypatch.setattr(e, "_support_sync", lambda src: None)
+    monkeypatch.setattr(e, "_support_held", lambda src: [])
+    now = time.time()
+    picks = [{"mint": "N" + "x" * 40, "symbol": "N", "ts": now, "age": 6.0}]
+    monkeypatch.setattr(DS, "LAST_CANDLE_PICKS", picks)
+    monkeypatch.setitem(DS.LAST_CANDLE_PICK, "mint", picks[0]["mint"])
+    monkeypatch.setitem(DS.LAST_CANDLE_PICK, "ts", now)
+    e._pick([])
+    f = e.feeds[picks[0]["mint"]]
+    assert f.age is not None and 6.0 <= f.age < 8.0     # young: the first-candle buy applies

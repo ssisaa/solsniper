@@ -95,7 +95,10 @@ slots (pro_hold: one). Paper / LIVE follow Candles' Live switch. Graduated coins
 and Min reserve; waits for the Mayhem check), and (b) the chart's green ▲ BUY (Pro Trader call, `pro_hold_pro_buy`).
 Switches on the Candles page ("pro_hold also buys"). Tests on unseen coins with pro_hold exits (15 %): BP 75 % won,
 median +21.6 %; first candle (3 s in) 58 %, +7.6 %; ▲ BUY 47 %, −0.6 % (−1.9 % w/o top 10 %) — data are Mayhem coins,
-pauses not modelled.
+pauses not modelled. All sources: Mayhem board / Mixed know the coin age from the board; with AutoTrade-Candles,
+Dayscalp's scan tokens carry `age` (LAST_CANDLE_PICKS) and MayhemMode's young opens their open age, so their feeds get
+the first-candle buy too; OpenCopy / CallOuts / Launch buy lot 1 themselves (that is their first-candle buy) and
+pro_hold adds on ◆ BP / ▲ BUY.
 
 **Candles avoid_mayhem (2026-11-14, user's request)**: Candles page "Skip Mayhem coins" (default on): no new
 Candles trade on a Mayhem coin (`MAYHEM_COIN` in `_entry_filters`; board `ms` or pump's mayhem-state, checked once per
