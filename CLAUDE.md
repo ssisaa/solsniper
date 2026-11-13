@@ -104,7 +104,11 @@ old +25 % exits on training coins, fresh coins and late entries (bp +1.2 / +5.6 
 **Candles rule `pro_hold` (2026-11-14, user's request)**: buy on the chart's Pro Trader BUY; sell only once the whole
 trade is in profit after fees (`green_target()`: Min profit, or Fast Pace margin), checked in the value loop; in a
 loss hold until Max hold, then sell; no stop, no red-candle ladder. **Every new BUY signal buys again** (Max position) into
-the open trade up to Total cap (`_fit_cap`); a signal that stays on for several candles buys once (`f.pro_was_buy`). Backtest on 76 fresh coins: 45–50 % wins but −0.6 … −1.2 %
+the open trade up to Total cap (`_fit_cap`); a signal that stays on for several candles buys once (`f.pro_was_buy`).
+With AutoTrade-Candles on, **pro_hold buys lot 1 itself** (user's choice 2026-11-14): Dayscalp only picks the first
+scan token and feeds it (`dayscalp._candle_rule() == "pro_hold"` → no Dayscalp buy); Candles buys on the chart BUY
+(live, Auto Trade must be on, else `AUTO_TRADE_OFF`). Other rules keep `SUPPORT_NO_ENTRY` (the source buys lot 1).
+MayhemMode's young-open grab still buys through MayhemMode. Backtest on 76 fresh coins: 45–50 % wins but −0.6 … −1.2 %
 per trade (held losers lose more than winners make); rule `pro` did +1.8 % on the same coins. User chose to have it.
 
 **Botpredict (2026-11-13)**: `src/signal/botpredict.py`, Mayhem2 strategy `botpredict` — the bot's own learned

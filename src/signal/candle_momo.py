@@ -47,7 +47,7 @@ BASE_FEE_LAMPORTS = 5000
 SKIP_REASONS = ("KILLED", "NO_POSITION", "ALREADY_LONG", "ENTRIES_PAUSED", "FEED_DEGRADED", "STALE_FEED",
                 "BLACKLIST", "NOT_WHITELISTED", "DAILY_LOSS", "RATE_LIMIT", "COOLDOWN", "MAX_EXPOSURE",
                 "MAX_TRADE", "NOT_READY", "CIRCUIT_BREAKER", "BUY_UNRESOLVED", "DUPLICATE", "COALESCED", "STALE", "IN_FLIGHT", "NOT_TRADABLE", "LADDER_WAIT", "LADDER_MAX", "LADDER_CAP", "GREEN_CONFIRM", "NOT_IN_PROFIT", "LOW_RESERVES", "CRASH_CANDLE", "BELOW_BREAKEVEN", "SOL_OUTFLOW",
-                "FAR_BELOW_PEAK", "LADDER_ABOVE", "SUPPORT_NO_ENTRY")
+                "FAR_BELOW_PEAK", "LADDER_ABOVE", "SUPPORT_NO_ENTRY", "AUTO_TRADE_OFF")
 
 
 # ---------------------------------------------------------------- providers
@@ -507,7 +507,9 @@ class CandleMomo:
                                 or m[:6])
                     self.feeds[m] = f
                     what = {"mayhem-new": "Mayhem_Mode just opened it — buying",
-                            "scan": "Dayscalp's top pick on Decoded Tokens — bought as lot 1 when Auto Trade is on"}
+                            "scan": ("Dayscalp's top pick on Decoded Tokens — pro_hold buys it on the chart BUY signal"
+                                     if cfg.rule == "pro_hold" else
+                                     "Dayscalp's top pick on Decoded Tokens — bought as lot 1 when Auto Trade is on")}
                     self.note("info", f"Watching {f.symbol} ({what.get(origin, src + ' holds it')}).", m)
             for m in list(self.feeds):
                 if m not in want:
@@ -759,7 +761,16 @@ class CandleMomo:
         if side == "SELL" and ladder and n < cfg.sell_on_green_confirm:
             return self.skip(sig, "GREEN_CONFIRM")
         if side == "BUY" and held is None and self.support_source():
-            return self.skip(sig, "SUPPORT_NO_ENTRY")            # the source buys lot 1; Candles only adds / sells
+            if not (cfg.rule == "pro_hold" and sig.get("pro")):
+                return self.skip(sig, "SUPPORT_NO_ENTRY")        # the source buys lot 1; Candles only adds / sells
+            # pro_hold: Candles buys lot 1 itself on the chart BUY (the source only picks / feeds the coin),
+            # and like the source it buys only while Auto Trade is on (off = watch only)
+            try:
+                from src.config.runtime import get_config as _rc
+                if not bool(getattr(_rc(), "trade_enabled", False)):
+                    return self.skip(sig, "AUTO_TRADE_OFF")
+            except Exception:
+                pass
         if (side == "BUY" and held is None and cfg.rule == "inverse" and cfg.max_entry_red_pct > 0
                 and float(sig.get("deltaPct") or 0) < -cfg.max_entry_red_pct):
             return self.skip(sig, "CRASH_CANDLE")          # opening on a -15%+ second buys the crash, not a dip
@@ -1442,8 +1453,7 @@ class CandleMomo:
                                f"after fees ({tgt_from}); {hold_txt}")
                 out["ready"] = bool(up is not None and up >= tgt)
             else:
-                out["entry"] = ("support mode: the source buys lot 1" if self.support_source()
-                                else "on the chart's Pro Trader BUY (≥10% under VWAP, green, RSI<45, volume ≥1.5x)")
+                out["entry"] = "lot 1 on the chart's Pro Trader BUY (≥10% under VWAP, green, RSI<45, volume ≥1.5x)"
                 out["exit"] = "—"
             return out
         if cfg.rule == "pro":

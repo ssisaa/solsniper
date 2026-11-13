@@ -241,3 +241,50 @@ def test_pro_hold_add_respects_total_cap(tmp_path, monkeypatch):
     assert e._route(sig("a")) == "intent" and started[-1]["add"] and started[-1]["lot_no"] == 3
     e.positions["MINT"]["entry_sol"] = 0.015
     assert e._route(sig("b")) != "intent"
+
+
+def _support_engine(tmp_path, monkeypatch, rule, trade_on):
+    from src.signal import candle_momo as CM
+    from src.signal.candle_store import Store
+    import src.config.runtime as rt
+    e = CM.CandleMomo()
+    e.store = Store(str(tmp_path / "s.sqlite"), str(tmp_path / "s.jsonl"))
+    e.cfg.rule = rule
+    e.cfg.mode = "live"
+    e.cfg.inflow_window_s = 0
+    e.cfg.max_below_peak_pct = 0
+    f = CM.Feed("MINT", 10)
+    f.status = "OK"
+    e.feeds["MINT"] = f
+    monkeypatch.setattr(e, "support_source", lambda: "dayscalp")
+    monkeypatch.setattr(e, "live_block", lambda: "")
+    started = []
+    monkeypatch.setattr(e, "_start", lambda sig: started.append(sig) or "intent")
+    monkeypatch.setattr(rt, "get_config", lambda: type("C", (), {"trade_enabled": trade_on})())
+    sig = {"id": "x", "mint": "MINT", "side": "BUY", "pro": True, "symbol": "S", "provider": "pump_rest",
+           "ts": int(time.time() * 1000), "open": 1.0, "prevClose": 1.0, "close": 1.0, "deltaPct": 0.0,
+           "candleTs": 0, "rule": "pro", "feedLagMs": 0}
+    return e, sig
+
+
+def test_pro_hold_buys_lot_one_in_support_mode(tmp_path, monkeypatch):
+    e, sig = _support_engine(tmp_path, monkeypatch, "pro_hold", True)
+    assert e._route(sig) == "intent"
+
+
+def test_pro_hold_support_watch_only_with_auto_trade_off(tmp_path, monkeypatch):
+    e, sig = _support_engine(tmp_path, monkeypatch, "pro_hold", False)
+    assert e._route(sig) == "AUTO_TRADE_OFF"
+
+
+def test_other_rules_still_leave_lot_one_to_the_source(tmp_path, monkeypatch):
+    e, sig = _support_engine(tmp_path, monkeypatch, "pro", True)
+    assert e._route(sig) == "SUPPORT_NO_ENTRY"
+
+
+def test_dayscalp_knows_the_candles_rule(monkeypatch):
+    from src.signal import dayscalp as DS
+    from src.signal import candle_momo as CM
+    eng = CM.get_engine()
+    monkeypatch.setattr(eng.cfg, "rule", "pro_hold")
+    assert DS._candle_rule() == "pro_hold"

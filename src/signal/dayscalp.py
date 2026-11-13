@@ -781,6 +781,14 @@ async def _drop_client(client) -> None:
 LAST_CANDLE_PICK: Dict[str, Any] = {"mint": "", "symbol": "", "ts": 0.0}
 
 
+def _candle_rule() -> str:
+    try:
+        from src.signal.candle_momo import get_engine
+        return str(get_engine().cfg.rule or "")
+    except Exception:
+        return ""
+
+
 def _candle_supports_dayscalp() -> bool:
     """AutoTrade-Candles is on and Dayscalp is the Live Controls source."""
     try:
@@ -853,6 +861,11 @@ async def select_top1_dayscalp(cfg: Optional[DayScalpConfig] = None) -> Optional
                 why = f"AutoTrade-Candles: first scan token ({age_txt}) — bought now as lot 1"
                 log.info("DAYSCALP candle pick %s m5=%+.1f%% %s mint=%s", row.get("symbol") or "?", m5, age_txt, mint[:8])
                 LAST_CANDLE_PICK.update(mint=mint, symbol=str(row.get("symbol") or ""), ts=now_t)
+                if _candle_rule() == "pro_hold":
+                    # Candles rule pro_hold buys lot 1 itself, on its chart BUY signal: Dayscalp only picks the coin.
+                    await _show_decoded(row, "WATCH", f"AutoTrade-Candles pro_hold: first scan token ({age_txt}) — "
+                                                      "Candles buys it on its chart BUY signal")
+                    return None
                 await _show_decoded(row, "BUYING", why)
                 return DayScalpCandidate(
                     mint=mint, symbol=row.get("symbol") or "", name=row.get("name") or "",
