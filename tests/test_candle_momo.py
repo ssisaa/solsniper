@@ -986,7 +986,9 @@ def test_support_on_adopts_source_coins_and_never_opens(engine, monkeypatch, tmp
     assert list(e.feeds) == ["OCMINT"] and e.positions["OCMINT"]["support"] == "opencopy"
     assert held.source == "opencopy"                                  # its own rules stay
     s = _sig("BUY", 900, mint="OTHER")
-    assert e._route(s) == "SUPPORT_NO_ENTRY"                          # Candles never buys lot 1 here
+    assert e._route(s) != "SUPPORT_NO_ENTRY"      # OpenCopy only offers tokens (2026-11-14): Candles buys lot 1 by its rule
+    monkeypatch.setattr(e, "feeds_only", lambda src: False)
+    assert e._route(_sig("BUY", 901, mint="OTHER")) == "SUPPORT_NO_ENTRY"   # sources that buy lot 1 themselves
     r = e.set_support(False)                                          # Revert
     assert r["ok"] and not e.cfg.support_enabled and e.cfg.mode == "paper" and "OCMINT" not in e.positions
     assert held.status == "OPEN"                                      # the source keeps its coin
@@ -1216,11 +1218,15 @@ def test_mayhem_grab_feeds_and_buys_youngest(monkeypatch):
     monkeypatch.setattr(D, "queue_openhold_order", lambda *a, **k: orders.append((a, k)))
     e._pick([])
     assert "YOUNGpump" in e.feeds and "OLDERpump" not in e.feeds
+    assert not orders                              # MayhemMode only feeds (2026-11-14): Candles buys by its rule
+    monkeypatch.setattr(e, "feeds_only", lambda src: False)
+    e.feeds.clear()
+    e._pick([])                                    # the old way (a source that buys lot 1): MayhemMode buys it
     assert len(orders) == 1 and orders[0][0][1] == "YOUNGpump" and orders[0][1]["candle"] is True
     e._pick([])                                    # one coin at a time: no second buy
     assert len(orders) == 1
     monkeypatch.setattr(rt, "get_config", lambda: _types.SimpleNamespace(filter_mode="mayhem", trade_enabled=False))
-    e2 = CandleMomo(); e2.store = None; e2.cfg.support_enabled = True
+    e2 = CandleMomo(); e2.store = None; e2.cfg.support_enabled = True; e2.cfg.mode = "live"
     e2.manager = _types.SimpleNamespace(positions={})
     e2._pick([])
     assert len(orders) == 1 and "YOUNGpump" in e2.feeds   # Auto Trade off: shown in the feeds, not bought

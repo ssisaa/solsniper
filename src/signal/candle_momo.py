@@ -44,6 +44,7 @@ CANDLE_URL = ("https://frontend-api-v3.pump.fun/candles/solana:5eykt4UsFv8P8NJdT
               "?res={res}&count={count}&measure={measure}")
 BOARD_URL = "https://advanced-indexer.pump.fun/boards/mayhem?tier=web&offset=0&limit=30"
 BASE_FEE_LAMPORTS = 5000
+FEED_ONLY_SOURCES = ("opencopy", "callout", "mayhem")   # AutoTrade-Candles: these sources only offer tokens
 PRO_FIRST_MAX_AGE_S = 60.0     # pro_hold first-candle buy: only coins this young (a new coin's first candle)
 SKIP_REASONS = ("KILLED", "NO_POSITION", "ALREADY_LONG", "ENTRIES_PAUSED", "FEED_DEGRADED", "STALE_FEED",
                 "BLACKLIST", "NOT_WHITELISTED", "DAILY_LOSS", "RATE_LIMIT", "COOLDOWN", "MAX_EXPOSURE",
@@ -202,6 +203,7 @@ class CandleMomo:
         self.traded: Dict[str, float] = {}           # mint -> when its last trade closed (one-time-use mode)
         self._mx_rows: Dict[str, List[Dict[str, Any]]] = {}   # Mixed feed: board rows by group
         self._mx_at: Dict[str, float] = {}
+        self.offers: Dict[str, Dict[str, Any]] = {}    # AutoTrade-Candles feed-only sources: mint -> offer
         self._mirrored: Dict[str, float] = {}         # Paper + AutoTrade-Candles: coins given a paper lot 1
         self.mayhem_of: Dict[str, Optional[bool]] = {}  # mint -> Mayhem coin? (None = still checking)
         self._mx_turn = 0                             # index in mayhem2.MIXED_GROUPS whose turn is next
@@ -395,9 +397,28 @@ class CandleMomo:
             self.note("info", f"{sig['symbol']} — PAPER lot 1 for {src} (what {src} would buy live).", m)
             self._start(sig)
 
+    def feeds_only(self, src: str) -> bool:
+        """AutoTrade-Candles on for CallOuts / OpenCopy / MayhemMode (user 2026-11-14): the source does not buy, pin or
+        hold — every new token its callers (or Mayhem_Mode) open is offered to Candles, which buys and sells it by its
+        own rule (Live or Paper as the Candles switch). Off: the source follows its own rules, no relation to Candles."""
+        return src in FEED_ONLY_SOURCES and bool(self.cfg.support_enabled) and self.support_source() == src
+
+    def offer(self, src: str, mint: str, symbol: str = "", age: Optional[float] = None) -> bool:
+        """A source hands a new token to Candles instead of buying it. True the first time (for logging)."""
+        if not mint or mint in self.unusable:
+            return False
+        now = time.time()
+        first = mint not in self.offers
+        o = self.offers.setdefault(mint, {"src": src, "at": now, "symbol": symbol or mint[:6], "age": age})
+        o["seen"] = now
+        if first:
+            self.note("info", f"{o['symbol']} — {src} offered it (new token); Candles buys / sells it by its "
+                              f"{self.cfg.rule} rule ({self.cfg.mode.upper()}).", mint)
+        return first
+
     def pro_hold_owns_entries(self, src: str) -> bool:
         """pro_hold with AutoTrade-Candles on this source: Candles buys (on Botpredict's BUY); the source only feeds."""
-        return (self.cfg.rule == "pro_hold" or self.paper_support()) and self.support_source() == src
+        return ((self.cfg.rule == "pro_hold" or self.paper_support()) and self.support_source() == src) or self.feeds_only(src)
 
     def paper_support(self) -> bool:
         """AutoTrade-Candles on with Candles in PAPER (user 2026-11-14: test a source without real SOL). Candles
@@ -417,7 +438,7 @@ class CandleMomo:
         if held:
             return {held[0]: want.get(held[0], "held")}
         for m, origin in want.items():
-            if origin in ("scan", "mayhem-new", "mayhem-watch"):
+            if origin in ("scan", "mayhem-new", "mayhem-watch", "offer"):
                 return {m: origin}
         for m, origin in want.items():
             if mayhem_state_of(m) != "paused":
@@ -695,6 +716,25 @@ class CandleMomo:
                             self._grab.setdefault(pk["mint"], {"at": time.time(), "symbol": pk.get("symbol") or ""})
                 except Exception:
                     pass
+            if self.feeds_only(src):
+                now = time.time()
+                for m, o in list(self.offers.items()):
+                    stale = now - float(o.get("seen") or o["at"]) > max(cfg.mixed_idle_s, 30.0)
+                    done = m in self.traded and float(self.traded[m]) >= float(o["at"])
+                    if m in self.positions:
+                        continue
+                    if o["src"] != src or stale or done:
+                        self.offers.pop(m, None)
+                slots = 1 if cfg.rule == "pro_hold" else max(1, int(cfg.max_mints or 1))
+                fresh = sorted((o["at"], m) for m, o in self.offers.items() if m not in self.positions)
+                for _at, m in reversed(fresh):                       # newest offer first
+                    if len([x for x in want if x not in self.positions]) >= slots:
+                        break
+                    want.setdefault(m, "offer")
+                    o = self.offers[m]
+                    if o.get("age") is not None:
+                        ages[m] = float(o["age"]) + (now - float(o["at"]))
+                    self._grab.setdefault(m, {"at": now, "symbol": o.get("symbol") or ""})
             if cfg.rule == "pro_hold":
                 want = self._one_feed(want)
             for m, origin in want.items():
@@ -709,7 +749,8 @@ class CandleMomo:
                     f.symbol = ((self.positions.get(m) or {}).get("symbol") or (self._grab.get(m) or {}).get("symbol")
                                 or m[:6])
                     self.feeds[m] = f
-                    what = {"mayhem-new": ("Mayhem_Mode just opened it — pro_hold buys it on Botpredict's BUY (◆ BP)"
+                    what = {"offer": f"{src} offered it — Candles buys it by its {cfg.rule} rule ({cfg.mode.upper()})",
+                            "mayhem-new": ("Mayhem_Mode just opened it — pro_hold buys it on Botpredict's BUY (◆ BP)"
                                            if cfg.rule == "pro_hold" else "Mayhem_Mode just opened it — buying"),
                             "scan": ("Dayscalp's top pick on Decoded Tokens — pro_hold buys it on Botpredict's BUY (◆ BP)"
                                      if cfg.rule == "pro_hold" else
@@ -719,7 +760,7 @@ class CandleMomo:
                 if m not in want:
                     self.feeds.pop(m, None)
             self.providers["stream"].wanted = set(self.feeds)
-            if self.paper_support() and cfg.rule != "pro_hold":
+            if self.paper_support() and cfg.rule != "pro_hold" and not self.feeds_only(src):
                 self._paper_lot1(want, src)
             return
         want: Dict[str, Dict[str, Any]] = {}
@@ -1035,7 +1076,7 @@ class CandleMomo:
             return self.skip(sig, "GREEN_CONFIRM")
         if side == "BUY" and held is None and self.support_source():
             if not ((cfg.rule == "pro_hold" and sig.get("pro")) or sig.get("mirror")
-                    or (self.paper_support() and sig.get("pro"))):
+                    or (self.paper_support() and sig.get("pro")) or self.feeds_only(self.support_source())):
                 return self.skip(sig, "SUPPORT_NO_ENTRY")        # the source buys lot 1; Candles only adds / sells
             # pro_hold: Candles buys lot 1 itself on the chart BUY (the source only picks / feeds the coin),
             # and like the source it buys only while Auto Trade is on (off = watch only)

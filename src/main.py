@@ -6167,16 +6167,25 @@ async def dayscalp_loop(
                         except Exception:
                             log.debug("paused block note failed", exc_info=True)
                         continue
-                if row.get("auto") and is_mayhem_user(user):
+                if row.get("auto"):
+                    # AutoTrade-Candles on (OpenCopy / MayhemMode, or pro_hold / Paper for MayhemMode): the source does
+                    # not buy, pin or hold — the caller's new token goes to Candles, which buys / sells it by its rule.
+                    _src_now = "mayhem" if is_mayhem_user(user) else "opencopy"
                     try:
                         from src.signal.candle_momo import get_engine as _cm_engine
-                        _owns = _cm_engine().pro_hold_owns_entries("mayhem")
+                        _cme = _cm_engine()
+                        _owns = _cme.pro_hold_owns_entries(_src_now)
                     except Exception:
                         _owns = False
                     if _owns:
-                        # AutoTrade-Candles pro_hold: Candles buys this coin on Botpredict's BUY; MayhemMode only feeds it
                         cooled[mint] = _time.time() + 120
-                        log.info("OPENHOLDS %s — Candles pro_hold buys on its BUY signal; MayhemMode does not buy.", symbol)
+                        try:
+                            _first = _cme.offer(_src_now, mint, str(symbol or ""),
+                                                age=(float(row.get("age") or 0) if _src_now == "mayhem" else None))
+                        except Exception:
+                            _first = False
+                        if _first:
+                            log.info("OPENHOLDS %s — AutoTrade-Candles: offered to Candles (%s does not buy).", symbol, _src_now)
                         continue
                 set_openhold_status(mint, "BUYING")
                 note_openhold_seen(user, mint)
@@ -6754,6 +6763,18 @@ async def dayscalp_loop(
                 "user": str(row.get("userName") or ""),
                 "wallet": str(row.get("walletAddress") or ""),
             }
+            try:
+                from src.signal.candle_momo import get_engine as _cm_engine
+                _cme = _cm_engine()
+                _fo = _cme.feeds_only("callout")
+            except Exception:
+                _fo = False
+            if _fo:
+                # AutoTrade-Candles on: CallOuts does not buy — the caller's token goes to Candles (its rule buys / sells)
+                if _cme.offer("callout", mint, str(symbol or "")):
+                    log.info("CALLOUT %s %s — AutoTrade-Candles: offered to Candles (CallOuts does not buy).", trigger, symbol)
+                await asyncio.sleep(1.0)
+                continue
             log.info(
                 "CALLOUT %s %s — buying. caller %s / unrealized %s inside the range. next-trade level %+.0f%%",
                 trigger, symbol, row.get("percentageUsd"), row.get("unrealizedUsd"), threshold,
