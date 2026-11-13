@@ -308,6 +308,10 @@ td{padding:8px 6px;border-bottom:1px solid rgba(120,160,210,.08);vertical-align:
 #view-candle .cm-cread b{color:var(--text,#e6edf3);font-weight:700}
 #view-candle .cm-chartwrap{position:relative;flex:1;min-height:420px;border-radius:10px;background:radial-gradient(120% 90% at 50% 0%,rgba(40,70,120,.18),rgba(6,10,18,0) 60%),linear-gradient(180deg,#0b1220,#070b14);border:1px solid rgba(120,160,210,.12);overflow:hidden}
 #view-candle .cm-chartwrap canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair}
+#view-candle .cm-mh{display:inline-flex;flex-direction:column;gap:3px;min-width:84px}
+#view-candle .cm-mh b{font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+#view-candle .cm-mh i{display:block;height:4px;border-radius:9px;background:rgba(138,160,184,.18);overflow:hidden}
+#view-candle .cm-mh s{display:block;height:100%;border-radius:9px}
 #view-candle .cm-chartmsg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted,#8aa0b8);font-size:13px;pointer-events:none}
 #view-candle .cm-chartmsg[hidden]{display:none}
 #view-candle .cm-cfoot{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-top:8px;font-size:11px;color:var(--muted,#8aa0b8)}
@@ -4412,10 +4416,10 @@ function paintCandle(d){
       <span class="m2-pill ${cls}">${escapeHtml(f.status)}</span> <span class="muted">${escapeHtml(f.using||'—')} · ${escapeHtml(f.origin)} · ${escapeHtml(f.boardState||'')} · age ${f.age??'—'}s · ${f.candles} candles · last ${f.lastAgeS??'—'}s ago</span>
       <div class="cm-tail">${tail||'no candles yet'}${err?' · <span class="w">'+escapeHtml(err)+'</span>':''}</div></div>`;
   }).join(''):'<div class="muted">No coin watched yet.</div>');
-  cmSet('cmPos', (d.positions||[]).length?'<table><tr><th>Coin</th><th>Mode</th><th>Lots</th><th>In SOL</th><th>Value</th><th>uPnL</th><th>Held</th></tr>'+(d.positions||[]).map(p=>
+  cmSet('cmPos', (d.positions||[]).length?'<table><tr><th>Coin</th><th>Mode</th><th>Lots</th><th>In SOL</th><th>Value</th><th>uPnL</th><th>Held</th><th title="Max hold (Candles settings): the trade is sold when this reaches 0">Max hold</th></tr>'+(d.positions||[]).map(p=>
     `<tr><td>${escapeHtml(p.symbol||p.mint.slice(0,6))}${p.support?' <span class="muted">· '+escapeHtml(p.support)+'</span>':''}</td><td>${p.mode==='live'?'<b class="r">LIVE</b>':'paper'}</td><td>${p.lots||1}</td><td>${(p.entry_sol||0).toFixed(4)}</td>
      <td title="${escapeHtml(p.value_src?'valued from '+p.value_src:'no price yet')}">${p.value_sol==null?'<span class="muted">pricing…</span>':p.value_sol.toFixed(5)}</td>
-     <td class="${p.upct==null?'':m2Cls(p.upct)}">${p.upct==null?'—':(p.upnl_sol>=0?'+':'')+Number(p.upnl_sol||0).toFixed(5)+' · '+m2Pct(p.upct)}</td><td>${cmHeld((Date.now()/1000)-(p.entry_ts||0))}</td></tr>`).join('')+'</table>':'<div class="muted">Flat.</div>');
+     <td class="${p.upct==null?'':m2Cls(p.upct)}">${p.upct==null?'—':(p.upnl_sol>=0?'+':'')+Number(p.upnl_sol||0).toFixed(5)+' · '+m2Pct(p.upct)}</td><td>${cmHeld((Date.now()/1000)-(p.entry_ts||0))}</td><td>${cmMaxHold(p, (d.config||{}).max_hold_s)}</td></tr>`).join('')+'</table>':'<div class="muted">Flat.</div>');
   const sigs=d.signals||[];
   cmSet('cmSigN', sigs.length?'· newest first':'');
   cmSet('cmSig', sigs.length?sigs.map(s=>`<li><span class="muted">${m2Clock((s.ts||0)/1000)}</span><span>${escapeHtml(s.symbol||'')}</span>
@@ -4988,6 +4992,14 @@ function cmDrawChart(){
       g.textAlign='left'; rows.forEach((r,k)=>{ g.fillStyle=r[1]; g.fillText(r[0],bx+8,by+12+k*15); }); } }
   if(rd){ const ch=show.o?((show.c/show.o-1)*100):0, age=Math.max(0,(Date.now()-(last.t+1000))/1000);
     rd.innerHTML=`${new Date(show.t).toTimeString().slice(0,8)} · O <b>${m2Px(show.o)}</b> H <b>${m2Px(show.h)}</b> L <b>${m2Px(show.l)}</b> C <b>${m2Px(show.c)}</b> <span class="${ch>0?'g':(ch<0?'r':'')}">${ch>0?'+':''}${ch.toFixed(2)}%</span> · last candle ${age.toFixed(0)}s ago${open&&open.value_src?' · value: '+escapeHtml(open.value_src):''}`; }
+}
+function cmMaxHold(p, maxS){
+  maxS=Number(maxS)||0;
+  if(maxS<=0) return '<span class="muted">off</span>';
+  const held=Math.max(0,(Date.now()/1000)-(p.entry_ts||0)), left=maxS-held, frac=Math.max(0,Math.min(1,held/maxS));
+  const col=left<=0?'#ff5d73':(left<=30?'#ffcc66':'#3ee0a0');
+  const txt=left<=0?'selling':cmHeld(left)+' left';
+  return `<span class="cm-mh" title="Max hold ${maxS.toFixed(0)}s — ${escapeHtml(txt)}"><b style="color:${col}">${escapeHtml(txt)}</b><i><s style="width:${(frac*100).toFixed(1)}%;background:${col}"></s></i></span>`;
 }
 function cmHeld(sec){ sec=Math.max(0,Math.round(sec)); return sec<120?sec+'s':(sec<7200?Math.floor(sec/60)+'m '+(sec%60)+'s':Math.floor(sec/3600)+'h '+Math.floor(sec%3600/60)+'m'); }
 function cmCfgLadder(){ return !!(_cmChart.cfg&&_cmChart.cfg.rule==='inverse'&&_cmChart.cfg.ladder_enabled); }
