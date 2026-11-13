@@ -83,6 +83,13 @@ first in each board (boards read every 0.8 s / 1.5 s), Solana coins whose mint s
 read. Coins off the pump curve (graduated) are valued by a Jupiter quote (`_jup_curve`, flat price, 1.5 s cache);
 dry run skips the local build for them. Idle unpin (30 s without a trade) and one trade per coin still apply.
 
+**Candles Mixed feed (2026-11-13)**: Candles page Feed checkboxes (`auto_follow`: `mayhem_board` | `mixed`, one is
+always on; only when AutoTrade-Candles is off). *Mixed* = same boards as Mayhem2's Mixed (`mayhem2.MIXED_BOARDS`,
+reuses Mayhem2's fresh copy, else reads them itself), turns New → Movers → Graduated (`_mixed_want`, `_mx_turn`),
+youngest first, pump mints only, New < 3 min; a coin stays while held, else until its trade completes or
+`mixed_idle_s` (60 s) with no trade, then the next board's youngest (a handed-over coin is skipped 5 min). Max mints
+slots (pro_hold: one). Paper / LIVE follow Candles' Live switch. Graduated coins are valued by Jupiter.
+
 **Pro Trader (2026-11-13)**: `src/signal/pro_trader.py` reads the pinned coin's 1s candles (EMA 9/21, VWAP, RSI,
 MACD, volume, 15 s BUY/SELL flow) → call BUY / SELL / HOLD / WAIT / AVOID with entry, target, stop, checklist and a
 replay of the rules on the chart. Entry = "VWAP dip with volume" (≥10 % under VWAP, green candle, RSI < 45, last-5

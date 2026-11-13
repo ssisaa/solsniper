@@ -175,7 +175,8 @@ class Config:
     kill: bool = False
     provider: str = "pump_rest"              # pump_rest | stream
     fallback: str = "stream"                 # "" | stream | pump_rest
-    auto_follow: str = "mayhem_board"        # none | mayhem_board
+    auto_follow: str = "mayhem_board"        # none | mayhem_board | mixed (New -> Movers -> Graduated, youngest first)
+    mixed_idle_s: float = 60.0               # mixed: a watched coin with no trade for this long hands over to the next turn
     max_mints: int = 1
     min_age_s: float = 3.0
     max_age_s: float = 180.0                 # only coins younger than this are PICKED (see reuse_coin)
@@ -232,11 +233,11 @@ _LIMITS: Dict[str, Tuple[float, float]] = {
     "max_open_sol_per_mint": (0.0001, 5), "max_daily_loss_sol": (0.0001, 100), "max_mints": (0, 10),
     "min_age_s": (0, 86400), "max_age_s": (1, 864000), "max_hold_s": (0, 3600), "max_ladder_buys": (1, 20), "min_red_count_to_ladder": (1, 20), "reds_per_lot": (1, 20),
     "ladder_max_total_sol": (0.0001, 5), "sell_on_green_confirm": (1, 10), "stop_loss_pct": (0, 100), "min_profit_pct": (-50, 1000), "min_reserve_sol": (0, 100), "max_entry_red_pct": (0, 100), "inflow_window_s": (0, 60),
-    "max_below_peak_pct": (0, 99.9), "exit_reserve_sol": (0, 100),
+    "max_below_peak_pct": (0, 99.9), "exit_reserve_sol": (0, 100), "mixed_idle_s": (5, 3600),
 }
 _CHOICES = {"mode": MODES, "rule": RULES, "res": ("1s", "5s", "15s", "1m"), "measure": ("price_usd", "price"),
             "provider": ("pump_rest", "stream"), "fallback": ("", "stream", "pump_rest"),
-            "auto_follow": ("none", "mayhem_board"), "ladder_size_mode": ("fixed", "martingale"),
+            "auto_follow": ("none", "mayhem_board", "mixed"), "ladder_size_mode": ("fixed", "martingale"),
             "ladder_count": ("since_last_lot", "in_a_row")}
 HOT_KEYS = set(Config.__dataclass_fields__)      # everything is hot-reloadable (no keys live here)
 

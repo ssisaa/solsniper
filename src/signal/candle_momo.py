@@ -195,6 +195,11 @@ class CandleMomo:
         self.reds_since: Dict[str, int] = {}         # mint -> red signals since the last lot (downside ladder)
         self.pro_px: Dict[str, float] = {}           # rule pro: mint -> chart price of the BUY call (its entry line)
         self.traded: Dict[str, float] = {}           # mint -> when its last trade closed (one-time-use mode)
+        self._mx_rows: Dict[str, List[Dict[str, Any]]] = {}   # Mixed feed: board rows by group
+        self._mx_at: Dict[str, float] = {}
+        self._mx_turn = 0                             # index in mayhem2.MIXED_GROUPS whose turn is next
+        self._mx_since: Dict[str, float] = {}         # mint -> when Mixed started watching it
+        self._mx_left: Dict[str, float] = {}          # mint -> when Mixed handed it over
         self.board_seen: Dict[str, float] = {}       # mint -> last time the board listed it
         self._jup_val: Dict[str, Tuple[float, float, int]] = {}   # mint -> (SOL value, ts, raw tokens)
         self._quote_dec: Dict[str, int] = {}         # quote coin -> decimals
@@ -290,7 +295,10 @@ class CandleMomo:
                 if not self.cfg.enabled:
                     continue
                 rows: List[Dict[str, Any]] = []
-                if self.cfg.auto_follow == "mayhem_board":
+                if self.cfg.auto_follow == "mixed" and not self.support_source():
+                    rows = await self._mixed_boards()
+                    self.board, self.board_at = rows, time.time()
+                elif self.cfg.auto_follow == "mayhem_board":
                     try:
                         from src.signal.mayhem2 import get_engine as _m2
                         m2 = _m2()
@@ -506,6 +514,112 @@ class CandleMomo:
             self.note("info", "Reverted — Candles is back to normal, in PAPER mode. The source keeps its own coins and rules.")
         return dict(out, support=bool(on))
 
+    # ---------- Mixed feed (Candles page checkbox, same boards as Mayhem2's "Mixed")
+    async def _mixed_boards(self) -> List[Dict[str, Any]]:
+        """New / Movers / Graduated boards (pump's own lists). Reuses Mayhem2's fresh copy when it reads them,
+        else reads them here (New every 2 s, Movers / Graduated every 4 s). Rows carry _grp and _age."""
+        from src.data.fast_get import mayhem2_get
+        from src.signal.mayhem2 import MIXED_BOARDS, MIXED_GROUPS
+        now = time.time()
+        try:
+            from src.signal.mayhem2 import get_engine as _m2
+            m2 = _m2()
+            if m2.mixed():
+                with m2.lock:
+                    for g in MIXED_GROUPS:
+                        at = float(m2.mixed_at.get(g) or 0)
+                        if now - at < 3.0 and m2.mixed_rows.get(g):
+                            self._mx_rows[g] = list(m2.mixed_rows[g])
+                            self._mx_at[g] = at
+        except Exception:
+            pass
+        due = [(g, u) for g, u, _e in MIXED_BOARDS
+               if now - float(self._mx_at.get(g) or 0) >= (2.0 if g == "new" else 4.0)]
+
+        async def one(g: str, u: str):
+            try:
+                body = await asyncio.to_thread(mayhem2_get, u, "candlemixed" + g[:3], 3.0)
+                return g, list((body or {}).get("entries") or []) if isinstance(body, dict) else None
+            except Exception:
+                return g, None
+        for g, rows in await asyncio.gather(*(one(g, u) for g, u in due)):
+            if rows is not None:
+                self._mx_rows[g] = rows
+                self._mx_at[g] = time.time()
+        out = []
+        for g in MIXED_GROUPS:
+            shift = max(0.0, now - float(self._mx_at.get(g) or now))
+            for r in self._mx_rows.get(g) or []:
+                out.append(dict(r, _grp=g, _age=float(r.get("age") or 0) + shift))
+        return out
+
+    def _mixed_candidates(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Solana coins whose mint starts or ends with 'pump', New only under max age, a Mayhem coin only while
+        active, not blacklisted / unusable / already traded (unless Reuse coin); youngest first in each board."""
+        from src.signal.mayhem2 import MIXED_GROUPS, YOUNG_S
+        cfg = self.cfg
+        out = []
+        for g in MIXED_GROUPS:
+            part, seen = [], set()
+            for r in rows:
+                m = str(r.get("m") or "")
+                if r.get("_grp") != g or not m or m in seen or not (m.startswith("pump") or m.endswith("pump")):
+                    continue
+                if not str(r.get("c") or "solana").startswith("solana"):
+                    continue
+                seen.add(m)
+                if g == "new" and r["_age"] > min(YOUNG_S, cfg.max_age_s):
+                    continue
+                ms = str(r.get("ms") or "").lower()
+                if ms and ms not in ("active", "enabled"):
+                    continue
+                if m in cfg.blacklist or m in self.unusable or (not cfg.reuse_coin and m in self.traded):
+                    continue
+                part.append(r)
+            part.sort(key=lambda r: r["_age"])
+            out.extend(part)
+        return out
+
+    def _mixed_want(self, rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        """Mixed: takes turns New -> Movers -> Graduated -> New ... A watched coin stays while held, and while
+        flat until a trade on it completes or it sat mixed_idle_s with no trade; then the next board's youngest
+        coin is fed. An empty board passes the turn on. Up to Max mints (pro_hold: one)."""
+        from src.signal.mayhem2 import MIXED_GROUPS
+        cfg = self.cfg
+        now = time.time()
+        n = len(MIXED_GROUPS)
+        cands = self._mixed_candidates(rows)
+        cmints = {r["m"] for r in cands}
+        slots = 1 if cfg.rule == "pro_hold" else max(1, int(cfg.max_mints or 1))
+        want: Dict[str, Dict[str, Any]] = {}
+        for m, f in list(self.feeds.items()):
+            if not str(f.origin).startswith("mixed"):
+                continue
+            since = float(self._mx_since.get(m) or now)
+            done = m in self.traded and float(self.traded[m]) >= since
+            idle = now - since >= cfg.mixed_idle_s and m not in self.busy
+            if m in self.positions or (not done and not idle and (m in cmints or now - since < 10)):
+                want[m] = {"origin": f.origin}
+        if cfg.rule == "pro_hold" and self.positions:
+            return want                       # one coin at a time: the open trade completes first
+        used = set(want) | set(self.positions)
+        while len(want) < slots:
+            pick = None
+            for k in range(n):
+                i = (self._mx_turn + k) % n
+                g = MIXED_GROUPS[i]
+                pick = next((r for r in cands if r["_grp"] == g and r["m"] not in used
+                             and now - float(self._mx_left.get(r["m"]) or 0) > 300), None)
+                if pick:
+                    self._mx_turn = (i + 1) % n
+                    break
+            if not pick:
+                break
+            used.add(pick["m"])
+            self._mx_since[pick["m"]] = now
+            want[pick["m"]] = {"origin": "mixed-" + pick["_grp"], "row": pick}
+        return want
+
     def _pick(self, rows: List[Dict[str, Any]]) -> None:
         cfg = self.cfg
         src = self.support_source()
@@ -558,7 +672,14 @@ class CandleMomo:
             if m not in cfg.blacklist:
                 want[m] = {"origin": "manual"}
         state = {str(r.get("m") or ""): r for r in rows}
-        if cfg.auto_follow == "mayhem_board" and not cfg.whitelist_only:
+        if cfg.auto_follow == "mixed" and not cfg.whitelist_only:
+            for m, info in self._mixed_want(rows).items():
+                want.setdefault(m, info)
+            for m in list(self.feeds):
+                if str(self.feeds[m].origin).startswith("mixed") and m not in want:
+                    self._mx_left[m] = time.time()        # handed over: not picked again for 5 minutes
+                    self._mx_since.pop(m, None)
+        elif cfg.auto_follow == "mayhem_board" and not cfg.whitelist_only:
             now = time.time()
             for r in rows:
                 if r.get("m"):
@@ -583,7 +704,12 @@ class CandleMomo:
                 f = Feed(mint, cfg.count)
                 f.origin = info["origin"]
                 self.feeds[mint] = f
-                self.note("info", f"Watching {state.get(mint, {}).get('t') or mint[:6]} ({info['origin']}).", mint)
+                r0 = info.get("row") or state.get(mint) or {}
+                what = info["origin"]
+                if what.startswith("mixed-"):
+                    what = (f"Mixed: {what[6:].title()} board's youngest, age {float(r0.get('_age') or 0):.0f}s — "
+                            f"next turn {('New', 'Movers', 'Graduated')[self._mx_turn % 3]}")
+                self.note("info", f"Watching {r0.get('t') or mint[:6]} ({what}).", mint)
             f = self.feeds[mint]
             r = state.get(mint)
             if r:

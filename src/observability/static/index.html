@@ -693,6 +693,7 @@ button.lite{width:auto;margin:0;padding:5px 10px;background:transparent;color:#c
 button.lite:hover{color:#fff;border-color:#eef3fb}
 .cm-sending{opacity:.55;pointer-events:none}
 #cmChart,#m2Chart{cursor:crosshair}#cmChart.drag,#m2Chart.drag{cursor:grabbing}
+#view-candle .cm-feeds{display:inline-flex;gap:10px;align-items:center;padding:2px 8px;border:1px solid rgba(138,160,184,.3);border-radius:8px}
 </style>
 </head>
 <body>
@@ -1201,6 +1202,10 @@ button.lite:hover{color:#fff;border-color:#eef3fb}
         <label>Buy SOL <input class="cm-in" id="cmSize" type="number" step="0.001" min="0.0001"/></label>
         <label>Coins <input class="cm-in" id="cmMax" type="number" step="1" min="0" max="10"/></label>
         <label title="On: keep trading the same coin until it is paused or completed. Off: one trade per coin (win or loss), then move on to a new coin"><input type="checkbox" id="cmReuse"/> Reuse same coin</label>
+        <span class="cm-feeds" title="Where Candles gets its coins when AutoTrade-Candles is off. Paper or LIVE follows the Live switch.">Feed:
+          <label title="Mayhem_Mode's board: young Mayhem coins"><input type="checkbox" class="cm-feed" data-feed="mayhem_board"/> Mayhem board</label>
+          <label title="Takes turns New → Movers → Graduated → New …, the youngest coin of each board (pump mints only). The coin stays while a trade is open; after its trade completes, or 60 s with no trade, the next board's youngest is fed."><input type="checkbox" class="cm-feed" data-feed="mixed"/> Mixed (New, Movers, Graduated)</label>
+        </span>
         <label>Pinned mints <input class="cm-mints" id="cmMints" placeholder="mint mint …"/></label>
         <button type="button" class="m2-btn" id="cmApply">Apply</button>
         <button type="button" class="m2-btn" id="cmEntBtn">Entries …</button>
@@ -4350,6 +4355,7 @@ function paintCandle(d){
       document.getElementById('cmSize').value=c.buy_size_sol;
       document.getElementById('cmMax').value=c.max_mints;
       document.getElementById('cmReuse').checked=c.reuse_coin!==false;
+      document.querySelectorAll('.cm-feed').forEach(b=>{ b.checked=(b.dataset.feed===(c.auto_follow||'mayhem_board')); });
       document.getElementById('cmMints').value=(c.mints||[]).join(' ');
       document.getElementById('cmLadOn').checked=!!c.ladder_enabled;
       document.getElementById('cmLadMax').value=c.max_ladder_buys;
@@ -4434,6 +4440,13 @@ function paintCandle(d){
     <td>${(t.entry_sol||0).toFixed(4)}</td><td>${(t.exit_sol||0).toFixed(5)}</td><td>${(t.costs_sol||0).toFixed(5)}</td>
     <td class="${m2Cls(t.pnl_sol)}">${cmSol(t.pnl_sol)}</td><td class="${m2Cls(t.pct)}">${m2Pct(t.pct)}</td><td>${escapeHtml(t.why||'')}${t.paused_exit?' <span class="w">paused</span>':''}</td></tr>`).join(''):'<tr><td colspan="11" class="muted">No closed trade yet.</td></tr>');
 }
+document.addEventListener('change', e=>{
+  if(!(e.target&&e.target.classList&&e.target.classList.contains('cm-feed'))) return;
+  const f=e.target.dataset.feed;
+  if(!e.target.checked){ e.target.checked=true; return; }       // one feed is always on
+  document.querySelectorAll('.cm-feed').forEach(b=>{ b.checked=(b.dataset.feed===f); });
+  cmPost({auto_follow:f}, f==='mixed'?'Feed: Mixed — New, then Movers, then Graduated (youngest of each)':'Feed: Mayhem board');
+});
 document.getElementById('cmApply').addEventListener('click',()=>{
   const mints=document.getElementById('cmMints').value.trim();
   cmPost({rule:document.getElementById('cmRuleSel').value, min_delta_pct:document.getElementById('cmDelta').value,
