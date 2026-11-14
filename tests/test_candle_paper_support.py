@@ -137,8 +137,12 @@ def test_opencopy_new_opens_feed_candles_several_at_once(monkeypatch):
     import src.observability.dashboard as D
     e = _fo(monkeypatch, "opencopy")
     e.cfg.rule = "pro_hold"
+    now = time.time()
+    e.cfg.support_since = now - 60
     monkeypatch.setattr(D, "openhold_recent_coins", lambda window_s=900.0: [
-        {"coinMint": "A1xpump", "symbol": "A1"}, {"coinMint": "B2xpump", "symbol": "B2"}, {"coinMint": "C3xpump", "symbol": "C3"}])
+        {"coinMint": "A1xpump", "symbol": "A1", "openedAt": now - 5}, {"coinMint": "B2xpump", "symbol": "B2", "openedAt": now - 9},
+        {"coinMint": "C3xpump", "symbol": "C3", "openedAt": now - 20},
+        {"coinMint": "OLDxpump", "symbol": "OLD", "openedAt": now - 300}])      # opened before the tick: not fed
     e._pick([])
     assert set(e.feeds) == {"A1xpump", "B2xpump", "C3xpump"}      # OpenCopy: opened together, fed together
 
@@ -153,3 +157,26 @@ def test_other_sources_stay_one_feed(monkeypatch):
         {"coinMint": "X2xpump", "symbol": "X2", "call": "OPEN", "openedAt": now - 1}], ""))
     e._pick([])
     assert len(e.feeds) == 1
+
+
+def test_live_feed_only_buy_does_not_need_auto_trade(monkeypatch):
+    from src.config import runtime as R
+    e = _fo(monkeypatch, "opencopy", mode="live")
+    monkeypatch.setattr(R, "get_config", lambda: SimpleNamespace(trade_enabled=False, filter_mode="opencopy"))
+    monkeypatch.setattr(e, "_start", lambda sig: "intent")
+    monkeypatch.setattr(e, "live_block", lambda: "")
+    m = "LV" + "z" * 40 + "pump"
+    e.feeds[m] = CM.Feed(m, 10)
+    e.feeds[m].status = "OK"
+    sig = {"id": "lv1", "mint": m, "side": "BUY", "pro": True, "_counted": True, "deltaPct": 0.0}
+    assert e._route(sig) == "intent"                    # was AUTO_TRADE_OFF
+
+
+def test_set_support_stamps_the_time(monkeypatch):
+    e = CM.CandleMomo()
+    seen = {}
+    monkeypatch.setattr(e, "update", lambda patch: seen.update(patch) or {"ok": True})
+    monkeypatch.setattr(e, "_wipe", lambda: "")
+    t0 = time.time()
+    e.set_support(True)
+    assert seen["support_enabled"] and seen["support_since"] >= t0

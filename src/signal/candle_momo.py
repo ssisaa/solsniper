@@ -663,7 +663,9 @@ class CandleMomo:
             self.recent.clear()           # the source's signals; closed support trades stay in the table
             self.notes.clear()
             self.m["skips"] = {}
-        out = self.update({"support_enabled": bool(on), "mode": "live" if on else "paper"})
+        self.offers.clear()
+        out = self.update({"support_enabled": bool(on), "mode": "live" if on else "paper",
+                           "support_since": time.time() if on else 0.0})
         if on:
             self.note("info", "AutoTrade-Candles ON — Candles stopped its own trading and now supports the Live Controls "
                               "source: its held coins are the feeds; Candles adds lots and sells them by its rule (LIVE).")
@@ -1009,7 +1011,11 @@ class CandleMomo:
                     # the coins the OpenHolds page lists (opened in the last 15 minutes), not only OpenCopy's 1-minute
                     # auto-open window; pump coins only (mint starts or ends with "pump", user 2026-11-15)
                     from src.observability.dashboard import openhold_recent_coins
-                    for r in openhold_recent_coins(900.0)[:OPENCOPY_MAX_FEEDS]:
+                    # only coins the callers opened AFTER AutoTrade-Candles was ticked (user 2026-11-15): ticking
+                    # it does not pick up what is already listed
+                    since = float(cfg.support_since or 0) or self.started_at
+                    new = [r for r in openhold_recent_coins(900.0) if float(r.get("openedAt") or 0) >= since]
+                    for r in new[:OPENCOPY_MAX_FEEDS]:
                         m = str(r.get("coinMint") or "")
                         if (m.startswith("pump") or m.endswith("pump")) and m not in self.traded and m not in self.unusable:
                             self.offer("opencopy", m, str(r.get("symbol") or ""))
@@ -1554,7 +1560,11 @@ class CandleMomo:
             # and like the source it buys only while Auto Trade is on (off = watch only)
             try:
                 from src.config.runtime import get_config as _rc
-                if cfg.mode == "live" and not bool(getattr(_rc(), "trade_enabled", False)):
+                # Feed-only sources (OpenCopy / CallOuts / MayhemMode do not buy themselves): Candles' own Live
+                # switch is the gate, as for its own feeds — Auto Trade is not needed (user 2026-11-15: every
+                # live buy was skipped AUTO_TRADE_OFF). Launch / Dayscalp still need it.
+                if (cfg.mode == "live" and not self.feeds_only(self.support_source())
+                        and not bool(getattr(_rc(), "trade_enabled", False))):
                     return self.skip(sig, "AUTO_TRADE_OFF")     # Paper: Auto Trade not needed
             except Exception:
                 pass

@@ -438,3 +438,19 @@ def test_untradable_offer_is_dropped(monkeypatch):
     e.unusable["BADxpump"] = "no route"
     e._pick([])
     assert "BADxpump" not in e.offers and "BADxpump" not in e.feeds
+
+
+def test_non_sol_quoted_coin_tries_lightning_before_jupiter(monkeypatch):
+    import asyncio
+    from src.execution import tx_route as TR
+    tried = []
+
+    async def fake_one(trader, name, side, mint, *a, **k):
+        tried.append(name)
+        return {"status": "skip", "err": "lightning_400:refused" if name == "lightning" else "NO_ROUTES_FOUND"}
+    monkeypatch.setattr(TR, "_one", fake_one)
+    monkeypatch.setattr(TR, "_non_sol_quote", lambda m: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
+    monkeypatch.setattr(TR, "ensure_lightning_warm", lambda: None)
+    monkeypatch.setattr(TR, "lightning_held", lambda m: "")
+    out = asyncio.run(TR.run_swap(None, "buy", "Qx" + "a" * 38 + "pump", sol=0.005, reason="candle"))
+    assert tried[:2] == ["lightning", "jupiter"] and not out["ok"]

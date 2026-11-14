@@ -947,8 +947,12 @@ async def run_swap(trader, side: str, mint: str, sol: float = 0.0, raw: int = 0,
         order = ["jupiter"]
         log.info("TX %s jupiter mint=%s reason=%s", side, mint[:8], reason or "-")
     elif _non_sol_quote(mint):
-        order = ["jupiter"]
-        log.info("TX %s jupiter mint=%s reason=%s — its curve trades against %s, not SOL; Lightning cannot route it",
+        # Lightning (PumpPortal, the Settings route) first, Jupiter only as the fallback (user 2026-11-15: these
+        # went straight to Jupiter, which had no route for a new coin — billie, Cat — so nothing was bought).
+        # A Lightning refusal costs nothing.
+        order = ["lightning", "jupiter"]
+        ensure_lightning_warm()
+        log.info("TX %s lightning mint=%s reason=%s — its curve trades against %s, not SOL; Jupiter is the fallback",
                  side, mint[:8], reason or "-", _non_sol_quote(mint)[:8])
     elif lightning_held(mint):
         order = ["jupiter"]
@@ -1236,6 +1240,7 @@ async def run_swap(trader, side: str, mint: str, sol: float = 0.0, raw: int = 0,
                 _lightning_no_pool(missed),
                 _pool_reject(missed),
                 _migrated(missed),
+                bool(_non_sol_quote(mint)),          # a coin quoted in another coin: Jupiter is always its fallback
             ))
             if go_jupiter and "jupiter" not in names:
                 names.append("jupiter")

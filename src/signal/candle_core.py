@@ -189,6 +189,7 @@ class Config:
     max_mints: int = 1
     min_age_s: float = 3.0
     max_age_s: float = 180.0                 # only coins younger than this are PICKED (see reuse_coin)
+    support_since: float = 0.0               # when AutoTrade-Candles was last ticked: OpenCopy feeds only opens after it
     support_enabled: bool = False            # AutoTrade-Candles (OpenHolds / CallOuts pages): Candles supports the
                                              # Live Controls source (opencopy / callout) — its held coins are the
                                              # feeds; the source buys lot 1, Candles adds lots and sells by its rule
