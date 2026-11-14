@@ -229,3 +229,46 @@ def test_is_paused_marks_coins_pump_paused():
     assert e.is_paused("PZ")
     e.paused_mints["OLD"] = time.time()
     assert e.is_paused("OLD")
+
+
+def test_paused_coin_is_held_not_sold_and_does_not_block_feeds():
+    e = CM.CandleMomo()
+    e.cfg.auto_follow, e.cfg.rule, e.cfg.max_mints, e.cfg.reuse_coin = "mayhem_board", "pro_hold", 1, False
+    pos = {"mint": "PZ", "symbol": "PZ", "mode": "paper", "tokens": 1.0, "entry_sol": 0.01, "entry_ts": time.time()}
+    e.positions["PZ"] = pos
+    e._pause_hold("PZ", pos, "paused")
+    assert pos["paused_at"] and not pos.get("closing") and e.is_paused("PZ")
+    assert e.active_positions() == {}
+    rows = [{"m": "NEXTpump", "t": "N", "ms": "active", "age": 10}]
+    e._pick(rows)
+    assert set(e.feeds) == {"NEXTpump"}                   # the next coin comes; the paused one is only watched
+    assert e.paused_view()[0]["mint"] == "PZ"
+
+
+def test_paused_coin_resumes_the_trade():
+    e = CM.CandleMomo()
+    pos = {"mint": "PZ", "symbol": "PZ", "mode": "paper", "tokens": 1.0, "entry_sol": 0.01, "entry_ts": time.time() - 500}
+    e.positions["PZ"] = pos
+    e._pause_hold("PZ", pos, "paused")
+    e._pause_resume("PZ", pos)
+    assert "paused_at" not in pos and pos["resumed_at"] and not e.is_paused("PZ")
+    assert "PZ" in e.active_positions()
+
+
+def test_paused_coin_gone_to_dust_is_left(monkeypatch):
+    e = CM.CandleMomo()
+    pos = {"mint": "PZ", "symbol": "PZ", "mode": "paper", "tokens": 1.0, "entry_sol": 0.01, "entry_ts": time.time()}
+    e.positions["PZ"] = pos
+    e._pause_hold("PZ", pos, "paused")
+    exits = []
+
+    async def fx(mint, why):
+        exits.append(why)
+    monkeypatch.setattr(e, "_forced_exit", fx)
+    import asyncio
+
+    async def go():
+        e._pause_leave("PZ", pos, 0.00001)
+        await asyncio.sleep(0)
+    asyncio.run(go())
+    assert exits and "dust" in exits[0] and "paused_at" not in pos

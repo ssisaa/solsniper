@@ -51,6 +51,8 @@ SEQ_STEPS = (("launch", "Launch"), ("mayhem", "MayhemMode"), ("board:mayhem_boar
 SEQ_STEP_S = 60.0              # Source Sequence: a step with no trade moves on after this   # AutoTrade-Candles: these sources only offer tokens
 FLAT_PCT = 0.05                # "no candles yet": the only reading moved less than this (shows 0.00%)
 PRO_FIRST_START_CANDLES = 2    # first-buy "start": the chart counts as just started up to this many candles
+PAUSED_DUST_SOL = 0.0002       # Paused Coins: a held paused coin worth less than this (or 2% of its cost) is left
+PAUSED_DUST_FRAC = 0.02
 PRO_FIRST_MAX_AGE_S = 60.0     # pro_hold first-candle buy: only coins this young (a new coin's first candle)
 SKIP_REASONS = ("KILLED", "NO_POSITION", "ALREADY_LONG", "ENTRIES_PAUSED", "FEED_DEGRADED", "STALE_FEED",
                 "BLACKLIST", "NOT_WHITELISTED", "DAILY_LOSS", "RATE_LIMIT", "COOLDOWN", "MAX_EXPOSURE",
@@ -403,7 +405,7 @@ class CandleMomo:
         now = time.time()
         for m in want:
             if (m in self.positions or m in self.busy or m in self.unusable or m in self._mirrored
-                    or len(self.positions) >= max(1, int(self.cfg.max_mints or 1))):
+                    or len(self.active_positions()) >= max(1, int(self.cfg.max_mints or 1))):
                 continue
             self._mirrored[m] = now
             f = self.feeds.get(m)
@@ -489,7 +491,7 @@ class CandleMomo:
                 if self.seq["i"] < 0 or self.seq["state"] == "off":
                     self._seq_switch(0 if self.seq["i"] < 0 else self.seq["i"])
                     continue
-                busy = bool(self.positions) or bool(self.busy) or bool(self.unresolved)
+                busy = bool(self.active_positions()) or bool(self.busy) or bool(self.unresolved)
                 if busy:
                     if not self.seq["trade_at"]:
                         self.seq["trade_at"] = now
@@ -566,7 +568,7 @@ class CandleMomo:
                     if r.get("support") == "mayhem" and mayhem_state_of(m) != "paused"]) + len(grab)
         if self.pro_hold_owns_entries("mayhem"):
             # pro_hold (or Paper) buys itself: the youngest open is only watched, and only while flat
-            if held or self.positions:
+            if held or self.active_positions():
                 return []
             young = [str(r.get("coinMint") or "") for r in mayhem_young_opens(MAYHEM_MAX_OPEN_AGE_S)]
             young = [m for m in young if m and m not in self.traded and m not in self.unusable]
@@ -752,7 +754,7 @@ class CandleMomo:
             idle = now - since >= cfg.mixed_idle_s and m not in self.busy
             if m in self.positions or (not done and not idle and (m in cmints or now - since < 10)):
                 want[m] = {"origin": f.origin}
-        if cfg.rule == "pro_hold" and self.positions:
+        if cfg.rule == "pro_hold" and self.active_positions():
             return want                       # one coin at a time: the open trade completes first
         used = set(want) | set(self.positions)
         while len(want) < slots:
@@ -795,6 +797,106 @@ class CandleMomo:
         src = self.support_source()
         return SUPPORT_NAMES.get(src, "Candles") if src else "Candles"
 
+    # ---------- Paused Coins (user 2026-11-14): a paused coin is held and watched, not sold
+    def _pause_hold(self, mint: str, pos: Dict[str, Any], state: str) -> None:
+        """pump paused the coin while held: do not sell (pump refuses sells then, and paused coins often move
+        again). It goes to the Paused Coins page, watched every second by _paused_loop."""
+        now = time.time()
+        pos["paused_at"] = now
+        pos["pause_state"] = state
+        pos.pop("closing", None)
+        self.paused_mints[mint] = now
+        self.feeds.pop(mint, None)
+        self.note("warn", f"{pos.get('symbol') or mint[:6]} PAUSED by pump — held, not sold; watched every second on "
+                          f"the Paused Coins page. It continues (sells on profit) if it moves again.", mint)
+        if self.store:
+            self.store.audit("paused_hold", mint=mint, state=state)
+
+    async def _paused_loop(self) -> None:
+        """Every second, for each held paused coin: pump's mayhem-state and the coin's value. Moving again
+        (active) -> the trade continues (Max hold restarts, sells on profit). Worth almost nothing (dust) -> left:
+        booked, no longer watched. Never sold while paused."""
+        from src.data.fast_get import mayhem2_get
+        from src.signal.mayhem2 import STATE_URL
+        while True:
+            await asyncio.sleep(1.0)
+            tick = getattr(self, "_paused_tick", 0) + 1
+            self._paused_tick = tick
+            for mint, pos in list(self.positions.items())[:8]:
+                if mint in self.busy:
+                    continue
+                if not pos.get("paused_at"):
+                    # an open trade from any source / feed: is pump pausing it? (every 2s; the board only covers
+                    # the Mayhem board / Mixed feeds)
+                    if tick % 2 or pos.get("closing") or time.time() - float(pos.get("resumed_at") or 0) < 15:
+                        continue
+                    try:
+                        body = await asyncio.to_thread(mayhem2_get, STATE_URL.format(mint=mint), "candlepaused", 2.0)
+                        st = str((body or {}).get("state") or "").lower() if isinstance(body, dict) else ""
+                        if st == "paused":
+                            self._pause_hold(mint, pos, st)
+                    except Exception:
+                        pass
+                    continue
+                try:
+                    body = await asyncio.to_thread(mayhem2_get, STATE_URL.format(mint=mint), "candlepaused", 2.0)
+                    state = str((body or {}).get("state") or "").lower() if isinstance(body, dict) else ""
+                    if body is None or (isinstance(body, dict) and not body.get("state")):
+                        state = "active"          # not a Mayhem coin any more / no pause record: trading
+                    pos["pause_state"] = state or pos.get("pause_state")
+                    pos["pause_checked"] = time.time()
+                    v, _real, vsrc = await self._value(mint, pos["tokens"])
+                    if v is not None:
+                        pos["value_sol"] = v
+                        pos["value_src"] = vsrc
+                        pos["value_at"] = time.time()
+                        pos["upnl_sol"] = v - pos["entry_sol"] - 2 * self._network_fee_sol()
+                        pos["upct"] = pos["upnl_sol"] / pos["entry_sol"] * 100.0 if pos["entry_sol"] else 0.0
+                    cost = float(pos.get("entry_sol") or 0)
+                    if v is not None and cost > 0 and v < max(PAUSED_DUST_SOL, cost * PAUSED_DUST_FRAC):
+                        self._pause_leave(mint, pos, v)
+                    elif state == "active":
+                        self._pause_resume(mint, pos)
+                except Exception:
+                    log.debug("paused watch failed", exc_info=True)
+
+    def _pause_resume(self, mint: str, pos: Dict[str, Any]) -> None:
+        held = time.time() - float(pos.get("paused_at") or time.time())
+        pos.pop("paused_at", None)
+        pos["resumed_at"] = time.time()
+        pos.pop("pro_armed", None)
+        self.paused_mints.pop(mint, None)
+        f = self.feeds.get(mint)
+        if f is not None:
+            f.board_state = "active"
+        self.note("info", f"{pos.get('symbol') or mint[:6]} moving again after {held:.0f}s paused — the trade continues "
+                          f"(sells on profit; Max hold restarts).", mint)
+        if self.store:
+            self.store.audit("paused_resume", mint=mint, after_s=round(held, 1))
+
+    def _pause_leave(self, mint: str, pos: Dict[str, Any], v: float) -> None:
+        """Gone to dust while paused: stop watching. Booked at its value; the coins are left in the wallet."""
+        why = f"paused coin went to dust ({v:.6f} SOL) — left in the wallet, no longer watched"
+        pos.pop("paused_at", None)
+        self.paused_mints.pop(mint, None)
+        if pos.get("mode") == "live":
+            self._live_closed(mint, None, why)
+        else:
+            pos["closing"] = True
+            asyncio.ensure_future(self._forced_exit(mint, "coin " + why))     # paper: booked at its dust value
+
+    def paused_view(self) -> List[Dict[str, Any]]:
+        now = time.time()
+        return [{"mint": m, "symbol": p.get("symbol"), "mode": p.get("mode"), "src": p.get("src"),
+                 "lots": len(p.get("lots") or []) or 1, "entry_sol": p.get("entry_sol"), "value_sol": p.get("value_sol"),
+                 "upct": p.get("upct"), "state": p.get("pause_state"), "paused_s": round(now - float(p["paused_at"])),
+                 "checked_s": round(now - float(p.get("pause_checked") or now), 1)}
+                for m, p in self.positions.items() if p.get("paused_at")]
+
+    def active_positions(self) -> Dict[str, Dict[str, Any]]:
+        """Open trades that are not on the Paused Coins watch: a paused coin never blocks the next coin."""
+        return {m: p for m, p in self.positions.items() if not p.get("paused_at")}
+
     def is_paused(self, mint: str) -> bool:
         """pump paused (or completed) this coin: it cannot be sold, so it is not an active trade."""
         if mint in self.paused_mints:
@@ -805,10 +907,12 @@ class CandleMomo:
     def _single_feed(self) -> None:
         """One coin at a time, for every source and feed (user 2026-11-14): while a trade is open only the coin(s)
         held are watched; flat, one coin. The next coin comes once the trade completes."""
-        if self.positions:
-            keep = [m for m in self.feeds if m in self.positions]
+        active = self.active_positions()
+        if active:
+            keep = [m for m in self.feeds if m in active]
         else:
-            keep = list(self.feeds)[:1]
+            # paused coins are watched on the Paused Coins page, not fed: the next coin can come
+            keep = [m for m in self.feeds if m not in self.positions][:1]
         for m in list(self.feeds):
             if m not in keep:
                 self.feeds.pop(m, None)
@@ -842,7 +946,7 @@ class CandleMomo:
                             self._grab.pop(gm, None)
                     owns = self.pro_hold_owns_entries("dayscalp")
                     picks = list(_pks) if owns else [_pk]
-                    if owns and self.positions:
+                    if owns and self.active_positions():
                         picks = []        # one coin at a time: the open trade completes before the next coin is fed
                     for pk in picks:
                         if pk.get("mint") and time.time() - float(pk.get("ts") or 0) < 20:
@@ -931,7 +1035,7 @@ class CandleMomo:
             if cfg.rule == "pro_hold":
                 # one coin at a time (user 2026-11-14): while a trade is open only that coin is fed; the next
                 # board coin comes once it closes
-                picks = [] if self.positions else picks[:1]
+                picks = [] if self.active_positions() else picks[:1]
             for r in picks:
                 want.setdefault(r["m"], {"origin": "auto"})
         for mint in list(self.positions):           # never drop a coin we hold
@@ -963,10 +1067,9 @@ class CandleMomo:
         self.providers["stream"].wanted = set(self.feeds)
         for mint, pos in list(self.positions.items()):
             f = self.feeds.get(mint)
-            if f and f.board_state in ("paused", "completed") and not pos.get("closing") and self.loop:
-                self.paused_mints[mint] = time.time()
-                pos["closing"] = True
-                asyncio.ensure_future(self._forced_exit(mint, f"coin {f.board_state}"))
+            if (f and f.board_state in ("paused", "completed") and not pos.get("closing") and not pos.get("paused_at")
+                    and time.time() - float(pos.get("resumed_at") or 0) > 15):
+                self._pause_hold(mint, pos, f.board_state)
 
     # ---------- polling
     async def _poll_loop(self) -> None:
@@ -2640,8 +2743,11 @@ class CandleMomo:
                                           if pos.get("support") else "no longer open in the bot (sold or closed elsewhere)")
                         continue
                     pos.pop("gone_at", None)
+                if pos.get("paused_at"):
+                    continue          # on the Paused Coins watch: no Max hold / stop / reserve exit (_paused_loop)
                 if (self.cfg.max_hold_s and not pos.get("closing") and mint not in self.busy
-                        and time.time() - float(pos.get("entry_ts") or time.time()) > self.cfg.max_hold_s):
+                        and time.time() - float(pos.get("resumed_at") or pos.get("entry_ts") or time.time())
+                        > self.cfg.max_hold_s):
                     pos["closing"] = True
                     asyncio.ensure_future(self._forced_exit(mint, f"max hold {self.cfg.max_hold_s:.0f}s"))
                 try:
@@ -2709,7 +2815,8 @@ class CandleMomo:
             get_stream().add_raw_listener(self.providers["stream"].on_trade)
         except Exception:
             log.debug("candle stream hook failed", exc_info=True)
-        for coro in (self._board_loop(), self._poll_loop(), self._value_loop(), self._reserve_loop(), self._seq_loop()):
+        for coro in (self._board_loop(), self._poll_loop(), self._value_loop(), self._reserve_loop(), self._seq_loop(),
+                     self._paused_loop()):
             asyncio.ensure_future(coro)
         self.note("info", f"Candle engine started — {self.cfg.mode.upper()}, rule {self.cfg.rule}, poll {self.cfg.poll_ms} ms.")
 
@@ -2791,7 +2898,7 @@ class CandleMomo:
             src_now = str(getattr(_gc(), "filter_mode", "") or "")
         except Exception:
             src_now = ""
-        return {"ok": True, "seq": self.seq_status(), "support": sup, "supportEnabled": bool(self.cfg.support_enabled), "liveSource": src_now,
+        return {"ok": True, "seq": self.seq_status(), "paused": self.paused_view(), "support": sup, "supportEnabled": bool(self.cfg.support_enabled), "liveSource": src_now,
                 "paperOnly": self.cfg.mode != "live", "live": self.cfg.mode == "live",
                 "liveBlock": self.live_block() if self.cfg.mode == "live" else "", "autoTrade": auto,
                 "maxPositionSol": max_pos, "unresolved": bool(self.unresolved), "config": self.cfg.snapshot(), "configErrors": self.cfg_errors,
