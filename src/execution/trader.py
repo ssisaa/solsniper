@@ -1011,6 +1011,15 @@ class Trader:
         urgent = reason in (
             "manual_now", "caller_closed", "caller_drop_7", "callout_age",
         ) or str(reason).startswith("tp_") or str(reason).startswith("take_profit")
+        if str(reason).startswith("candle"):
+            # Candles' sell: the token amount is known from the buy fill, so the first try skips the ~0.6s wallet
+            # read (2026-11-14: 540-620 ms before every sell). A retry within 10s reads the wallet again, in case
+            # the amount was off and the first try was refused.
+            tried = getattr(self, "_fast_sell_at", None)
+            if tried is None:
+                tried = self._fast_sell_at = {}
+            urgent = time.time() - float(tried.get(mint, 0)) > 10.0
+            tried[mint] = time.time()
         held = None
         if pk and not (urgent and int(raw_amt) > 1000):
             try:

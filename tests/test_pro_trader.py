@@ -657,3 +657,20 @@ def test_flat_skips_a_chart_that_already_has_candles(tmp_path, monkeypatch):
     e, f, routed = _flat_engine(tmp_path, monkeypatch, [(1.0, 1.0), (1.0, 1.0)])
     e._evaluate(f, time.time())
     assert not [r for r in routed if r.get("first")] and f.first_done
+
+
+def test_pro_hold_takes_profit_as_the_forming_candle_turns_red(tmp_path, monkeypatch):
+    from src.signal import candle_core as C
+    e, f, routed = _ph_first_engine(tmp_path, monkeypatch, 3)
+    e.cfg.pro_hold_first = False
+    monkeypatch.setattr(e, "green_target", lambda: (15.0, "Min profit"))
+    e.positions["NEW"] = {"mint": "NEW", "mode": "paper", "tokens": 1.0, "entry_sol": 0.005, "entry_ts": time.time() - 5,
+                          "upct": 22.0, "value_at": time.time(), "pro_peak": 25.0, "lots": [{"n": 1}]}
+    book = f.books["pump_rest"]
+    t = book.rows[-1].t
+    book.merge([C.Candle(t=t + 1000, open=1.2, high=1.2, low=1.15, close=1.16, volume=1, final=False)])  # turning red
+    e._evaluate(f, time.time())
+    sells = [r for r in routed if r["side"] == "SELL"]
+    assert len(sells) == 1 and "forming" in sells[0]["pro_why"] and sells[0]["pro_hold_sell"]
+    e._evaluate(f, time.time())
+    assert len([r for r in routed if r["side"] == "SELL"]) == 1      # once per candle

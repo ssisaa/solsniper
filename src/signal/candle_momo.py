@@ -1083,6 +1083,20 @@ class CandleMomo:
                                                                 + ("" if c.final else ", candle still forming")},
                                    seen, first=True)
                     return
+        held_now = self.positions.get(f.mint)
+        if cfg.rule == "pro_hold" and held_now is not None and live_rows and not live_rows[-1].final:
+            # Take profit on the candle still FORMING (user 2026-11-14: sells came ~1.5s late — a red 1s candle had
+            # to close, then the next 0.5s poll): once it trades below its open with the whole trade still in
+            # profit, sell now. Once per candle; _in_profit re-checks on a fresh price before the sell.
+            c = live_rows[-1]
+            if c.t != getattr(f, "take_t", None) and self._pro_hold_take(held_now, c) is not None:
+                f.take_t = c.t
+                up, tgt, tgt_from = self._pro_hold_take(held_now, c)
+                self._pro_emit(f, live_rows, "SELL", {"call": "SELL", "px": c.close,
+                                                       "why": (f"take profit — trade {up:+.1f}% ≥ {tgt:g}% after fees "
+                                                               f"({tgt_from}), price turning down (candle still forming; "
+                                                               f"peak {float(held_now.get('pro_peak') or up):+.1f}%)")}, seen)
+                return
         if len(rows) < 2:
             return
         if f.last_eval_t is None:
