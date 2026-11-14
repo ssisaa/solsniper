@@ -331,3 +331,20 @@ def test_pinned_coin_not_tradable_is_not_refed_and_paused_coins_are_not_fed():
     e._pick([])
     assert "NOTPUMPmint1234567890" not in e.feeds and "PZpump" not in e.feeds
     assert any("not a pump.fun" in n["msg"] for n in e.notes)
+
+
+def test_paused_state_survives_a_restart(tmp_path):
+    from src.signal.candle_store import Store
+    st = Store(str(tmp_path / "r.sqlite"), str(tmp_path / "r.jsonl"))
+    e = CM.CandleMomo()
+    e.store = st
+    pos = {"mint": "RZ", "symbol": "RZ", "mode": "paper", "tokens": 1.0, "entry_sol": 0.01, "entry_ts": time.time() - 900,
+           "entry_signal": "x"}
+    e.positions["RZ"] = pos
+    st.open_position(pos)
+    e._pause_hold("RZ", pos, "paused")
+    restored = {p["mint"]: p for p in Store(str(tmp_path / "r.sqlite"), str(tmp_path / "r.jsonl")).positions()}
+    assert restored["RZ"]["paused_at"] and restored["RZ"]["pause_state"] == "paused"
+    e._pause_resume("RZ", pos)
+    restored = {p["mint"]: p for p in Store(str(tmp_path / "r.sqlite"), str(tmp_path / "r.jsonl")).positions()}
+    assert not restored["RZ"]["paused_at"]

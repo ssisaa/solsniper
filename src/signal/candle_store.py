@@ -42,7 +42,8 @@ class Store:
         self.src_hook = None            # engine: mint -> where the trade came from ("Launch", "Candles (Mixed: New)" …)
         for table, col, kind in (("positions", "lots", "TEXT"), ("trades", "lots", "INTEGER"),
                                  ("positions", "support", "TEXT"), ("positions", "src", "TEXT"),
-                                 ("trades", "src", "TEXT")):
+                                 ("trades", "src", "TEXT"), ("positions", "paused_at", "REAL"),
+                                 ("positions", "pause_state", "TEXT")):
             try:
                 self.db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {kind}")   # ladder lots (added later)
             except sqlite3.OperationalError:
@@ -122,10 +123,12 @@ class Store:
                 pass
         with self.lock:
             self.db.execute("INSERT OR REPLACE INTO positions(mint, symbol, mode, tokens, entry_sol, entry_ts, "
-                            "entry_signal, costs_sol, lots, support, src) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                            "entry_signal, costs_sol, lots, support, src, paused_at, pause_state) "
+                            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                             (p["mint"], p.get("symbol"), p["mode"], p["tokens"], p["entry_sol"], p["entry_ts"],
                              p["entry_signal"], p.get("costs_sol", 0.0), json.dumps(p.get("lots") or []),
-                             p.get("support") or None, p.get("src") or None))
+                             p.get("support") or None, p.get("src") or None, p.get("paused_at") or None,
+                             p.get("pause_state") or None))
 
     def drop_position(self, mint: str) -> None:
         """Forget a position without booking a trade (support mode on/off: Candles stops tracking it)."""

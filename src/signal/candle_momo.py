@@ -810,6 +810,8 @@ class CandleMomo:
         pos.pop("closing", None)
         self.paused_mints[mint] = now
         self.feeds.pop(mint, None)
+        if self.store:
+            self.store.open_position(pos)      # saved: a restart keeps it paused (it was sold at Max hold before)
         self.note("warn", f"{pos.get('symbol') or mint[:6]} PAUSED by pump — held, not sold; watched every second on "
                           f"the Paused Coins page. It continues (sells on profit) if it moves again.", mint)
         if self.store:
@@ -869,6 +871,8 @@ class CandleMomo:
         pos["resumed_at"] = time.time()
         pos.pop("pro_armed", None)
         self.paused_mints.pop(mint, None)
+        if self.store:
+            self.store.open_position(pos)
         f = self.feeds.get(mint)
         if f is not None:
             f.board_state = "active"
@@ -2870,6 +2874,12 @@ class CandleMomo:
         self.store.audit("start", digest=self.cfg.digest(), config=self.cfg.snapshot(), errors=self.cfg_errors)
         for p in self.store.positions():
             self.positions[p["mint"]] = p
+            if p.get("paused_at"):
+                self.paused_mints[p["mint"]] = float(p["paused_at"])     # still paused: stays on the watch
+            else:
+                # Max hold counts from the restart: a restored trade is not force-sold at once (2026-11-14 restored
+                # paused coins were sold at Max hold before the pause check could see them)
+                p["resumed_at"] = time.time()
         if self.positions:
             live = sum(1 for p in self.positions.values() if p.get("mode") == "live")
             self.note("info", f"Restored {len(self.positions)} position(s) from SQLite ({live} live: matched to the bot's open trades).")

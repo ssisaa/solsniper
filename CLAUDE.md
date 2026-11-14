@@ -96,7 +96,7 @@ other open trade). New dashboard tab **Paused Coins** (`paused` in `/api/candle`
 second. `_paused_loop` checks each held paused coin every second: mayhem-state active (or no state) → `_pause_resume`
 (trade continues, Max hold counts from `resumed_at`, sells on profit); value < 0.0002 SOL or 2 % of cost →
 `_pause_leave` (booked, coins left in the wallet). One trade at a time counts a buy still being sent (`trading()` = active + `busy` + `pending`; a second coin was bought in the ~1.6 s before a fill was booked). Open positions shows a paused coin as "paused · watching" (Max hold counts from `resumed_at`). While paused: no Max hold / stop / reserve exit, and the coin is not
-fed or counted as open (`active_positions()`), so the next coin comes. Pump refuses sells of a paused coin (error
+fed or counted as open (`active_positions()`), so the next coin comes. Paused state is saved with the position (`positions.paused_at` / `pause_state` columns), and a restored trade's Max hold counts from the restart (`resumed_at`), so a restart neither forgets nor force-sells a paused coin. Pump refuses sells of a paused coin (error
 0x1788 / 6024 seen on KRILLION; $ANIMAL sold in the first second after its board said paused).
 
 **Live buy limits (2026-11-14)**: Candles' live buys (source `candle`) are not under the Live Controls Max concurrent
