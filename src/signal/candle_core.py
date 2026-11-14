@@ -245,7 +245,7 @@ _LIMITS: Dict[str, Tuple[float, float]] = {
 _CHOICES = {"mode": MODES, "rule": RULES, "res": ("1s", "5s", "15s", "1m"), "measure": ("price_usd", "price"),
             "provider": ("pump_rest", "stream"), "fallback": ("", "stream", "pump_rest"),
             "auto_follow": ("none", "mayhem_board", "mixed"), "ladder_size_mode": ("fixed", "martingale"),
-            "ladder_count": ("since_last_lot", "in_a_row"), "pro_hold_first_at": ("now", "flat", "start", "green")}
+            "ladder_count": ("since_last_lot", "in_a_row"), "pro_hold_first_at": ("now", "flat", "start", "green", "gar")}
 HOT_KEYS = set(Config.__dataclass_fields__)      # everything is hot-reloadable (no keys live here)
 
 

@@ -1007,6 +1007,29 @@ class CandleMomo:
             px = float(self._px_at(f, ts) or 0)
         return {"flow": None, "holding": {"entry": px, "held": time.time() - ts} if px > 0 else None}
 
+    def _gar(self, f: Feed, live_rows: List[Candle], held: Optional[Dict[str, Any]], seen: float) -> bool:
+        """pro_hold "buy green after red" (user 2026-11-14): the candle now forming trades above its open right after
+        a red candle = a green after a red. Buys then when flat and the coin is down from its high, or adds a lot
+        (Max position, up to Total cap) when the open trade is in a loss. In profit: no buy — it sells on profit.
+        Once per candle, checked every 0.5s poll on the forming candle. True when a signal was sent."""
+        c, prev = live_rows[-1], live_rows[-2]
+        if c.t == getattr(f, "gar_t", None) or not (prev.close < prev.open) or not (c.close > c.open):
+            return False
+        if held is None:
+            peak = max(x.high for x in live_rows)
+            if not (peak > 0 and c.close < peak):
+                return False
+            down = (1 - c.close / peak) * 100
+            why = f"green after red — the coin is {down:.0f}% under its high"
+        else:
+            up = held.get("upct")
+            if up is None or float(up) >= 0 or time.time() - float(held.get("value_at") or 0) > 3:
+                return False
+            why = f"green after red — trade {float(up):+.1f}%: buys again to lower the average (sells on profit)"
+        f.gar_t = c.t
+        self._pro_emit(f, live_rows, "BUY", {"call": "BUY", "px": c.close, "why": why}, seen)
+        return True
+
     def _pro_hold_take(self, held: Dict[str, Any], cur) -> Optional[tuple]:
         """pro_hold take-profit read: (trade %, target, from) when the trade is in profit after fees and this
         1s candle is red, else None. Never on the loss side: below the target it keeps holding (Max hold)."""
@@ -1025,7 +1048,8 @@ class CandleMomo:
         rows = f.books[f.using].finals()
         cfg = self.cfg
         live_rows = f.books[f.using].rows           # finals + the candle still forming this second
-        if (cfg.rule == "pro_hold" and cfg.pro_hold_first and live_rows and not getattr(f, "first_done", False)
+        if (cfg.rule == "pro_hold" and cfg.pro_hold_first and cfg.pro_hold_first_at != "gar" and live_rows
+                and not getattr(f, "first_done", False)
                 and f.mint not in self.positions
                 and not (self._avoid_mayhem_for(f) and self.mayhem_of.get(f.mint) is None and not f.board_state)):
             # pro_hold: a NEW coin is bought on its first GREEN candle (user's choice 2026-11-14; first candle on
@@ -1084,6 +1108,9 @@ class CandleMomo:
                                    seen, first=True)
                     return
         held_now = self.positions.get(f.mint)
+        if (cfg.rule == "pro_hold" and cfg.pro_hold_first and cfg.pro_hold_first_at == "gar"
+                and len(live_rows) >= 2 and self._gar(f, live_rows, held_now, seen)):
+            return
         if cfg.rule == "pro_hold" and held_now is not None and live_rows and not live_rows[-1].final:
             # Take profit on the candle still FORMING (user 2026-11-14: sells came ~1.5s late — a red 1s candle had
             # to close, then the next 0.5s poll): once it trades below its open with the whole trade still in

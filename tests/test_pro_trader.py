@@ -674,3 +674,41 @@ def test_pro_hold_takes_profit_as_the_forming_candle_turns_red(tmp_path, monkeyp
     assert len(sells) == 1 and "forming" in sells[0]["pro_why"] and sells[0]["pro_hold_sell"]
     e._evaluate(f, time.time())
     assert len([r for r in routed if r["side"] == "SELL"]) == 1      # once per candle
+
+
+def _gar_engine(tmp_path, monkeypatch, candles):
+    from src.signal import candle_core as C
+    e, f, routed = _ph_first_engine(tmp_path, monkeypatch, 30)
+    e.cfg.pro_hold_first_at = "gar"
+    book = f.books["pump_rest"]
+    t = book.rows[-1].t
+    book.rows.clear()
+    book.merge([C.Candle(t=t + k * 1000, open=o, high=max(o, c), low=min(o, c), close=c, volume=1,
+                         final=(k < len(candles) - 1)) for k, (o, c) in enumerate(candles)])
+    return e, f, routed
+
+
+def test_gar_buys_green_after_red_when_flat_and_down(tmp_path, monkeypatch):
+    e, f, routed = _gar_engine(tmp_path, monkeypatch, [(1.0, 2.0), (2.0, 1.5), (1.5, 1.6)])   # up, red, green starting
+    e._evaluate(f, time.time())
+    assert len(routed) == 1 and routed[0]["side"] == "BUY" and "green after red" in routed[0]["pro_why"]
+    e._evaluate(f, time.time())
+    assert len(routed) == 1                                   # once per candle
+
+
+def test_gar_adds_only_while_the_trade_is_in_a_loss(tmp_path, monkeypatch):
+    e, f, routed = _gar_engine(tmp_path, monkeypatch, [(1.0, 2.0), (2.0, 1.5), (1.5, 1.6)])
+    e.positions["NEW"] = {"mint": "NEW", "mode": "paper", "upct": 12.0, "value_at": time.time(), "lots": [{"n": 1}],
+                          "entry_sol": 0.005, "tokens": 1.0, "entry_ts": time.time()}
+    e._evaluate(f, time.time())
+    assert not [r for r in routed if r["side"] == "BUY"]      # in profit: no buy
+    e.positions["NEW"]["upct"] = -20.0
+    f.gar_t = None
+    e._evaluate(f, time.time())
+    assert [r for r in routed if r["side"] == "BUY" and "lower the average" in r["pro_why"]]
+
+
+def test_gar_needs_a_red_before(tmp_path, monkeypatch):
+    e, f, routed = _gar_engine(tmp_path, monkeypatch, [(1.0, 2.0), (2.0, 2.5), (2.5, 2.6)])  # green, green
+    e._evaluate(f, time.time())
+    assert not [r for r in routed if "green after red" in r.get("pro_why", "")]
