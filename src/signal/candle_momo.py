@@ -1628,6 +1628,24 @@ class CandleMomo:
         _fee, _bb, bps = await PC._fees()
         return curve, int(bps or 100), why
 
+    async def _fill_px_chart(self, mint: str, sol: float, tokens: float, sig: Dict[str, Any]) -> float:
+        """A live fill's price in chart units: the real SOL/token paid against the curve's price right now, on
+        the chart's price right now. Falls back to the signal candle's close."""
+        base = float(sig.get("close") or 0)
+        try:
+            from src.execution import pump_curve as PC  # noqa: F401
+            f = self.feeds.get(mint)
+            rows = f.books[f.using].rows if f and f.using else []
+            c, _bps, _ = await self._curve(mint)
+            if c and rows and sol > 0 and tokens > 0 and c.get("virtual_token"):
+                curve_px = float(c["virtual_sol"]) / float(c["virtual_token"])        # lamports per raw token
+                fill_px = sol * 1e9 / float(tokens)
+                if curve_px > 0 and rows[-1].close > 0:
+                    return rows[-1].close * fill_px / curve_px
+        except Exception:
+            log.debug("fill px failed", exc_info=True)
+        return base
+
     async def _value(self, mint: str, tokens: float) -> Tuple[Optional[float], Optional[float], str]:
         """(SOL the whole holding sells for now, SOL left in the curve, source). The SOL curve is read
         fresh; a coin quoted in another coin (OpenCopy / CallOuts often hold these) is valued on its own
@@ -1783,8 +1801,13 @@ class CandleMomo:
         self.fill_ms.append(fill_ms)
         self.m["executed"] += 1
         self.exec_fail_streak = 0
+        # the lot's price in chart units at the REAL fill (2026-11-14: GHOSTY's L1 filled 0.7s later at a spike
+        # top, 4x the signal candle — the marker and the fast profit reading used the signal price)
+        px = float(sig.get("close") or 0)
+        if px > 0 and expected and tokens:
+            px = px * float(expected) / float(tokens)
         lot = {"n": 1, "sol": size, "tokens": float(tokens), "ts": time.time(), "signal": sig["id"],
-               "px": sig.get("close"), "src": sig.get("provider")}
+               "px": px or sig.get("close"), "src": sig.get("provider")}
         if add and mint not in self.positions:
             # the trade closed (pause / max hold / stop) while this lot was being priced: no lot
             return self._failed(sig, "ladder add skipped — the trade closed meanwhile")
@@ -2278,7 +2301,7 @@ class CandleMomo:
         rec.setdefault("lots", [{"n": 1, "sol": rec["entry_sol"], "tokens": rec["tokens"], "ts": rec["entry_ts"],
                                  "signal": rec["entry_signal"]}])
         lot = {"n": len(rec["lots"]) + 1, "sol": size, "tokens": got, "ts": time.time(), "signal": sig["id"],
-               "px": sig.get("close"), "src": sig.get("provider")}
+               "px": await self._fill_px_chart(mint, size, got, sig), "src": sig.get("provider")}
         rec["lots"].append(lot)
         rec["tokens"] = float(rec["tokens"]) + got
         rec["entry_sol"] = float(rec["entry_sol"]) + size
@@ -2412,7 +2435,8 @@ class CandleMomo:
         sol, raw = float(fill.sol_in or 0), float(fill.tokens_out or 0)
         self._tag_live(pos, sol, raw, sig["id"], fill.signature or "", sym)
         try:
-            self.positions[mint]["lots"][0].update(px=sig.get("close"), src=sig.get("provider"))
+            self.positions[mint]["lots"][0].update(px=await self._fill_px_chart(mint, sol, raw, sig),
+                                                   src=sig.get("provider"))
         except (KeyError, IndexError):
             pass
         self.lat_ms.append(ms)

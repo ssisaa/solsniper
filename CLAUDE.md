@@ -100,7 +100,7 @@ fed or counted as open (`active_positions()`), so the next coin comes. Pump refu
 0x1788 / 6024 seen on KRILLION; $ANIMAL sold in the first second after its board said paused).
 
 **Live buy limits (2026-11-14)**: Candles' live buys (source `candle`) are not under the Live Controls Max concurrent
-(trader.buy: only a second buy of the same coin is refused; other open trades and leftover wallet coins don't block it; the wallet / second-buy gate is skipped for `candle`). The fast profit reading is scaled by `pos["impact"]` = real curve value / chart value from the value loop (selling a thin curve gets less than the chart shows). For the other sources a
+(trader.buy: only a second buy of the same coin is refused; other open trades and leftover wallet coins don't block it; the wallet / second-buy gate is skipped for `candle`). Each lot's `px` is its REAL fill in chart units (paper: signal close × expected / got tokens; live: `_fill_px_chart` = chart close × fill price / curve price right after the fill) — GHOSTY's L1 filled 4× above its signal candle. The fast profit reading is scaled by `pos["impact"]` = real curve value / chart value from the value loop (selling a thin curve gets less than the chart shows). For the other sources a
 coin pump paused (`mayhem_state_of`, or `CandleMomo.is_paused` / `paused_mints`) holds no Max concurrent slot.
 
 **Trade source in the Mode column (2026-11-14)**: Candles Open positions / Closed trades show "paper · Launch",

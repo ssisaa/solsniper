@@ -294,3 +294,29 @@ def test_manual_exit_sells_a_paused_coin(monkeypatch):
     monkeypatch.setattr(e, "_start", lambda sig: started.append(sig) or "intent")
     out = e.manual("exit", "PX")
     assert out["ok"] and started and started[0]["side"] == "SELL" and started[0]["manual"]
+
+
+def test_paper_lot_price_is_the_real_fill(tmp_path, monkeypatch):
+    import asyncio
+    from src.signal.candle_store import Store
+    from src.execution import pump_curve as PC
+    e = CM.CandleMomo()
+    e.store = Store(str(tmp_path / "f.sqlite"), str(tmp_path / "f.jsonl"))
+    e.cfg.fill_lag_ms, e.cfg.max_slippage_bps = 0, 10_000
+    calls = {"n": 0}
+
+    async def fake_curve(mint):
+        calls["n"] += 1
+        return {"virtual_token": 1e15, "virtual_sol": 3e10}, 100, ""
+    monkeypatch.setattr(e, "_curve", fake_curve)
+
+    async def fake_tx(*a, **k):
+        return "", 0, ""
+    monkeypatch.setattr(PC, "pump_buy_tx", fake_tx)
+    seq = iter([1000.0, 250.0])                        # expected at send, then got: price moved 4x before the fill
+    monkeypatch.setattr(PC, "_tokens_for_sol", lambda *a: next(seq))
+    sig = {"id": "b1", "mint": "LP", "side": "BUY", "seen": time.time(), "close": 1.0, "provider": "stream",
+           "symbol": "LP", "ts": 1, "candleTs": 1, "open": 1.0, "prevClose": 1.0, "ref": 1.0, "deltaPct": 0.0,
+           "rule": "pro_hold", "feedLagMs": 0}
+    asyncio.run(e._paper_buy(sig))
+    assert round(e.positions["LP"]["lots"][0]["px"], 6) == 4.0
