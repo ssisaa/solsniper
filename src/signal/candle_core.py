@@ -177,6 +177,8 @@ class Config:
     fallback: str = "stream"                 # "" | stream | pump_rest
     auto_follow: str = "mayhem_board"        # none | mayhem_board | mixed (New -> Movers -> Graduated, youngest first)
     pro_hold_first: bool = True              # pro_hold: also buy a NEW coin (age <= 60s) on its first candle
+    pro_hold_first_at: str = "start"         # first-candle buy: "start" = as the chart starts (1-2 candles, before it
+                                             # moves) | "green" = when the first green starts
     pro_hold_pro_buy: bool = True            # pro_hold: also buy on the chart's green ▲ BUY (Pro Trader call)
     source_seq: bool = False                 # Source Sequence: every step (>= 60s) the source moves on in SEQ_STEPS
     avoid_mayhem: bool = True                # never buy a Mayhem coin (pump can pause it; a paused coin cannot sell)
@@ -242,7 +244,7 @@ _LIMITS: Dict[str, Tuple[float, float]] = {
 _CHOICES = {"mode": MODES, "rule": RULES, "res": ("1s", "5s", "15s", "1m"), "measure": ("price_usd", "price"),
             "provider": ("pump_rest", "stream"), "fallback": ("", "stream", "pump_rest"),
             "auto_follow": ("none", "mayhem_board", "mixed"), "ladder_size_mode": ("fixed", "martingale"),
-            "ladder_count": ("since_last_lot", "in_a_row")}
+            "ladder_count": ("since_last_lot", "in_a_row"), "pro_hold_first_at": ("start", "green")}
 HOT_KEYS = set(Config.__dataclass_fields__)      # everything is hot-reloadable (no keys live here)
 
 

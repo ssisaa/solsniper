@@ -536,6 +536,7 @@ def test_support_feed_gets_the_scan_tokens_age(monkeypatch):
 def test_pro_hold_first_buy_waits_for_the_first_green_candle(tmp_path, monkeypatch):
     from src.signal import candle_core as C
     e, f, routed = _ph_first_engine(tmp_path, monkeypatch, 4)
+    e.cfg.pro_hold_first_at = "green"
     book = f.books["pump_rest"]
     t = book.rows[-1].t
     book.rows.clear()
@@ -565,6 +566,7 @@ def test_skip_mayhem_does_not_block_the_mayhemmode_source(monkeypatch):
 def test_pro_hold_first_buy_fires_while_the_green_candle_is_forming(tmp_path, monkeypatch):
     from src.signal import candle_core as C
     e, f, routed = _ph_first_engine(tmp_path, monkeypatch, 4)
+    e.cfg.pro_hold_first_at = "green"
     book = f.books["pump_rest"]
     t = book.rows[-1].t
     book.rows.clear()
@@ -574,3 +576,27 @@ def test_pro_hold_first_buy_fires_while_the_green_candle_is_forming(tmp_path, mo
     book.merge([C.Candle(t=t + 1000, open=1.0, high=1.03, low=1.0, close=1.03, volume=1, final=False)])
     e._evaluate(f, time.time())
     assert routed and routed[0]["first"] and "forming" in routed[0]["pro_why"]
+
+
+def test_pro_hold_first_buy_at_the_start_of_the_chart(tmp_path, monkeypatch):
+    from src.signal import candle_core as C
+    e, f, routed = _ph_first_engine(tmp_path, monkeypatch, 3)
+    assert e.cfg.pro_hold_first_at == "start"
+    book = f.books["pump_rest"]
+    t = book.rows[-1].t
+    book.rows.clear()
+    book.merge([C.Candle(t=t, open=1.0, high=1.0, low=1.0, close=1.0, volume=1, final=False)])   # flat, just begun
+    e._evaluate(f, time.time())
+    assert routed and routed[0]["first"] and "just started" in routed[0]["pro_why"]
+
+
+def test_pro_hold_start_with_history_waits_for_green(tmp_path, monkeypatch):
+    from src.signal import candle_core as C
+    e, f, routed = _ph_first_engine(tmp_path, monkeypatch, 30)
+    book = f.books["pump_rest"]
+    t = book.rows[-1].t
+    book.rows.clear()
+    book.merge([C.Candle(t=t + k * 1000, open=1.0 - k * 0.01, high=1.0, low=0.9, close=0.99 - k * 0.01,
+                         volume=1, final=True) for k in range(5)])                                # already moving down
+    e._evaluate(f, time.time())
+    assert not routed                                  # not "just started": waits for a green start

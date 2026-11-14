@@ -1200,6 +1200,7 @@ button.lite:hover{color:#fff;border-color:#eef3fb}
         <label>Rule <select id="cmRuleSel"><option value="own_candle">own_candle (close vs open)</option><option value="inverse">inverse (buy red, sell green)</option><option value="literal">literal (open vs prev close)</option><option value="pro">pro — Pro Trader (VWAP dip with volume; +40% / −5% / 120s)</option><option value="pro_hold">pro_hold — buy on every Botpredict BUY (◆ BP, up to Total cap), sell only in profit (Min profit after fees); in a loss hold to Max hold</option></select></label>
         <span class="cm-feeds" title="Extra entries for rule pro_hold (it always buys on ◆ BP). Exits stay: sell on the first red candle once the trade is in profit, else Max hold.">pro_hold also buys:
           <label title="A new coin (60 s old or younger) is bought on its first candle. Test on 74 unseen coins: 58% won, median +7.6%."><input type="checkbox" id="cmPhFirst"/> first candle</label>
+          <select id="cmPhFirstAt" title="When the first-candle buy fires. At the start: as soon as the new coin's chart begins (one or two candles, no move up or down yet). First green: when the price first starts going up (after any red)."><option value="start">at the start</option><option value="green">first green</option></select>
           <label title="The chart's green ▲ BUY (Pro Trader). Weaker in tests: 47% won, about −1.9% per trade without the top 10%."><input type="checkbox" id="cmPhPro"/> ▲ BUY</label>
         </span>
         <label>Min Δ % <input class="cm-in" id="cmDelta" type="number" step="0.1" min="0"/></label>
@@ -4364,6 +4365,7 @@ function paintCandle(d){
       document.getElementById('cmReuse').checked=c.reuse_coin!==false;
       document.getElementById('cmAvoidMayhem').checked=c.avoid_mayhem!==false;
       document.getElementById('cmPhFirst').checked=c.pro_hold_first!==false;
+      document.getElementById('cmPhFirstAt').value=c.pro_hold_first_at||'start';
       document.getElementById('cmPhPro').checked=c.pro_hold_pro_buy!==false;
       document.querySelectorAll('.cm-feed').forEach(b=>{ b.checked=(b.dataset.feed===(c.auto_follow||'mayhem_board')); });
       document.getElementById('cmMints').value=(c.mints||[]).join(' ');
@@ -4454,6 +4456,7 @@ function paintCandle(d){
     <td class="${m2Cls(t.pnl_sol)}">${cmSol(t.pnl_sol)}</td><td class="${m2Cls(t.pct)}">${m2Pct(t.pct)}</td><td>${escapeHtml(t.why||'')}${t.paused_exit?' <span class="w">paused</span>':''}</td></tr>`).join(''):'<tr><td colspan="11" class="muted">No closed trade yet.</td></tr>');
 }
 document.getElementById('cmPhFirst').addEventListener('change',e=>cmPost({pro_hold_first:e.target.checked}, 'pro_hold first-candle buy '+(e.target.checked?'on':'off')));
+document.getElementById('cmPhFirstAt').addEventListener('change',e=>cmPost({pro_hold_first_at:e.target.value}, 'pro_hold first buy: '+(e.target.value==='start'?'at the start of the chart':'at the first green')));
 document.getElementById('cmPhPro').addEventListener('change',e=>cmPost({pro_hold_pro_buy:e.target.checked}, 'pro_hold ▲ BUY entry '+(e.target.checked?'on':'off')));
 document.getElementById('cmAvoidMayhem').addEventListener('change',e=>{
   cmPost({avoid_mayhem:e.target.checked}, e.target.checked?'Skip Mayhem coins: on (never buys a coin pump can pause)':'Skip Mayhem coins: off');

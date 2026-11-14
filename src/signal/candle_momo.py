@@ -48,6 +48,7 @@ FEED_ONLY_SOURCES = ("opencopy", "callout", "mayhem")
 SEQ_STEPS = (("launch", "Launch"), ("dayscalp", "Dayscalp"), ("callout", "CallOuts"), ("opencopy", "OpenCopy"),
              ("mayhem", "MayhemMode"), ("board:mayhem_board", "Candles · Mayhem board"), ("board:mixed", "Candles · Mixed"))
 SEQ_STEP_S = 60.0              # Source Sequence: a step with no trade moves on after this   # AutoTrade-Candles: these sources only offer tokens
+PRO_FIRST_START_CANDLES = 2    # first-buy "start": the chart counts as just started up to this many candles
 PRO_FIRST_MAX_AGE_S = 60.0     # pro_hold first-candle buy: only coins this young (a new coin's first candle)
 SKIP_REASONS = ("KILLED", "NO_POSITION", "ALREADY_LONG", "ENTRIES_PAUSED", "FEED_DEGRADED", "STALE_FEED",
                 "BLACKLIST", "NOT_WHITELISTED", "DAILY_LOSS", "RATE_LIMIT", "COOLDOWN", "MAX_EXPOSURE",
@@ -1040,6 +1041,15 @@ class CandleMomo:
                 # 0.5s): it opens at the last close, so trading above its open = the first green has begun —
                 # bought then, not 1s later when it closes (user 2026-11-14).
                 c = live_rows[-1]
+                if cfg.pro_hold_first_at == "start" and len(live_rows) <= PRO_FIRST_START_CANDLES:
+                    # "start" (user 2026-11-14): the chart has just begun — one or two candles, no move up or down
+                    # yet — buy right there. A coin first seen with more history than that waits for a green start.
+                    f.first_done = True
+                    self._pro_emit(f, live_rows, "BUY", {"call": "BUY", "px": c.close,
+                                                         "why": f"chart just started — a new coin (age {age_now:.0f}s, "
+                                                                f"{len(live_rows)} candle{'s' if len(live_rows) > 1 else ''})"},
+                                   seen, first=True)
+                    return
                 if c.close > c.open:
                     f.first_done = True
                     self._pro_emit(f, live_rows, "BUY", {"call": "BUY", "px": c.close,
