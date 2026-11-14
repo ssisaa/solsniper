@@ -211,7 +211,8 @@ class CandleMomo:
         self._mx_at: Dict[str, float] = {}
         self.seq_board = ""                           # Source Sequence board step: "mayhem_board" | "mixed" | ""
         self.seq: Dict[str, Any] = {"i": -1, "at": 0.0, "trade_at": 0.0, "state": "off"}
-        self.offers: Dict[str, Dict[str, Any]] = {}    # AutoTrade-Candles feed-only sources: mint -> offer
+        self.offers: Dict[str, Dict[str, Any]] = {}
+        self.paused_mints: Dict[str, float] = {}      # coins pump paused / completed while Candles held them    # AutoTrade-Candles feed-only sources: mint -> offer
         self._mirrored: Dict[str, float] = {}         # Paper + AutoTrade-Candles: coins given a paper lot 1
         self.mayhem_of: Dict[str, Optional[bool]] = {}  # mint -> Mayhem coin? (None = still checking)
         self._mx_turn = 0                             # index in mayhem2.MIXED_GROUPS whose turn is next
@@ -794,6 +795,13 @@ class CandleMomo:
         src = self.support_source()
         return SUPPORT_NAMES.get(src, "Candles") if src else "Candles"
 
+    def is_paused(self, mint: str) -> bool:
+        """pump paused (or completed) this coin: it cannot be sold, so it is not an active trade."""
+        if mint in self.paused_mints:
+            return True
+        f = self.feeds.get(mint)
+        return bool(f and f.board_state in ("paused", "completed"))
+
     def _single_feed(self) -> None:
         """One coin at a time, for every source and feed (user 2026-11-14): while a trade is open only the coin(s)
         held are watched; flat, one coin. The next coin comes once the trade completes."""
@@ -956,6 +964,7 @@ class CandleMomo:
         for mint, pos in list(self.positions.items()):
             f = self.feeds.get(mint)
             if f and f.board_state in ("paused", "completed") and not pos.get("closing") and self.loop:
+                self.paused_mints[mint] = time.time()
                 pos["closing"] = True
                 asyncio.ensure_future(self._forced_exit(mint, f"coin {f.board_state}"))
 

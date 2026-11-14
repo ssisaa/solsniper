@@ -218,3 +218,14 @@ def test_trade_source_label_and_store(tmp_path):
     e.store.close_position("Sauto", {"mint": "Sauto", "symbol": "S", "mode": "paper", "entry_ts": 1, "exit_ts": 2,
                                      "entry_sol": 0.005, "exit_sol": 0.006, "pnl_sol": 0.001, "pct": 20.0})
     assert e.store.trades(1)[0]["src"] == "Candles (Mayhem board)"
+
+
+def test_is_paused_marks_coins_pump_paused():
+    e = CM.CandleMomo()
+    f = CM.Feed("PZ", 10)
+    e.feeds["PZ"] = f
+    assert not e.is_paused("PZ")
+    f.board_state = "paused"
+    assert e.is_paused("PZ")
+    e.paused_mints["OLD"] = time.time()
+    assert e.is_paused("OLD")

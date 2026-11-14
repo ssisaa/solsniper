@@ -90,6 +90,10 @@ youngest first, pump mints only, New < 3 min; a coin stays while held, else unti
 `mixed_idle_s` (60 s) with no trade, then the next board's youngest (a handed-over coin is skipped 5 min). Max mints
 slots (pro_hold: one). Paper / LIVE follow Candles' Live switch. Graduated coins are valued by Jupiter.
 
+**Live buy limits (2026-11-14)**: Candles' live buys (source `candle`) are not under the Live Controls Max concurrent
+(trader.buy: only a second buy of the same coin is refused; other open trades don't block it). For the other sources a
+coin pump paused (`mayhem_state_of`, or `CandleMomo.is_paused` / `paused_mints`) holds no Max concurrent slot.
+
 **Trade source in the Mode column (2026-11-14)**: Candles Open positions / Closed trades show "paper · Launch",
 "LIVE · Candles (Mixed: New)" … from `CandleMomo._src_label` (feed origin / support source), stored by `candle_store`
 (`src` column on positions and trades; `Store.src_hook` fills it at open, close copies it).

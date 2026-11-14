@@ -474,12 +474,28 @@ class Trader:
                     )
                 opens = [p for p in self.manager.positions.values() if p.status == "OPEN" and p.mint != mint]
                 callout_ignore = set()
-                if source in ("callout", "opencopy", "mayhem", "mayhem2", "candle"):
+                # Candles keeps its own count (one coin at a time): the Live Controls Max concurrent is not its
+                # limit (2026-11-14: a paused coin + one open trade refused every Candles buy with "max concurrent 2")
+                if source in ("callout", "opencopy", "mayhem", "mayhem2"):
                     from src.config.runtime import get_config
                     cap = max(1, int(getattr(get_config(), "max_concurrent", 1) or 1))
+
+                    def _paused(m: str) -> bool:
+                        # a coin pump paused cannot be sold: it is not an active trade and holds no slot
+                        try:
+                            from src.observability.dashboard import mayhem_state_of
+                            if mayhem_state_of(m) in ("paused", "completed"):
+                                return True
+                        except Exception:
+                            pass
+                        try:
+                            from src.signal.candle_momo import get_engine as _cme
+                            return _cme().is_paused(m)
+                        except Exception:
+                            return False
                     callout_open = [
                         p for p in self.manager.positions.values()
-                        if p.status == "OPEN" and (
+                        if p.status == "OPEN" and not _paused(p.mint) and (
                             getattr(p, "source", "") in ("callout", "opencopy", "mayhem", "mayhem2", "candle")
                             or getattr(p, "strategy", "") in ("callout", "opencopy", "mayhem", "mayhem2", "candle")
                         )
@@ -507,6 +523,19 @@ class Trader:
                             latency_ms=(time.perf_counter() - t0) * 1000,
                         )
                     callout_ignore = {p.mint for p in callout_open if p.mint}
+                    opens = []
+                elif source == "candle":
+                    # Candles: only a second buy of the same coin is refused (its own lots go through candle_add);
+                    # other open trades — e.g. a paused coin that can never sell — do not block it
+                    if any(p.status == "OPEN" and p.mint == mint for p in self.manager.positions.values()):
+                        reason = f"already holding {mint[:8]} — no second buy"
+                        log.warning("ACTION BUY_BLOCKED %s", reason)
+                        return FillResult(
+                            ok=False, mode="live", mint=mint, sol_in=sol_in, tokens_out=0.0,
+                            effective_price=0.0, fees_sol=0.0, error=reason,
+                            latency_ms=(time.perf_counter() - t0) * 1000,
+                        )
+                    callout_ignore = {p.mint for p in opens if p.mint}
                     opens = []
                 if opens:
                     held = getattr(opens[0], "symbol", "") or opens[0].mint[:8]
