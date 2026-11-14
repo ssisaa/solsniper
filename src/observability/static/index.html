@@ -1186,8 +1186,9 @@ header nav.nav .navbtn[hidden]{display:none}
   <div class="card">
     <div class="row-between"><h2 style="margin:0">Paused Coins</h2><span class="muted" id="pcInfo">checked every second</span></div>
     <p class="muted" style="margin:6px 0 12px">Candles trades whose coin pump paused. They are <b>not sold</b> while paused — pump refuses sells then, and paused coins often move again. Each is checked every second: <b>moving again</b> → the trade continues on the Candles page (sells on profit, Max hold restarts); <b>gone to dust</b> → booked and no longer watched. Once its trade completes, at a gain or a loss, it leaves this page.</p>
-    <table><thead><tr><th>Coin</th><th>Mode</th><th>Lots</th><th>In SOL</th><th>Value now</th><th>P/L</th><th>State</th><th>Paused for</th><th>Last check</th></tr></thead>
-    <tbody id="pcRows"><tr><td colspan="9" class="muted">Loading…</td></tr></tbody></table>
+    <table><thead><tr><th>Coin</th><th>Mode</th><th>Lots</th><th>In SOL</th><th>Value now</th><th>P/L</th><th>State</th><th>Paused for</th><th>Last check</th><th></th></tr></thead>
+    <tbody id="pcRows"><tr><td colspan="10" class="muted">Loading…</td></tr></tbody></table>
+    <div class="muted" id="pcMsg" style="margin-top:8px"></div>
   </div>
 </div>
 <div id="view-candle" class="view" data-view="candle">
@@ -4910,16 +4911,19 @@ function m2DrawChart(){
 // ---------- Candles: 1s chart with entries / exits + manual Entry / Exit ----------
 let _cmChart={mint:'',sel:'',candles:[],marks:null,hover:null,busy:false,feeds:[],positions:[],live:false};
 function cmChartCoins(){
-  const out=[], seen=new Set();
-  (_cmChart.positions||[]).forEach(p=>{ if(p.mint&&!seen.has(p.mint)){ seen.add(p.mint); out.push({mint:p.mint,symbol:p.symbol||p.mint.slice(0,6),held:true}); } });
-  (_cmChart.feeds||[]).forEach(f=>{ if(f.mint&&!seen.has(f.mint)){ seen.add(f.mint); out.push({mint:f.mint,symbol:f.symbol||f.mint.slice(0,6),held:false}); } });
+  // Chart order (user 2026-11-14): the open trade, else the coin in the feed, else the latest paused coin
+  const out=[], seen=new Set(), pos=_cmChart.positions||[];
+  const add=(m,sym,held,paused)=>{ if(m&&!seen.has(m)){ seen.add(m); out.push({mint:m,symbol:sym||m.slice(0,6),held,paused}); } };
+  pos.filter(p=>!p.paused_at).forEach(p=>add(p.mint,p.symbol,true,false));
+  (_cmChart.feeds||[]).forEach(f=>add(f.mint,f.symbol,false,false));
+  pos.filter(p=>p.paused_at).sort((a,b)=>(b.paused_at||0)-(a.paused_at||0)).forEach(p=>add(p.mint,p.symbol,true,true));
   return out;
 }
 function cmChartFromSnapshot(d){
   _cmChart.feeds=d.feeds||[]; _cmChart.positions=d.positions||[]; _cmChart.live=(d.config||{}).mode==='live'; _cmChart.cfg=d.config||null;
   const coins=cmChartCoins(), sel=document.getElementById('cmChartSel');
   let want=_cmChart.sel&&coins.some(c=>c.mint===_cmChart.sel)?_cmChart.sel:(coins[0]||{}).mint||'';
-  const html=coins.map(c=>`<option value="${escapeHtml(c.mint)}">${escapeHtml(c.symbol)}${c.held?' · held':''}</option>`).join('')||'<option value="">no coin</option>';
+  const html=coins.map(c=>`<option value="${escapeHtml(c.mint)}">${escapeHtml(c.symbol)}${c.paused?' · paused':(c.held?' · held':'')}</option>`).join('')||'<option value="">no coin</option>';
   if(sel._html!==html){ sel._html=html; sel.innerHTML=html; }
   if(want && sel.value!==want) sel.value=want;
   if(want!==_cmChart.mint){ _cmChart.mint=want; _cmChart.candles=[]; _cmChart.marks=null; _cmChart.pro=null; _cmChart.hover=null; paintDesk(document.getElementById('cmDesk'), null); cmDrawChart(); }
@@ -5231,11 +5235,23 @@ async function loadPaused(){
         <td>${r.lots||1}</td><td>${Number(r.entry_sol||0).toFixed(4)}</td>
         <td>${r.value_sol!=null?Number(r.value_sol).toFixed(5):'—'}</td>
         <td class="${m2Cls(r.upct)}">${r.upct!=null?m2Pct(r.upct):'—'}</td>
-        <td><b class="${stCls}">${escapeHtml(st)}</b></td><td>${pcAge(r.paused_s)}</td><td>${Number(r.checked_s||0).toFixed(1)}s ago</td></tr>`;
-    }).join(''):'<tr><td colspan="9" class="muted">No paused coin held — nothing to watch.</td></tr>';
+        <td><b class="${stCls}">${escapeHtml(st)}</b></td><td>${pcAge(r.paused_s)}</td><td>${Number(r.checked_s||0).toFixed(1)}s ago</td>
+        <td><button type="button" class="m2-btn bad pc-exit" data-mint="${escapeHtml(r.mint)}" data-sym="${escapeHtml(r.symbol||'')}" title="Sell all of it now, at any price">Exit</button></td></tr>`;
+    }).join(''):'<tr><td colspan="10" class="muted">No paused coin held — nothing to watch.</td></tr>';
   }catch(e){}
 }
 setInterval(()=>{ if(!document.getElementById('view-paused').classList.contains('on')) loadPaused(); }, 5000);
+document.addEventListener('click', async e=>{
+  const b=e.target&&e.target.closest&&e.target.closest('.pc-exit'); if(!b||b.disabled) return;
+  // one click, no popup (same as the chart's Exit all): sells every lot of this paused coin now, at any price
+  b.disabled=true; const sym=b.dataset.sym||b.dataset.mint.slice(0,6), msg=document.getElementById('pcMsg');
+  if(msg) msg.innerHTML=`Exit ${escapeHtml(sym)} — sending…`;
+  try{
+    const d=await (await fetch('/api/candle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'exit',mint:b.dataset.mint})})).json();
+    if(msg) msg.innerHTML=d.ok?`<span class="g">Exit ${escapeHtml(sym)} sent.</span> If pump still has it paused, a live sell may be refused — it stays here.`:`<span class="r">${escapeHtml(d.error||'refused')}</span>`;
+  }catch(err){ if(msg) msg.innerHTML='<span class="r">Could not reach the bot.</span>'; }
+  setTimeout(()=>{ b.disabled=false; loadPaused(); }, 1500);
+});
 function showView(name){
   const views=['dash','ledger','history','exec','coins','mayhem','mayhem2','candle','paused','decoded','callouts','openholds','livetrades','predict','settings'];
   if(!views.includes(name)) name='dash';

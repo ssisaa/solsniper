@@ -283,3 +283,14 @@ def test_a_buy_in_flight_counts_as_the_open_trade():
     e.busy[first] = "sig-1"                          # its buy is being sent: not booked yet
     e._pick(rows[1:])
     assert set(e.feeds) == {first}                   # no second coin while the first buy is in flight
+
+
+def test_manual_exit_sells_a_paused_coin(monkeypatch):
+    e = CM.CandleMomo()
+    pos = {"mint": "PX", "symbol": "PX", "mode": "paper", "tokens": 1.0, "entry_sol": 0.01, "entry_ts": time.time()}
+    e.positions["PX"] = pos
+    e._pause_hold("PX", pos, "paused")
+    started = []
+    monkeypatch.setattr(e, "_start", lambda sig: started.append(sig) or "intent")
+    out = e.manual("exit", "PX")
+    assert out["ok"] and started and started[0]["side"] == "SELL" and started[0]["manual"]
