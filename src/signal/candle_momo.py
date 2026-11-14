@@ -45,8 +45,9 @@ CANDLE_URL = ("https://frontend-api-v3.pump.fun/candles/solana:5eykt4UsFv8P8NJdT
 BOARD_URL = "https://advanced-indexer.pump.fun/boards/mayhem?tier=web&offset=0&limit=30"
 BASE_FEE_LAMPORTS = 5000
 FEED_ONLY_SOURCES = ("opencopy", "callout", "mayhem")
-SEQ_STEPS = (("launch", "Launch"), ("dayscalp", "Dayscalp"), ("callout", "CallOuts"), ("opencopy", "OpenCopy"),
-             ("mayhem", "MayhemMode"), ("board:mayhem_board", "Candles · Mayhem board"), ("board:mixed", "Candles · Mixed"))
+# Dayscalp, CallOuts and OpenCopy taken out at the user's request (2026-11-14)
+SEQ_STEPS = (("launch", "Launch"), ("mayhem", "MayhemMode"), ("board:mayhem_board", "Candles · Mayhem board"),
+             ("board:mixed", "Candles · Mixed"))
 SEQ_STEP_S = 60.0              # Source Sequence: a step with no trade moves on after this   # AutoTrade-Candles: these sources only offer tokens
 FLAT_PCT = 0.05                # "no candles yet": the only reading moved less than this (shows 0.00%)
 PRO_FIRST_START_CANDLES = 2    # first-buy "start": the chart counts as just started up to this many candles

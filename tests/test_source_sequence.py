@@ -35,7 +35,7 @@ def test_steps_in_order_and_board_steps(monkeypatch):
             assert e.feeds_only("mayhem")              # MayhemMode stays the source and only offers
         else:
             assert e.seq_board == "" and e.support_source() == CM.SEQ_STEPS[i][0]
-    assert switched == ["launch", "dayscalp", "callout", "opencopy", "mayhem"]
+    assert switched == ["launch", "mayhem"]
     assert e.cfg.support_enabled
     assert e.follow() == "mixed"
 
@@ -46,7 +46,7 @@ def test_moves_on_after_60s_without_a_trade(monkeypatch):
     assert e.seq["i"] == 0 and switched == ["launch"]
     e.seq["at"] = time.time() - CM.SEQ_STEP_S - 1
     _tick(e)
-    assert e.seq["i"] == 1 and switched[-1] == "dayscalp"
+    assert e.seq["i"] == 1 and switched[-1] == "mayhem"
 
 
 def test_waits_for_an_open_trade_then_moves_on(monkeypatch):
@@ -73,7 +73,7 @@ def test_trade_closed_early_moves_on_at_once(monkeypatch):
 
 def test_off_stops_and_keeps_the_source(monkeypatch):
     e, switched = _eng(monkeypatch)
-    e._seq_switch(5)
+    e._seq_switch(2)
     assert e.seq_board == "mayhem_board"
     e.cfg.source_seq = False
     _tick(e)

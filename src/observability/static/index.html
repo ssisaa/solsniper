@@ -1216,7 +1216,7 @@ button.lite:hover{color:#fff;border-color:#eef3fb}
         <button type="button" class="m2-btn" id="cmApply">Apply</button>
         <button type="button" class="m2-btn" id="cmEntBtn">Entries …</button>
         <button type="button" class="m2-btn" id="cmLiveBtn">Live: OFF</button>
-        <button type="button" class="m2-btn" id="cmSeqBtn" title="Source Sequence: Launch → Dayscalp → CallOuts → OpenCopy → MayhemMode → Candles · Mayhem board → Candles · Mixed → Launch … Each step waits up to 60 s for a Candles trade; a trade that opened is waited for until it sells or hits Max hold, then the next step. Sources use AutoTrade-Candles. Paper or Live as the Live button.">Source Sequence: OFF</button>
+        <button type="button" class="m2-btn" id="cmSeqBtn" title="Source Sequence: Launch → MayhemMode → Candles · Mayhem board → Candles · Mixed → Launch … Each step waits up to 60 s for a Candles trade; a trade that opened is waited for until it sells or hits Max hold, then the next step. Sources use AutoTrade-Candles. Paper or Live as the Live button.">Source Sequence: OFF</button>
         <span class="muted" id="cmSeqInfo"></span>
         <button type="button" class="m2-btn bad" id="cmKillBtn">Kill switch</button>
         <button type="button" class="m2-btn" id="cmResetBtn" title="Clear results, trades, signals and paper positions. Settings are kept.">Reset data</button>
@@ -4487,7 +4487,7 @@ document.getElementById('cmEntBtn').addEventListener('click',()=>{ if(_cmCfg) cm
 document.getElementById('cmSeqBtn').addEventListener('click',()=>{
   if(!_cmCfg) return;
   const on=!_cmCfg.source_seq;
-  if(on&&!confirm('Source Sequence ON?\n\nEvery step switches the Live Controls source in turn: Launch → Dayscalp → CallOuts → OpenCopy → MayhemMode → Candles · Mayhem board → Candles · Mixed → again. AutoTrade-Candles stays on; each step waits up to 60 s for a Candles trade, and a trade that opened is waited for until it sells or hits Max hold.\n\nCandles is '+(_cmCfg.mode==='live'?'LIVE — real SOL.':'in PAPER.'))) return;
+  if(on&&!confirm('Source Sequence ON?\n\nEvery step switches the Live Controls source in turn: Launch → MayhemMode → Candles · Mayhem board → Candles · Mixed → again. AutoTrade-Candles stays on; each step waits up to 60 s for a Candles trade, and a trade that opened is waited for until it sells or hits Max hold.\n\nCandles is '+(_cmCfg.mode==='live'?'LIVE — real SOL.':'in PAPER.'))) return;
   cmPost({source_seq:on}, on?'Source Sequence ON':'Source Sequence OFF — the current source stays');
 });
 document.getElementById('cmLiveBtn').addEventListener('click',()=>{

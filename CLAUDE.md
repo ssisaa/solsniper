@@ -102,7 +102,7 @@ the value loop's fresh `upct`), retried every 1 s; no red-candle wait and no `_i
 floor in the sell stays). The forming-red / candle-close take-profit below is now only a backstop.
 
 **Source Sequence (2026-11-14, user's request)**: Candles page button (`source_seq`, default off). On: `_seq_loop` steps
-through `SEQ_STEPS` Launch → Dayscalp → CallOuts → OpenCopy → MayhemMode → Candles · Mayhem board → Candles · Mixed →
+through `SEQ_STEPS` Launch → MayhemMode → Candles · Mayhem board → Candles · Mixed → (Dayscalp / CallOuts / OpenCopy removed 2026-11-14) →
 again. Source steps switch the Live Controls source through the dashboard config handler (`_seq_apply_source`, same as
 the Settings page) with AutoTrade-Candles on (`update`, no wipe, Live/Paper untouched); board steps set `seq_board`
 (`support_source()` = "", `follow()` = the board) while MayhemMode stays the source and only offers. A step waits up to
