@@ -771,6 +771,22 @@ class CandleMomo:
         return want
 
     def _pick(self, rows: List[Dict[str, Any]]) -> None:
+        self._pick_feeds(rows)
+        self._single_feed()
+
+    def _single_feed(self) -> None:
+        """One coin at a time, for every source and feed (user 2026-11-14): while a trade is open only the coin(s)
+        held are watched; flat, one coin. The next coin comes once the trade completes."""
+        if self.positions:
+            keep = [m for m in self.feeds if m in self.positions]
+        else:
+            keep = list(self.feeds)[:1]
+        for m in list(self.feeds):
+            if m not in keep:
+                self.feeds.pop(m, None)
+        self.providers["stream"].wanted = set(self.feeds)
+
+    def _pick_feeds(self, rows: List[Dict[str, Any]]) -> None:
         cfg = self.cfg
         src = self.support_source()
         if src:
@@ -1038,6 +1054,21 @@ class CandleMomo:
                        first=True, now_buy=True, gar=True)
         return True
 
+    def _fast_upct(self, held: Dict[str, Any], f: Feed, price: float) -> Optional[float]:
+        """Whole trade % after fees from the chart price: each lot's buy price (same feed units) against the price
+        now; fees ~2% (pump 1% each way) + both network fees. Falls back to the value loop's fresh read."""
+        lots = held.get("lots") or []
+        cost = sum(float(l.get("sol") or 0) for l in lots)
+        if price > 0 and cost > 0 and all(float(l.get("px") or 0) > 0 and (l.get("src") in (None, f.using))
+                                         for l in lots):
+            value = sum(float(l["sol"]) * price / float(l["px"]) for l in lots)
+            net = 2 * self._network_fee_sol() * max(1, len(lots))
+            return (value - cost - net) / cost * 100.0 - 2.0
+        up = held.get("upct")
+        if up is not None and time.time() - float(held.get("value_at") or 0) <= 2.0:
+            return float(up)
+        return None
+
     def _pro_hold_take(self, held: Dict[str, Any], cur) -> Optional[tuple]:
         """pro_hold take-profit read: (trade %, target, from) when the trade is in profit after fees and this
         1s candle is red, else None. Never on the loss side: below the target it keeps holding (Max hold)."""
@@ -1123,18 +1154,20 @@ class CandleMomo:
         if (cfg.rule == "pro_hold" and cfg.pro_hold_first and cfg.pro_hold_first_at == "gar"
                 and len(live_rows) >= 2 and self._gar(f, live_rows, held_now, seen)):
             return
-        if cfg.rule == "pro_hold" and held_now is not None and live_rows and not live_rows[-1].final:
-            # Take profit on the candle still FORMING (user 2026-11-14: sells came ~1.5s late — a red 1s candle had
-            # to close, then the next 0.5s poll): once it trades below its open with the whole trade still in
-            # profit, sell now. Once per candle; _in_profit re-checks on a fresh price before the sell.
+        if cfg.rule == "pro_hold" and held_now is not None and live_rows and not held_now.get("closing"):
+            # Sell on profit AT ONCE (user 2026-11-14: +35% and +18% passed unsold, then -45%). The whole trade
+            # (every lot, after fees) is read from the 1s chart on every 0.5s poll — not the once-a-second curve
+            # read — and sold the moment it is >= the target; no waiting for a red candle. The break-even floor
+            # in the sell keeps slippage from turning it into a loss.
             c = live_rows[-1]
-            if c.t != getattr(f, "take_t", None) and self._pro_hold_take(held_now, c) is not None:
-                f.take_t = c.t
-                up, tgt, tgt_from = self._pro_hold_take(held_now, c)
+            up = self._fast_upct(held_now, f, c.close)
+            tgt, tgt_from = self.green_target()
+            if up is not None and up >= tgt and time.time() - float(getattr(f, "take_at", 0) or 0) >= 1.0:
+                f.take_at = time.time()
+                held_now["pro_peak"] = max(float(held_now.get("pro_peak") or up), up)
                 self._pro_emit(f, live_rows, "SELL", {"call": "SELL", "px": c.close,
-                                                       "why": (f"take profit — trade {up:+.1f}% ≥ {tgt:g}% after fees "
-                                                               f"({tgt_from}), price turning down (candle still forming; "
-                                                               f"peak {float(held_now.get('pro_peak') or up):+.1f}%)")}, seen)
+                                                       "why": f"take profit — trade {up:+.1f}% ≥ {tgt:g}% after fees "
+                                                              f"({tgt_from}), sold at once"}, seen)
                 return
         if len(rows) < 2:
             return
@@ -1409,7 +1442,7 @@ class CandleMomo:
                     await self._live_buy(sig)
                 else:
                     await self._paper_buy(sig)
-            elif (((self.cfg.sell_only_in_profit and not sig.get("pro")) or sig.get("pro_hold_sell"))
+            elif (self.cfg.sell_only_in_profit and not sig.get("pro")
                   and not sig.get("manual") and not await self._in_profit(sig)):
                 pass                                 # skipped NOT_IN_PROFIT: keep holding, wait for a better green
             else:

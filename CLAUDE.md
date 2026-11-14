@@ -90,6 +90,13 @@ youngest first, pump mints only, New < 3 min; a coin stays while held, else unti
 `mixed_idle_s` (60 s) with no trade, then the next board's youngest (a handed-over coin is skipped 5 min). Max mints
 slots (pro_hold: one). Paper / LIVE follow Candles' Live switch. Graduated coins are valued by Jupiter.
 
+**One feed + sell at once on profit (2026-11-14, user's request, repeated)**: `_pick` → `_pick_feeds` then
+`_single_feed()`: for every source / feed, while a trade is open only the held coin(s) are fed; flat, one coin (Coins >1
+no longer adds feeds). pro_hold sells AT ONCE when the whole trade (all lots, after ~2 % fees + network fees) is ≥
+`green_target()` — read from the chart price on every 0.5 s poll via each lot's buy price (`_fast_upct`, falls back to
+the value loop's fresh `upct`), retried every 1 s; no red-candle wait and no `_in_profit` RPC re-check (the break-even
+floor in the sell stays). The forming-red / candle-close take-profit below is now only a backstop.
+
 **Source Sequence (2026-11-14, user's request)**: Candles page button (`source_seq`, default off). On: `_seq_loop` steps
 through `SEQ_STEPS` Launch → Dayscalp → CallOuts → OpenCopy → MayhemMode → Candles · Mayhem board → Candles · Mixed →
 again. Source steps switch the Live Controls source through the dashboard config handler (`_seq_apply_source`, same as

@@ -671,7 +671,7 @@ def test_pro_hold_takes_profit_as_the_forming_candle_turns_red(tmp_path, monkeyp
     book.merge([C.Candle(t=t + 1000, open=1.2, high=1.2, low=1.15, close=1.16, volume=1, final=False)])  # turning red
     e._evaluate(f, time.time())
     sells = [r for r in routed if r["side"] == "SELL"]
-    assert len(sells) == 1 and "forming" in sells[0]["pro_why"] and sells[0]["pro_hold_sell"]
+    assert len(sells) == 1 and "sold at once" in sells[0]["pro_why"] and sells[0]["pro_hold_sell"]
     e._evaluate(f, time.time())
     assert len([r for r in routed if r["side"] == "SELL"]) == 1      # once per candle
 
@@ -757,3 +757,48 @@ def test_pro_hold_hint_names_the_limit():
     e.positions["X"] = {"mint": "X", "mode": "paper", "entry_sol": 0.005, "lots": [{"n": 1}], "upct": -3.0}
     h = e._hint("X")
     assert "allows 3" in h["entry"] and "raise Total cap to 0.025" in h["entry"]
+
+
+def test_pro_hold_sells_at_once_when_the_chart_shows_profit(tmp_path, monkeypatch):
+    from src.signal import candle_core as C
+    e, f, routed = _ph_first_engine(tmp_path, monkeypatch, 3)
+    e.cfg.pro_hold_first = False
+    monkeypatch.setattr(e, "green_target", lambda: (10.0, "Min profit"))
+    monkeypatch.setattr(e, "_network_fee_sol", lambda: 0.0)
+    e.positions["NEW"] = {"mint": "NEW", "mode": "paper", "tokens": 1.0, "entry_sol": 0.01, "entry_ts": time.time(),
+                          "lots": [{"n": 1, "sol": 0.005, "px": 1.0, "src": "pump_rest"},
+                                   {"n": 2, "sol": 0.005, "px": 0.5, "src": "pump_rest"}]}
+    book = f.books["pump_rest"]
+    t = book.rows[-1].t
+    book.merge([C.Candle(t=t + 1000, open=0.8, high=0.9, low=0.8, close=0.9, volume=1, final=False)])  # green, still rising
+    e._evaluate(f, time.time())
+    sells = [r for r in routed if r["side"] == "SELL"]
+    assert len(sells) == 1 and "sold at once" in sells[0]["pro_why"]        # avg 0.667 -> 0.9 = +35%: no red wait
+
+
+def test_pro_hold_no_sell_below_target_on_the_chart(tmp_path, monkeypatch):
+    from src.signal import candle_core as C
+    e, f, routed = _ph_first_engine(tmp_path, monkeypatch, 3)
+    e.cfg.pro_hold_first = False
+    monkeypatch.setattr(e, "green_target", lambda: (10.0, "Min profit"))
+    monkeypatch.setattr(e, "_network_fee_sol", lambda: 0.0)
+    e.positions["NEW"] = {"mint": "NEW", "mode": "paper", "tokens": 1.0, "entry_sol": 0.005, "entry_ts": time.time(),
+                          "lots": [{"n": 1, "sol": 0.005, "px": 1.0, "src": "pump_rest"}]}
+    book = f.books["pump_rest"]
+    t = book.rows[-1].t
+    book.merge([C.Candle(t=t + 1000, open=1.0, high=1.05, low=1.0, close=1.05, volume=1, final=False)])  # +3% after fees
+    e._evaluate(f, time.time())
+    assert not [r for r in routed if r["side"] == "SELL"]
+
+
+def test_one_feed_at_a_time_for_every_feed():
+    from src.signal import candle_momo as CM
+    e = CM.CandleMomo()
+    e.cfg.auto_follow, e.cfg.rule, e.cfg.max_mints = "mayhem_board", "inverse", 3
+    rows = [{"m": f"Z{i}pump", "t": f"Z{i}", "ms": "active", "age": 10 + i} for i in range(3)]
+    e._pick(rows)
+    assert len(e.feeds) == 1
+    held = next(iter(e.feeds))
+    e.positions[held] = {"mint": held}
+    e._pick(rows)
+    assert set(e.feeds) == {held}
