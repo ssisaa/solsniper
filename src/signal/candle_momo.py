@@ -45,6 +45,7 @@ CANDLE_URL = ("https://frontend-api-v3.pump.fun/candles/solana:5eykt4UsFv8P8NJdT
 BOARD_URL = "https://advanced-indexer.pump.fun/boards/mayhem?tier=web&offset=0&limit=30"
 BASE_FEE_LAMPORTS = 5000
 FEED_ONLY_SOURCES = ("opencopy", "callout", "mayhem")
+OPENCOPY_MAX_FEEDS = 5         # AutoTrade-Candles on OpenCopy: coins fed (and traded) at the same time
 # Dayscalp, CallOuts and OpenCopy taken out at the user's request (2026-11-14)
 SEQ_STEPS = (("launch", "Launch"), ("mayhem", "MayhemMode"), ("board:mayhem_board", "Candles · Mayhem board"),
              ("board:mixed", "Candles · Mixed"))
@@ -945,7 +946,12 @@ class CandleMomo:
         """One coin at a time, for every source and feed (user 2026-11-14): while a trade is open only the coin(s)
         held are watched; flat, one coin. The next coin comes once the trade completes."""
         active = self.trading()
-        if active:
+        if self.support_source() == "opencopy" and self.feeds_only("opencopy"):
+            # OpenCopy only (user 2026-11-15): several coins opened by the callers are watched and traded together,
+            # up to OPENCOPY_MAX_FEEDS — held coins first
+            keep = ([m for m in self.feeds if m in active]
+                    + [m for m in self.feeds if m not in active and m not in self.positions])[:max(OPENCOPY_MAX_FEEDS, len(active))]
+        elif active:
             keep = [m for m in self.feeds if m in active]
         else:
             # paused coins are watched on the Paused Coins page, not fed: the next coin can come. A pinned coin
@@ -996,6 +1002,17 @@ class CandleMomo:
                             self._grab.setdefault(pk["mint"], {"at": time.time(), "symbol": pk.get("symbol") or ""})
                 except Exception:
                     pass
+            if src == "opencopy" and self.feeds_only("opencopy"):
+                # AutoTrade-Candles on OpenCopy (user 2026-11-15): every new open of the callers selected on OpenHolds
+                # is offered to Candles at once — no OpenCopy buy / pin / hold, no auto-open range wait
+                try:
+                    from src.observability.dashboard import openhold_new_coins
+                    for r in openhold_new_coins(allowed_only=False)[:OPENCOPY_MAX_FEEDS]:
+                        m = str(r.get("coinMint") or "")
+                        if (m.endswith("pump") or m.startswith("pump")) and m not in self.traded and m not in self.unusable:
+                            self.offer("opencopy", m, str(r.get("symbol") or ""))
+                except Exception:
+                    log.debug("openholds rows for Candles failed", exc_info=True)
             if src == "callout" and self.feeds_only("callout"):
                 # AutoTrade-Candles on CallOuts (user 2026-11-15): no waiting for CallOuts' own buy rules — the newest
                 # OPEN pump coins on the CallOuts page are offered to Candles straight away
@@ -1021,6 +1038,8 @@ class CandleMomo:
                     if o["src"] != src or stale or done:
                         self.offers.pop(m, None)
                 slots = 1 if cfg.rule == "pro_hold" else max(1, int(cfg.max_mints or 1))
+                if src == "opencopy":
+                    slots = OPENCOPY_MAX_FEEDS      # OpenCopy only: coins opened together are fed together
                 fresh = sorted((o["at"], m) for m, o in self.offers.items() if m not in self.positions)
                 for _at, m in reversed(fresh):                       # newest offer first
                     if len([x for x in want if x not in self.positions]) >= slots:
@@ -1030,7 +1049,7 @@ class CandleMomo:
                     if o.get("age") is not None:
                         ages[m] = float(o["age"]) + (now - float(o["at"]))
                     self._grab.setdefault(m, {"at": now, "symbol": o.get("symbol") or ""})
-            if cfg.rule == "pro_hold":
+            if cfg.rule == "pro_hold" and src != "opencopy":
                 want = self._one_feed(want)
             for m, origin in want.items():
                 if cfg.avoid_mayhem and m not in self.mayhem_of:

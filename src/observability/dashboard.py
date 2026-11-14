@@ -3098,7 +3098,7 @@ def pop_openhold_orders() -> List[Dict[str, Any]]:
     return items
 
 
-def openhold_new_coins() -> List[Dict[str, Any]]:
+def openhold_new_coins(allowed_only: bool = True) -> List[Dict[str, Any]]:
     """Coins that just appeared on a live OpenHolds user and are inside the auto-open window.
 
     The window comes from Settings. Default is 1 minute. A clicked Buy does not use it.
@@ -3187,6 +3187,8 @@ def openhold_new_coins() -> List[Dict[str, Any]]:
             item["wallet"] = group.get("wallet") or ""
             fresh.append(item)
     fresh.sort(key=lambda row: -float(row.get("openedAt") or 0))
+    if not allowed_only:
+        return fresh                     # AutoTrade-Candles: every new open, no auto-open range filter
     return _openhold_allowed(fresh, window)
 
 

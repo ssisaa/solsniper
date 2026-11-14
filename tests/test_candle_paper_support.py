@@ -100,11 +100,13 @@ def test_offered_token_is_fed_and_candles_buys_lot1(monkeypatch):
 
 
 def test_offer_expires_and_newest_first(monkeypatch):
-    e = _fo(monkeypatch, "opencopy")
+    e = _fo(monkeypatch, "mayhem")                   # one-feed source (OpenCopy may feed several)
+    import src.observability.dashboard as D
+    monkeypatch.setattr(D, "mayhem_young_opens", lambda max_age: [])
     old, new = "Old" + "a" * 41, "New" + "b" * 41
-    e.offer("opencopy", old)
+    e.offer("mayhem", old)
     e.offers[old]["at"] = e.offers[old]["seen"] = time.time() - 10
-    e.offer("opencopy", new)
+    e.offer("mayhem", new)
     e._pick([])
     assert set(e.feeds) == {new}                      # Max mints 1: the newest offer
     e.offers[new]["seen"] = time.time() - 999
@@ -129,3 +131,25 @@ def test_callout_rows_feed_candles_directly(monkeypatch):
     e2.cfg.support_enabled = False
     e2._pick([])
     assert not e2.offers                              # AutoTrade-Candles off: CallOuts' own rules, nothing offered
+
+
+def test_opencopy_new_opens_feed_candles_several_at_once(monkeypatch):
+    import src.observability.dashboard as D
+    e = _fo(monkeypatch, "opencopy")
+    e.cfg.rule = "pro_hold"
+    monkeypatch.setattr(D, "openhold_new_coins", lambda allowed_only=True: [
+        {"coinMint": "A1xpump", "symbol": "A1"}, {"coinMint": "B2xpump", "symbol": "B2"}, {"coinMint": "C3xpump", "symbol": "C3"}])
+    e._pick([])
+    assert set(e.feeds) == {"A1xpump", "B2xpump", "C3xpump"}      # OpenCopy: opened together, fed together
+
+
+def test_other_sources_stay_one_feed(monkeypatch):
+    import src.observability.dashboard as D
+    e = _fo(monkeypatch, "callout")
+    e.cfg.rule = "pro_hold"
+    now = time.time()
+    monkeypatch.setattr(D, "_callout_rows", lambda: ([
+        {"coinMint": "X1xpump", "symbol": "X1", "call": "OPEN", "openedAt": now - 2},
+        {"coinMint": "X2xpump", "symbol": "X2", "call": "OPEN", "openedAt": now - 1}], ""))
+    e._pick([])
+    assert len(e.feeds) == 1
