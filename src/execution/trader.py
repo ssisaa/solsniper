@@ -2553,7 +2553,7 @@ class Trader:
             measured=bool(chain_buy),
         )
 
-    async def _send_keep_fee(self, signed_b64: str, fast: bool = False):  # noqa: C901
+    async def _send_keep_fee(self, signed_b64: str, fast: bool = False, presim: bool = True):  # noqa: C901
         """Simulate first. A rejected simulation is not broadcast, so it spends no fee.
 
         fast=True is the Local PumpPortal buy and sell. The simulation wait is
@@ -2562,7 +2562,10 @@ class Trader:
         # Check with simulateTransaction first, as its own call. A sendTransaction whose preflight
         # failed was still forwarded once by the RPC provider and landed as a failed tx with a fee
         # (5o97…, 23:37:58, Jupiter 6001 slippage). A tx that fails this check is never sent at all.
-        sim_err = await self._simulate_first(signed_b64, 0.9 if fast else 1.5)
+        # presim=False (Candles' buys and sells, user 2026-11-14 "live as fast as paper"): no separate
+        # simulateTransaction round trip — the RPC's own preflight on sendTransaction still checks it. Cost: a tx
+        # that fails can occasionally be forwarded and pay its ~0.00016 SOL fee.
+        sim_err = await self._simulate_first(signed_b64, 0.9 if fast else 1.5) if presim else ""
         if sim_err:
             log.warning("SEND not broadcast — simulateTransaction says it fails, nothing sent, no fee (%s)", sim_err[:140])
             return None, sim_err

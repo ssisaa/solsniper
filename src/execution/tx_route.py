@@ -1279,7 +1279,7 @@ async def _one(trader, name: str, side: str, mint: str, sol: float, raw: int, bu
                 return {"status": "skip", "err": "curve_unread"}
             if not signed:
                 return {"status": "skip", "err": err or "pump_buy_empty"}
-            sig, send_err = await trader._send_keep_fee(signed, fast=True)
+            sig, send_err = await trader._send_keep_fee(signed, fast=True, presim=not str(reason or "").startswith("candle"))
             if not sig:
                 return {"status": "skip", "err": str(send_err or "pump_send")}
             return {"status": "sent", "sig": sig, "tokens": int(tokens or 0), "sol": sol}
@@ -1308,7 +1308,7 @@ async def _one(trader, name: str, side: str, mint: str, sol: float, raw: int, bu
             return {"status": "skip", "err": "curve_unread"}
         if not signed:
             return {"status": "skip", "err": err or "pump_sell_empty"}
-        sig, send_err = await trader._send_keep_fee(signed, fast=True)
+        sig, send_err = await trader._send_keep_fee(signed, fast=True, presim=not str(reason or "").startswith("candle"))
         if not sig:
             return {"status": "skip", "err": str(send_err or "pump_send")}
         return {"status": "sent", "sig": sig, "tokens": raw, "sol": float(min_sol or 0) / 1_000_000_000}

@@ -177,3 +177,24 @@ def test_paper_profit_sell_below_breakeven_is_held(tmp_path, monkeypatch):
            "symbol": "PS"}
     asyncio.run(e._paper_sell(sig, "take profit"))
     assert "PS" in e.positions                                    # slippage would make a loss: not sold
+
+
+def test_candle_send_skips_the_separate_simulation():
+    import asyncio
+    from src.execution.trader import Trader
+    calls = []
+
+    class T:
+        async def _simulate_first(self, b64, t):
+            calls.append("sim")
+            return ""
+
+        async def _rpc_send_with_err(self, *a, **k):
+            calls.append("send")
+            return "SIG", None
+    t = T()
+    asyncio.run(Trader._send_keep_fee(t, "b64", fast=True, presim=False))
+    assert "sim" not in calls and "send" in calls
+    calls.clear()
+    asyncio.run(Trader._send_keep_fee(t, "b64", fast=True))
+    assert calls[0] == "sim"
