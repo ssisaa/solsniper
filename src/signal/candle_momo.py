@@ -214,7 +214,9 @@ class CandleMomo:
         self.seq_board = ""                           # Source Sequence board step: "mayhem_board" | "mixed" | ""
         self.seq: Dict[str, Any] = {"i": -1, "at": 0.0, "trade_at": 0.0, "state": "off"}
         self.offers: Dict[str, Dict[str, Any]] = {}
-        self.paused_mints: Dict[str, float] = {}      # coins pump paused / completed while Candles held them    # AutoTrade-Candles feed-only sources: mint -> offer
+        self.paused_mints: Dict[str, float] = {}
+        self._pin_warned: set = set()
+        self._named: set = set()                       # mints whose name was looked up (pinned / unnamed feeds)      # coins pump paused / completed while Candles held them    # AutoTrade-Candles feed-only sources: mint -> offer
         self._mirrored: Dict[str, float] = {}         # Paper + AutoTrade-Candles: coins given a paper lot 1
         self.mayhem_of: Dict[str, Optional[bool]] = {}  # mint -> Mayhem coin? (None = still checking)
         self._mx_turn = 0                             # index in mayhem2.MIXED_GROUPS whose turn is next
@@ -777,6 +779,7 @@ class CandleMomo:
     def _pick(self, rows: List[Dict[str, Any]]) -> None:
         self._pick_feeds(rows)
         self._single_feed()
+        self._name_feeds()
 
     def _src_label(self, mint: str) -> str:
         """Where a Candles trade came from, for the Mode column: Launch, Dayscalp, MayhemMode, Callout, OpenCopy,
@@ -909,6 +912,31 @@ class CandleMomo:
         f = self.feeds.get(mint)
         return bool(f and f.board_state in ("paused", "completed"))
 
+    def _name_feeds(self) -> None:
+        """A watched coin with no name (pinned mints, some sources) gets its symbol from pump / DexScreener, once."""
+        need = [m for m, f in self.feeds.items() if m not in self._named and (not f.symbol or f.symbol == m[:6])]
+        if not need or not self.loop:
+            return
+        self._named.update(need)
+
+        async def go(mints: List[str]) -> None:
+            try:
+                from src.execution.wallet_tokens import quote_mints
+                got = await quote_mints(mints, named=True)
+                for m in mints:
+                    sym = str((got.get(m) or {}).get("symbol") or "")
+                    if sym and m in self.feeds:
+                        self.feeds[m].symbol = sym
+                    if sym and m in self.positions and self.positions[m].get("symbol") in (None, "", m[:6]):
+                        self.positions[m]["symbol"] = sym
+            except Exception:
+                log.debug("candle name lookup failed", exc_info=True)
+        try:
+            asyncio.get_running_loop()
+            asyncio.ensure_future(go(need))
+        except RuntimeError:
+            asyncio.run_coroutine_threadsafe(go(need), self.loop)
+
     def _single_feed(self) -> None:
         """One coin at a time, for every source and feed (user 2026-11-14): while a trade is open only the coin(s)
         held are watched; flat, one coin. The next coin comes once the trade completes."""
@@ -931,7 +959,7 @@ class CandleMomo:
             self._support_sync(src)
             want = {p.mint: "support" for p in self._support_held(src)}
             ages: Dict[str, float] = {}           # coin age where the source knows it (first-candle buy)
-            for m in list(self.positions) + [m for m in self.busy if m in self.feeds]:
+            for m in [m for m, p in self.positions.items() if not p.get("paused_at")] + [m for m in self.busy if m in self.feeds]:
                 want.setdefault(m, "held")
             if src == "mayhem":
                 for m in self._mayhem_grab():
@@ -1010,6 +1038,12 @@ class CandleMomo:
             return
         want: Dict[str, Dict[str, Any]] = {}
         for m in cfg.mints:
+            if m in self.unusable:
+                if m not in self._pin_warned:
+                    self._pin_warned.add(m)
+                    self.note("warn", f"Pinned {m[:6]}… is not a pump.fun bonding-curve coin ({self.unusable[m]}) — "
+                                      "Candles can only chart and trade pump.fun coins. Remove it from Pinned mints.", m)
+                continue
             if m not in cfg.blacklist:
                 want[m] = {"origin": "manual"}
         state = {str(r.get("m") or ""): r for r in rows}
@@ -1043,7 +1077,7 @@ class CandleMomo:
                 picks = [] if self.trading() else picks[:1]
             for r in picks:
                 want.setdefault(r["m"], {"origin": "auto"})
-        for mint in list(self.positions) + [m for m in self.busy if m in self.feeds]:   # never drop a coin we hold
+        for mint in [m for m, p in self.positions.items() if not p.get("paused_at")] + [m for m in self.busy if m in self.feeds]:
             want.setdefault(mint, {"origin": self.feeds[mint].origin if mint in self.feeds else "held"})   # or are buying
         for mint, info in want.items():
             if mint not in self.feeds:

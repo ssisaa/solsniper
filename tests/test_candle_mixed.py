@@ -320,3 +320,14 @@ def test_paper_lot_price_is_the_real_fill(tmp_path, monkeypatch):
            "rule": "pro_hold", "feedLagMs": 0}
     asyncio.run(e._paper_buy(sig))
     assert round(e.positions["LP"]["lots"][0]["px"], 6) == 4.0
+
+
+def test_pinned_coin_not_tradable_is_not_refed_and_paused_coins_are_not_fed():
+    e = CM.CandleMomo()
+    e.cfg.auto_follow, e.cfg.rule = "none", "pro_hold"
+    e.cfg.mints = ["NOTPUMPmint1234567890"]
+    e.unusable["NOTPUMPmint1234567890"] = "graduated"
+    e.positions["PZpump"] = {"mint": "PZpump", "paused_at": time.time()}
+    e._pick([])
+    assert "NOTPUMPmint1234567890" not in e.feeds and "PZpump" not in e.feeds
+    assert any("not a pump.fun" in n["msg"] for n in e.notes)
