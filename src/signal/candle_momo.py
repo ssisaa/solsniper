@@ -1090,7 +1090,7 @@ class CandleMomo:
         cost = sum(float(l.get("sol") or 0) for l in lots)
         if price > 0 and cost > 0 and all(float(l.get("px") or 0) > 0 and (l.get("src") in (None, f.using))
                                          for l in lots):
-            value = sum(float(l["sol"]) * price / float(l["px"]) for l in lots)
+            value = sum(float(l["sol"]) * price / float(l["px"]) for l in lots) * float(held.get("impact") or 1.0)
             net = 2 * self._network_fee_sol() * max(1, len(lots))
             return (value - cost - net) / cost * 100.0 - 2.0
         up = held.get("upct")
@@ -2659,6 +2659,18 @@ class CandleMomo:
                         pos["value_at"] = time.time()
                         pos["upnl_sol"] = v - pos["entry_sol"] - 2 * self._network_fee_sol()
                         pos["upct"] = pos["upnl_sol"] / pos["entry_sol"] * 100.0 if pos["entry_sol"] else 0.0
+                        try:
+                            # selling the whole holding moves a thin curve: real value / chart value at this moment
+                            # scales the fast chart reading (2026-11-14: chart said +10%, the sale was under cost)
+                            fv = self.feeds.get(mint)
+                            px = fv.books[fv.using].rows[-1].close if fv and fv.using and fv.books[fv.using].rows else 0.0
+                            lots_ = pos.get("lots") or []
+                            if px > 0 and lots_ and all(float(l.get("px") or 0) > 0 for l in lots_):
+                                chart_v = sum(float(l.get("sol") or 0) * px / float(l["px"]) for l in lots_)
+                                if chart_v > 0:
+                                    pos["impact"] = max(0.2, min(1.2, v / chart_v))
+                        except Exception:
+                            pass
                         if self.cfg.rule == "pro_hold" and not pos.get("closing") and mint not in self.busy:
                             tgt, tgt_from = self.green_target()
                             if pos["upct"] >= tgt and not pos.get("pro_armed"):

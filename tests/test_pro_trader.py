@@ -802,3 +802,15 @@ def test_one_feed_at_a_time_for_every_feed():
     e.positions[held] = {"mint": held}
     e._pick(rows)
     assert set(e.feeds) == {held}
+
+
+def test_fast_upct_applies_the_price_impact():
+    from src.signal import candle_momo as CM
+    e = CM.CandleMomo()
+    f = CM.Feed("I", 10)
+    f.using = "pump_rest"
+    held = {"lots": [{"sol": 0.01, "px": 1.0, "src": "pump_rest"}]}
+    e._network_fee_sol = lambda: 0.0
+    assert round(e._fast_upct(held, f, 1.2)) == 18          # chart +20% - 2% fees
+    held["impact"] = 0.85                                     # the real sale gets 15% less than the chart shows
+    assert round(e._fast_upct(held, f, 1.2)) == 0

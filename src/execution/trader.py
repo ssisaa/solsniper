@@ -563,8 +563,9 @@ class Trader:
                         latency_ms=(time.perf_counter() - t0) * 1000,
                     )
                 from src.execution.wallet_gate import wallet_buy_block
-                # OpenCopy uses the free slot. A leftover coin in the wallet is not a reason to skip.
-                if source != "opencopy":
+                # OpenCopy uses the free slot. A leftover coin in the wallet is not a reason to skip. Candles neither
+                # (2026-11-14: a leftover 0.0104 SOL coin refused its buys); it refused a same-coin buy above.
+                if source not in ("opencopy", "candle"):
                     blocked = await wallet_buy_block(self.jup, buying_mint=mint, ignore_mints=callout_ignore)
                     if blocked:
                         log.warning("ACTION BUY_BLOCKED %s", blocked)

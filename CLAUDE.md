@@ -91,7 +91,7 @@ youngest first, pump mints only, New < 3 min; a coin stays while held, else unti
 slots (pro_hold: one). Paper / LIVE follow Candles' Live switch. Graduated coins are valued by Jupiter.
 
 **Live buy limits (2026-11-14)**: Candles' live buys (source `candle`) are not under the Live Controls Max concurrent
-(trader.buy: only a second buy of the same coin is refused; other open trades don't block it). For the other sources a
+(trader.buy: only a second buy of the same coin is refused; other open trades and leftover wallet coins don't block it; the wallet / second-buy gate is skipped for `candle`). The fast profit reading is scaled by `pos["impact"]` = real curve value / chart value from the value loop (selling a thin curve gets less than the chart shows). For the other sources a
 coin pump paused (`mayhem_state_of`, or `CandleMomo.is_paused` / `paused_mints`) holds no Max concurrent slot.
 
 **Trade source in the Mode column (2026-11-14)**: Candles Open positions / Closed trades show "paper · Launch",
