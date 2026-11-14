@@ -1062,16 +1062,20 @@ class CandleMomo:
             if not hasattr(f, "first_t0"):
                 f.first_t0, f.first_age0 = now, f.age
             age_now = None if f.first_age0 is None else float(f.first_age0) + (now - f.first_t0)
-            if cfg.pro_hold_first_at == "now":
+            if cfg.pro_hold_first_at in ("now", "gar"):
                 # "at once (0.00%)" (user 2026-11-14): every coin Candles is given is bought the first time its chart
                 # is read — before any move, whatever its age or candle count. Only the Mayhem check, Kill / Pause
                 # and the live gates can still stop it.
                 c = live_rows[-1]
                 f.first_done = True
+                gar = cfg.pro_hold_first_at == "gar"
+                # "buy green after red" always starts with this buy too (user 2026-11-14), then _gar buys each green
+                # after a red
                 self._pro_emit(f, live_rows, "BUY", {"call": "BUY", "px": c.close,
-                                                     "why": "bought at once on arrival (0.00%)"
-                                                            + (f" — coin age {age_now:.0f}s" if age_now is not None else "")},
-                               seen, first=True, now_buy=True)
+                                                     "why": ("bought at the start" if gar else "bought at once on arrival (0.00%)")
+                                                            + (f" — coin age {age_now:.0f}s" if age_now is not None else "")
+                                                            + ("; then buys every green after a red" if gar else "")},
+                               seen, first=True, now_buy=True, gar=gar)
                 return
             if cfg.pro_hold_first_at == "flat":
                 # "no candles yet (0.00%)" (user 2026-11-14): the chart has only its price line — one reading, no
@@ -1089,16 +1093,6 @@ class CandleMomo:
                     return
             elif age_now is None or age_now > PRO_FIRST_MAX_AGE_S:
                 f.first_done = True
-            elif cfg.pro_hold_first_at == "gar":
-                # "buy green after red" starts with a buy at the start (user 2026-11-14), then _gar buys each green
-                # after a red. A coin first seen with more history than the start gets no start buy.
-                f.first_done = True
-                if len(live_rows) <= PRO_FIRST_START_CANDLES:
-                    self._pro_emit(f, live_rows, "BUY", {"call": "BUY", "px": live_rows[-1].close,
-                                                         "why": f"chart just started — a new coin (age {age_now:.0f}s); "
-                                                                "then buys every green after a red"},
-                                   seen, first=True)
-                    return
             else:
                 # The turn: the red ends and the price starts up. Checked on the candle still FORMING (every poll,
                 # 0.5s): it opens at the last close, so trading above its open = the first green has begun —

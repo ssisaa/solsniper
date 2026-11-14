@@ -690,6 +690,7 @@ def _gar_engine(tmp_path, monkeypatch, candles):
 
 def test_gar_buys_green_after_red_when_flat_and_down(tmp_path, monkeypatch):
     e, f, routed = _gar_engine(tmp_path, monkeypatch, [(1.0, 2.0), (2.0, 1.5), (1.5, 1.6)])   # up, red, green starting
+    f.first_done = True                                       # the start buy is tested on its own
     e._evaluate(f, time.time())
     assert len(routed) == 1 and routed[0]["side"] == "BUY" and "green after red" in routed[0]["pro_why"]
     e._evaluate(f, time.time())
@@ -717,7 +718,7 @@ def test_gar_needs_a_red_before(tmp_path, monkeypatch):
 def test_gar_starts_with_a_buy_at_the_start(tmp_path, monkeypatch):
     e, f, routed = _gar_engine(tmp_path, monkeypatch, [(1.0, 1.0)])       # chart just started
     e._evaluate(f, time.time())
-    assert len(routed) == 1 and "just started" in routed[0]["pro_why"] and routed[0]["first"]
+    assert len(routed) == 1 and "bought at the start" in routed[0]["pro_why"] and routed[0]["first"]
 
 
 def test_gar_signal_skips_cooldown_and_entry_checks(tmp_path, monkeypatch):
@@ -727,3 +728,10 @@ def test_gar_signal_skips_cooldown_and_entry_checks(tmp_path, monkeypatch):
     assert sig["gar"] and sig["first"] and sig["now_buy"]
     e.cfg.inflow_window_s, e.cfg.max_below_peak_pct = 5, 10
     assert e._entry_filters("NEW", first=True, now_buy=True)[0] == ""
+
+
+def test_gar_always_buys_at_the_start_even_with_history(tmp_path, monkeypatch):
+    e, f, routed = _gar_engine(tmp_path, monkeypatch, [(1.0, 1.0)] * 6)        # older chart, flat, no red
+    f.age = 500
+    e._evaluate(f, time.time())
+    assert len(routed) == 1 and "bought at the start" in routed[0]["pro_why"] and routed[0]["gar"]
