@@ -39,8 +39,10 @@ class Store:
         CREATE INDEX IF NOT EXISTS signals_ts ON signals(ts);
         CREATE INDEX IF NOT EXISTS trades_exit ON trades(exit_ts);
         """)
+        self.src_hook = None            # engine: mint -> where the trade came from ("Launch", "Candles (Mixed: New)" …)
         for table, col, kind in (("positions", "lots", "TEXT"), ("trades", "lots", "INTEGER"),
-                                 ("positions", "support", "TEXT")):
+                                 ("positions", "support", "TEXT"), ("positions", "src", "TEXT"),
+                                 ("trades", "src", "TEXT")):
             try:
                 self.db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {kind}")   # ladder lots (added later)
             except sqlite3.OperationalError:
@@ -113,12 +115,17 @@ class Store:
                             tuple(f.get(c) for c in cols))
 
     def open_position(self, p: Dict[str, Any]) -> None:
+        if not p.get("src") and self.src_hook:
+            try:
+                p["src"] = self.src_hook(p["mint"]) or None
+            except Exception:
+                pass
         with self.lock:
             self.db.execute("INSERT OR REPLACE INTO positions(mint, symbol, mode, tokens, entry_sol, entry_ts, "
-                            "entry_signal, costs_sol, lots, support) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                            "entry_signal, costs_sol, lots, support, src) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                             (p["mint"], p.get("symbol"), p["mode"], p["tokens"], p["entry_sol"], p["entry_ts"],
                              p["entry_signal"], p.get("costs_sol", 0.0), json.dumps(p.get("lots") or []),
-                             p.get("support") or None))
+                             p.get("support") or None, p.get("src") or None))
 
     def drop_position(self, mint: str) -> None:
         """Forget a position without booking a trade (support mode on/off: Candles stops tracking it)."""
@@ -142,7 +149,14 @@ class Store:
     def close_position(self, mint: str, trade: Dict[str, Any], keep: Optional[Dict[str, Any]] = None) -> None:
         """Record a round trip and remove the position (or, after a partial sell, store what is left)."""
         cols = ("mint", "symbol", "mode", "entry_ts", "exit_ts", "entry_sol", "exit_sol", "pnl_sol", "pct", "costs_sol",
-                "gross_pnl_sol", "entry_signal", "exit_signal", "why", "paused_exit", "lots")
+                "gross_pnl_sol", "entry_signal", "exit_signal", "why", "paused_exit", "lots", "src")
+        if not trade.get("src"):
+            try:
+                with self.lock:
+                    row = self.db.execute("SELECT src FROM positions WHERE mint=?", (mint,)).fetchone()
+                trade = dict(trade, src=(row[0] if row and row[0] else None))
+            except Exception:
+                pass
         with self.lock:
             self.db.execute("BEGIN")
             try:

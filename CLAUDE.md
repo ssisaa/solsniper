@@ -90,6 +90,10 @@ youngest first, pump mints only, New < 3 min; a coin stays while held, else unti
 `mixed_idle_s` (60 s) with no trade, then the next board's youngest (a handed-over coin is skipped 5 min). Max mints
 slots (pro_hold: one). Paper / LIVE follow Candles' Live switch. Graduated coins are valued by Jupiter.
 
+**Trade source in the Mode column (2026-11-14)**: Candles Open positions / Closed trades show "paper · Launch",
+"LIVE · Candles (Mixed: New)" … from `CandleMomo._src_label` (feed origin / support source), stored by `candle_store`
+(`src` column on positions and trades; `Store.src_hook` fills it at open, close copies it).
+
 **One feed + sell at once on profit (2026-11-14, user's request, repeated)**: `_pick` → `_pick_feeds` then
 `_single_feed()`: for every source / feed, while a trade is open only the held coin(s) are fed; flat, one coin (Coins >1
 no longer adds feeds). pro_hold sells AT ONCE when the whole trade (all lots, after ~2 % fees + network fees) is ≥

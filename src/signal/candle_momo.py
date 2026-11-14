@@ -774,6 +774,25 @@ class CandleMomo:
         self._pick_feeds(rows)
         self._single_feed()
 
+    def _src_label(self, mint: str) -> str:
+        """Where a Candles trade came from, for the Mode column: Launch, Dayscalp, MayhemMode, Callout, OpenCopy,
+        Candles (Mayhem board), Candles (Mixed: New / Movers / Graduated), Candles (pinned)."""
+        pos = self.positions.get(mint) or {}
+        if pos.get("support"):
+            return SUPPORT_NAMES.get(pos["support"], pos["support"])
+        f = self.feeds.get(mint)
+        origin = str(getattr(f, "origin", "") or "")
+        if origin in SUPPORT_NAMES:
+            return SUPPORT_NAMES[origin]
+        if origin.startswith("mixed-"):
+            return f"Candles (Mixed: {origin[6:].title()})"
+        if origin == "auto":
+            return "Candles (Mayhem board)"
+        if origin == "manual":
+            return "Candles (pinned)"
+        src = self.support_source()
+        return SUPPORT_NAMES.get(src, "Candles") if src else "Candles"
+
     def _single_feed(self) -> None:
         """One coin at a time, for every source and feed (user 2026-11-14): while a trade is open only the coin(s)
         held are watched; flat, one coin. The next coin comes once the trade completes."""
@@ -2655,6 +2674,7 @@ class CandleMomo:
         self.trader = trader
         self.loop = asyncio.get_running_loop()
         self.store = Store(DB_PATH, AUDIT_PATH)
+        self.store.src_hook = self._src_label
         self.load_config(force=True)
         self.store.audit("start", digest=self.cfg.digest(), config=self.cfg.snapshot(), errors=self.cfg_errors)
         for p in self.store.positions():
@@ -2733,7 +2753,7 @@ class CandleMomo:
                           "outOfOrder": book.out_of_order if book else 0, "duplicates": book.duplicates if book else 0,
                           "tail": [{"t": c.t, "o": c.open, "c": c.close, "f": c.final} for c in (book.rows[-12:] if book else [])]})
         pos = [dict({k: p.get(k) for k in ("mint", "symbol", "mode", "tokens", "entry_sol", "entry_ts", "value_sol",
-                                           "upnl_sol", "upct", "support", "value_src")}, lots=len(p.get("lots") or []) or 1)
+                                           "upnl_sol", "upct", "support", "value_src", "src")}, lots=len(p.get("lots") or []) or 1)
                for p in self.positions.values()]
         recent = [{k: s.get(k) for k in ("id", "mint", "symbol", "ts", "side", "deltaPct", "candleTs", "provider",
                                          "feedLagMs", "action", "reason")} for s in list(self.recent)[:40]]

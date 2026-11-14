@@ -198,3 +198,23 @@ def test_candle_send_skips_the_separate_simulation():
     calls.clear()
     asyncio.run(Trader._send_keep_fee(t, "b64", fast=True))
     assert calls[0] == "sim"
+
+
+def test_trade_source_label_and_store(tmp_path):
+    from src.signal.candle_store import Store
+    e = CM.CandleMomo()
+    e.store = Store(str(tmp_path / "t.sqlite"), str(tmp_path / "t.jsonl"))
+    e.store.src_hook = e._src_label
+    for origin, want in (("auto", "Candles (Mayhem board)"), ("mixed-movers", "Candles (Mixed: Movers)"),
+                         ("dayscalp", "Dayscalp"), ("manual", "Candles (pinned)")):
+        m = "S" + origin
+        e.feeds[m] = CM.Feed(m, 10)
+        e.feeds[m].origin = origin
+        assert e._src_label(m) == want
+    p = {"mint": "Sauto", "symbol": "S", "mode": "paper", "tokens": 1.0, "entry_sol": 0.005, "entry_ts": 1.0,
+         "entry_signal": "x"}
+    e.store.open_position(p)
+    assert p["src"] == "Candles (Mayhem board)"
+    e.store.close_position("Sauto", {"mint": "Sauto", "symbol": "S", "mode": "paper", "entry_ts": 1, "exit_ts": 2,
+                                     "entry_sol": 0.005, "exit_sol": 0.006, "pnl_sol": 0.001, "pct": 20.0})
+    assert e.store.trades(1)[0]["src"] == "Candles (Mayhem board)"
