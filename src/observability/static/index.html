@@ -694,6 +694,11 @@ button.lite:hover{color:#fff;border-color:#eef3fb}
 .cm-sending{opacity:.55;pointer-events:none}
 #cmChart,#m2Chart{cursor:crosshair}#cmChart.drag,#m2Chart.drag{cursor:grabbing}
 #view-candle .cm-feeds{display:inline-flex;gap:10px;align-items:center;padding:2px 8px;border:1px solid rgba(138,160,184,.3);border-radius:8px}
+/* Header menu: 2 rows, up to 10 buttons each (user 2026-11-14) */
+header .head-bar{height:auto;min-height:56px;padding:6px 16px;flex-wrap:nowrap}
+header nav.nav{display:grid;grid-template-columns:repeat(10,auto);grid-auto-rows:30px;gap:4px 4px;flex:1 1 auto;overflow:visible}
+header nav.nav .navbtn{height:30px;padding:0 10px;font-size:12.5px;justify-content:center}
+header nav.nav .navbtn[hidden]{display:none}
 </style>
 </head>
 <body>
@@ -4450,10 +4455,13 @@ function paintCandle(d){
       <span class="m2-pill ${cls}">${escapeHtml(f.status)}</span> <span class="muted">${escapeHtml(f.using||'—')} · ${escapeHtml(f.origin)} · ${escapeHtml(f.boardState||'')} · age ${f.age??'—'}s · ${f.candles} candles · last ${f.lastAgeS??'—'}s ago</span>
       <div class="cm-tail">${tail||'no candles yet'}${err?' · <span class="w">'+escapeHtml(err)+'</span>':''}</div></div>`;
   }).join(''):'<div class="muted">No coin watched yet.</div>');
-  cmSet('cmPos', (d.positions||[]).length?'<table><tr><th>Coin</th><th>Mode</th><th>Lots</th><th>In SOL</th><th>Value</th><th>uPnL</th><th>Held</th><th title="Max hold (Candles settings): the trade is sold when this reaches 0">Max hold</th></tr>'+(d.positions||[]).map(p=>
+  // paused coins are watched on the Paused Coins page, not here
+  const cmOpen=(d.positions||[]).filter(p=>!p.paused_at), cmPausedN=(d.positions||[]).length-cmOpen.length;
+  cmSet('cmPos', (cmOpen.length?'<table><tr><th>Coin</th><th>Mode</th><th>Lots</th><th>In SOL</th><th>Value</th><th>uPnL</th><th>Held</th><th title="Max hold (Candles settings): the trade is sold when this reaches 0">Max hold</th></tr>'+cmOpen.map(p=>
     `<tr><td>${escapeHtml(p.symbol||p.mint.slice(0,6))}${p.support?' <span class="muted">· '+escapeHtml(p.support)+'</span>':''}</td><td>${p.mode==='live'?'<b class="r">LIVE</b>':'paper'}${p.src?' <span class="muted">· '+escapeHtml(p.src)+'</span>':''}</td><td>${p.lots||1}</td><td>${(p.entry_sol||0).toFixed(4)}</td>
      <td title="${escapeHtml(p.value_src?'valued from '+p.value_src:'no price yet')}">${p.value_sol==null?'<span class="muted">pricing…</span>':p.value_sol.toFixed(5)}</td>
-     <td class="${p.upct==null?'':m2Cls(p.upct)}">${p.upct==null?'—':(p.upnl_sol>=0?'+':'')+Number(p.upnl_sol||0).toFixed(5)+' · '+m2Pct(p.upct)}</td><td>${cmHeld((Date.now()/1000)-(p.entry_ts||0))}</td><td>${cmMaxHold(p, (d.config||{}).max_hold_s)}</td></tr>`).join('')+'</table>':'<div class="muted">Flat.</div>');
+     <td class="${p.upct==null?'':m2Cls(p.upct)}">${p.upct==null?'—':(p.upnl_sol>=0?'+':'')+Number(p.upnl_sol||0).toFixed(5)+' · '+m2Pct(p.upct)}</td><td>${cmHeld((Date.now()/1000)-(p.entry_ts||0))}</td><td>${cmMaxHold(p, (d.config||{}).max_hold_s)}</td></tr>`).join('')+'</table>':'<div class="muted">Flat.</div>')
+    +(cmPausedN?`<div class="muted" style="margin-top:6px">${cmPausedN} paused coin${cmPausedN>1?'s':''} held — <a href="#paused" onclick="showView('paused');return false;">Paused Coins page</a></div>`:''));
   const sigs=d.signals||[];
   cmSet('cmSigN', sigs.length?'· newest first':'');
   cmSet('cmSig', sigs.length?sigs.map(s=>`<li><span class="muted">${m2Clock((s.ts||0)/1000)}</span><span>${escapeHtml(s.symbol||'')}</span>
