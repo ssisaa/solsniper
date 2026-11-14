@@ -883,7 +883,12 @@ class CandleMomo:
             keep = [r for r in rows if ok(r) and r["m"] in self.feeds and self.feeds[r["m"]].origin == "auto"
                     and (cfg.reuse_coin or float(r.get("age") or 0) <= cfg.max_age_s)]
             fresh = [r for r in young if r["m"] not in {k["m"] for k in keep}]
-            for r in (keep + fresh)[:cfg.max_mints]:
+            picks = (keep + fresh)[:cfg.max_mints]
+            if cfg.rule == "pro_hold":
+                # one coin at a time (user 2026-11-14): while a trade is open only that coin is fed; the next
+                # board coin comes once it closes
+                picks = [] if self.positions else picks[:1]
+            for r in picks:
                 want.setdefault(r["m"], {"origin": "auto"})
         for mint in list(self.positions):           # never drop a coin we hold
             want.setdefault(mint, {"origin": self.feeds[mint].origin if mint in self.feeds else "held"})

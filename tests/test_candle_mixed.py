@@ -112,3 +112,15 @@ def test_mayhem_board_feed_is_not_skipped():
     assert e._entry_filters("MB")[0] == ""            # Mayhem board: its Mayhem coins are traded
     e.cfg.auto_follow = "mixed"
     assert e._entry_filters("MB")[0] == "MAYHEM_COIN"
+
+
+def test_mayhem_board_pro_hold_feeds_one_coin_at_a_time():
+    e = CM.CandleMomo()
+    e.cfg.auto_follow, e.cfg.rule, e.cfg.max_mints, e.cfg.reuse_coin = "mayhem_board", "pro_hold", 3, False
+    rows = [{"m": f"M{i}pump", "t": f"M{i}", "ms": "active", "age": 10 + i} for i in range(3)]
+    e._pick(rows)
+    assert len(e.feeds) == 1
+    held = next(iter(e.feeds))
+    e.positions[held] = {"mint": held}
+    e._pick(rows[1:])
+    assert set(e.feeds) == {held}                     # trade open: no new coin fed
