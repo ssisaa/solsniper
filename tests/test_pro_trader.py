@@ -735,3 +735,25 @@ def test_gar_always_buys_at_the_start_even_with_history(tmp_path, monkeypatch):
     f.age = 500
     e._evaluate(f, time.time())
     assert len(routed) == 1 and "bought at the start" in routed[0]["pro_why"] and routed[0]["gar"]
+
+
+def test_pro_hold_adds_stop_at_max_lots(tmp_path, monkeypatch):
+    from src.signal import candle_momo as CM
+    e = CM.CandleMomo()
+    e.cfg.rule, e.cfg.max_ladder_buys, e.cfg.ladder_max_total_sol, e.cfg.buy_size_sol = "pro_hold", 2, 1.0, 0.005
+    e.feeds["H"] = CM.Feed("H", 10)
+    e.feeds["H"].status = "OK"
+    e.positions["H"] = {"mint": "H", "mode": "paper", "entry_sol": 0.01, "lots": [{"n": 1}, {"n": 2}]}
+    sig = {"id": "a1", "mint": "H", "side": "BUY", "pro": True, "_counted": True, "deltaPct": 0.0}
+    assert e._route(sig) == "LADDER_MAX"
+    e.cfg.max_ladder_buys = 5
+    assert e._route(dict(sig, id="a2")) != "LADDER_MAX"
+
+
+def test_pro_hold_hint_names_the_limit():
+    from src.signal import candle_momo as CM
+    e = CM.CandleMomo()
+    e.cfg.rule, e.cfg.max_ladder_buys, e.cfg.ladder_max_total_sol, e.cfg.buy_size_sol = "pro_hold", 5, 0.015, 0.005
+    e.positions["X"] = {"mint": "X", "mode": "paper", "entry_sol": 0.005, "lots": [{"n": 1}], "upct": -3.0}
+    h = e._hint("X")
+    assert "allows 3" in h["entry"] and "raise Total cap to 0.025" in h["entry"]

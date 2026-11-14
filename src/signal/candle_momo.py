@@ -1283,9 +1283,12 @@ class CandleMomo:
                 and float(sig.get("deltaPct") or 0) < -cfg.max_entry_red_pct):
             return self.skip(sig, "CRASH_CANDLE")          # opening on a -15%+ second buys the crash, not a dip
         if side == "BUY" and held is not None and sig.get("pro") and cfg.rule == "pro_hold":
-            # pro_hold: a new BUY signal buys again (Max position), no red-candle ladder; Total cap still holds
+            # pro_hold: a new BUY signal buys again (Max position), no red-candle ladder; Max lots and Total cap
+            # both limit it (user 2026-11-14: Max lots 5 was ignored — Total cap 0.015 / 0.005 allowed 3)
             from src.signal.candle_core import _fit_cap
             lots = len(held.get("lots") or []) or 1
+            if lots >= max(1, int(cfg.max_ladder_buys)):
+                return self.skip(sig, "LADDER_MAX")
             what, size = _fit_cap(float(held.get("entry_sol") or 0), self._lot_base(held.get("mode") or cfg.mode), cfg)
             if what != "add":
                 return self.skip(sig, "LADDER_CAP")
@@ -1956,8 +1959,18 @@ class CandleMomo:
                 up = held.get("upct")
                 n = len(held.get("lots") or []) or 1
                 room = max(0.0, cfg.ladder_max_total_sol - float(held.get("entry_sol") or 0))
-                out["entry"] = (f"pro_hold: buy {n + 1} on the next Botpredict BUY (◆ BP) (no red-candle lots; {room:.4f} SOL left of Total cap "
-                                f"{cfg.ladder_max_total_sol:g})" if room >= 0.001 else f"Total cap {cfg.ladder_max_total_sol:g} SOL reached")
+                lot = self._lot_base(held.get("mode") or cfg.mode)
+                cap_lots = n + int((room + 1e-9) // lot) if lot > 0 else n
+                limit = min(int(cfg.max_ladder_buys), cap_lots)
+                if n >= int(cfg.max_ladder_buys):
+                    out["entry"] = f"Max lots {cfg.max_ladder_buys} reached ({n} lots)"
+                elif room < 0.001:
+                    out["entry"] = f"Total cap {cfg.ladder_max_total_sol:g} SOL reached ({n} lots)"
+                else:
+                    out["entry"] = (f"pro_hold: buy {n + 1} on the next signal — lots {n}/{limit} "
+                                    f"(Max lots {cfg.max_ladder_buys}, Total cap {cfg.ladder_max_total_sol:g} SOL allows {cap_lots}"
+                                    + (f" — raise Total cap to {cfg.max_ladder_buys * lot:g} for all {cfg.max_ladder_buys}"
+                                       if cap_lots < cfg.max_ladder_buys else "") + ")")
                 hold_txt = f"in a loss it holds up to Max hold {cfg.max_hold_s:.0f}s" if cfg.max_hold_s else "in a loss it holds (Max hold is off)"
                 out["exit"] = (f"{'now ' + format(up, '+.1f') + '% — ' if up is not None else ''}SELL signal on the first red "
                                f"candle while the trade is ≥ {tgt:g}% after fees ({tgt_from}) — rides the green run; "
