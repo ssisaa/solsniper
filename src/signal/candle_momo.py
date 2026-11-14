@@ -1027,7 +1027,10 @@ class CandleMomo:
                 return False
             why = f"green after red — trade {float(up):+.1f}%: buys again to lower the average (sells on profit)"
         f.gar_t = c.t
-        self._pro_emit(f, live_rows, "BUY", {"call": "BUY", "px": c.close, "why": why}, seen)
+        # "every green after red" means every one: the SOL-outflow / Min reserve / far-below-high / cooldown checks
+        # refused 57 of 77 (2026-11-14) — skipped here; Total cap still limits the adds, Max hold still exits
+        self._pro_emit(f, live_rows, "BUY", {"call": "BUY", "px": c.close, "why": why}, seen,
+                       first=True, now_buy=True, gar=True)
         return True
 
     def _pro_hold_take(self, held: Dict[str, Any], cur) -> Optional[tuple]:
@@ -1048,7 +1051,7 @@ class CandleMomo:
         rows = f.books[f.using].finals()
         cfg = self.cfg
         live_rows = f.books[f.using].rows           # finals + the candle still forming this second
-        if (cfg.rule == "pro_hold" and cfg.pro_hold_first and cfg.pro_hold_first_at != "gar" and live_rows
+        if (cfg.rule == "pro_hold" and cfg.pro_hold_first and live_rows
                 and not getattr(f, "first_done", False)
                 and f.mint not in self.positions
                 and not (self._avoid_mayhem_for(f) and self.mayhem_of.get(f.mint) is None and not f.board_state)):
@@ -1086,6 +1089,16 @@ class CandleMomo:
                     return
             elif age_now is None or age_now > PRO_FIRST_MAX_AGE_S:
                 f.first_done = True
+            elif cfg.pro_hold_first_at == "gar":
+                # "buy green after red" starts with a buy at the start (user 2026-11-14), then _gar buys each green
+                # after a red. A coin first seen with more history than the start gets no start buy.
+                f.first_done = True
+                if len(live_rows) <= PRO_FIRST_START_CANDLES:
+                    self._pro_emit(f, live_rows, "BUY", {"call": "BUY", "px": live_rows[-1].close,
+                                                         "why": f"chart just started — a new coin (age {age_now:.0f}s); "
+                                                                "then buys every green after a red"},
+                                   seen, first=True)
+                    return
             else:
                 # The turn: the red ends and the price starts up. Checked on the candle still FORMING (every poll,
                 # 0.5s): it opens at the last close, so trading above its open = the first green has begun —
@@ -1174,12 +1187,12 @@ class CandleMomo:
         self._pro_emit(f, rows, side, a, seen)
 
     def _pro_emit(self, f: Feed, rows: List[Candle], side: str, a: Dict[str, Any], seen: float,
-                  first: bool = False, now_buy: bool = False) -> None:
+                  first: bool = False, now_buy: bool = False, gar: bool = False) -> None:
         cur = rows[-1]
         lag_ms = (seen - (cur.t + 1000) / 1000.0) * 1000.0
         sig = {"id": signal_id(f.mint, cur.t, "pro"), "mint": f.mint, "ts": round(seen * 1000),
                "side": side, "open": cur.open, "prevClose": rows[-2].close if len(rows) >= 2 else cur.open,
-               "close": cur.close, "first": first, "now_buy": now_buy,
+               "close": cur.close, "first": first, "now_buy": now_buy, "gar": gar,
                "ref": cur.open, "deltaPct": round((cur.close / cur.open - 1) * 100, 4) if cur.open else 0.0,
                "candleTs": cur.t, "rule": "pro", "provider": f.using, "feedLagMs": round(lag_ms),
                "symbol": f.symbol, "seen": seen, "pro": True, "pro_why": str(a.get("why") or ""),
@@ -1334,7 +1347,8 @@ class CandleMomo:
             if sum(1 for t in self.sig_times if time.time() - t <= 60) >= cfg.max_signals_per_min:
                 return self.skip(sig, "RATE_LIMIT")
             # the cooldown stops re-entry churn after a round trip; ladder adds come 1s apart by design
-            if not sig.get("add") and time.time() - self.last_trade_at.get(mint, 0) < cfg.cooldown_s:
+            if (not sig.get("add") and not sig.get("gar")
+                    and time.time() - self.last_trade_at.get(mint, 0) < cfg.cooldown_s):
                 return self.skip(sig, "COOLDOWN")
         if mint in self.busy:
             old = self.pending.get(mint)
