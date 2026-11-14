@@ -111,3 +111,21 @@ def test_offer_expires_and_newest_first(monkeypatch):
     e.offers[old]["seen"] = time.time() - 999
     e._pick([])
     assert not e.offers and not e.feeds
+
+
+def test_callout_rows_feed_candles_directly(monkeypatch):
+    import src.observability.dashboard as D
+    e = _fo(monkeypatch, "callout")
+    now = time.time()
+    monkeypatch.setattr(D, "_callout_rows", lambda: ([
+        {"coinMint": "OLDxpump", "symbol": "OLD", "call": "OPEN", "openedAt": now - 100},
+        {"coinMint": "NEWxpump", "symbol": "NEW", "call": "OPEN", "openedAt": now - 5},
+        {"coinMint": "SOLDxpump", "symbol": "S", "call": "CLOSED", "openedAt": now}], ""))
+    e._pick([])
+    assert set(e.feeds) == {"NEWxpump"} or set(e.feeds) == {"OLDxpump"}
+    assert "NEWxpump" in e.offers and "SOLDxpump" not in e.offers
+    e.cfg.support_enabled = False
+    e2 = _fo(monkeypatch, "callout")
+    e2.cfg.support_enabled = False
+    e2._pick([])
+    assert not e2.offers                              # AutoTrade-Candles off: CallOuts' own rules, nothing offered

@@ -996,6 +996,21 @@ class CandleMomo:
                             self._grab.setdefault(pk["mint"], {"at": time.time(), "symbol": pk.get("symbol") or ""})
                 except Exception:
                     pass
+            if src == "callout" and self.feeds_only("callout"):
+                # AutoTrade-Candles on CallOuts (user 2026-11-15): no waiting for CallOuts' own buy rules — the newest
+                # OPEN pump coins on the CallOuts page are offered to Candles straight away
+                try:
+                    from src.observability.dashboard import _callout_rows
+                    co_rows, _err = _callout_rows()
+                    fresh = sorted((r for r in co_rows if str(r.get("call") or "").upper() == "OPEN"
+                                    and str(r.get("coinMint") or "").endswith("pump")),
+                                   key=lambda r: -float(r.get("openedAt") or 0))[:3]
+                    for r in fresh:
+                        m = str(r["coinMint"])
+                        if m not in self.traded and m not in self.unusable:
+                            self.offer("callout", m, str(r.get("symbol") or ""))
+                except Exception:
+                    log.debug("callout rows for Candles failed", exc_info=True)
             if self.feeds_only(src):
                 now = time.time()
                 for m, o in list(self.offers.items()):

@@ -133,7 +133,7 @@ at once. Never switches while a Candles trade is open / in flight. Off: the curr
 MayhemMode (`FEED_ONLY_SOURCES`, `feeds_only()`) do not buy, pin or hold: OpenHolds' auto rows (callers' new opens,
 Mayhem_Mode opens) and CallOuts' auto buy call `CandleMomo.offer(src, mint)` instead (main.py); Candles feeds the newest
 offers (Max mints, pro_hold one; an offer drops after `mixed_idle_s` without a trade or once its trade closes) and buys lot 1
-by its own rule (no SUPPORT_NO_ENTRY), Live or Paper as the Candles switch. Manual Buy clicks still buy. Off: sources
+by its own rule (no SUPPORT_NO_ENTRY), Live or Paper as the Candles switch. Manual Buy clicks still buy. CallOuts also feeds directly (2026-11-15): with AutoTrade-Candles on, the 3 newest OPEN pump rows of the CallOuts page (`_callout_rows`) are offered every pick, without waiting for CallOuts' own buy trigger. Off: sources
 trade by their own rules. Dayscalp / Launch keep buying lot 1 themselves (Live, non-pro_hold).
 
 **AutoTrade-Candles in Paper (2026-11-14, user's request)**: the Candles Live/Paper button works with AutoTrade-Candles
