@@ -600,3 +600,30 @@ def test_pro_hold_start_with_history_waits_for_green(tmp_path, monkeypatch):
                          volume=1, final=True) for k in range(5)])                                # already moving down
     e._evaluate(f, time.time())
     assert not routed                                  # not "just started": waits for a green start
+
+
+def test_pro_hold_first_buy_at_once_buys_any_coin_it_is_given(tmp_path, monkeypatch):
+    from src.signal import candle_core as C
+    e, f, routed = _ph_first_engine(tmp_path, monkeypatch, 900)        # old coin, long history
+    e.cfg.pro_hold_first_at = "now"
+    book = f.books["pump_rest"]
+    t = book.rows[-1].t
+    book.merge([C.Candle(t=t + k * 1000, open=1.0, high=1.0, low=0.9, close=0.95, volume=1, final=True)
+                for k in range(1, 8)])
+    e._evaluate(f, time.time())
+    assert len(routed) == 1 and routed[0]["first"] and routed[0]["now_buy"] and "0.00%" in routed[0]["pro_why"]
+    e._evaluate(f, time.time())
+    assert len(routed) == 1                                             # once per coin
+
+
+def test_at_once_buy_is_not_held_by_far_below_peak():
+    from src.signal import candle_momo as CM
+    from src.signal import candle_core as C
+    e = CM.CandleMomo()
+    e.cfg.inflow_window_s, e.cfg.max_below_peak_pct, e.cfg.avoid_mayhem = 0, 50, False
+    f = CM.Feed("P", 10)
+    f.using = "pump_rest"
+    f.books["pump_rest"].merge([C.Candle(t=1000, open=10, high=10, low=1, close=1, volume=1, final=True)])
+    e.feeds["P"] = f
+    assert e._entry_filters("P")[0] == "FAR_BELOW_PEAK"
+    assert e._entry_filters("P", first=True, now_buy=True)[0] == ""

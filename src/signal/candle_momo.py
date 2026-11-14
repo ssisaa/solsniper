@@ -1034,6 +1034,17 @@ class CandleMomo:
             if not hasattr(f, "first_t0"):
                 f.first_t0, f.first_age0 = now, f.age
             age_now = None if f.first_age0 is None else float(f.first_age0) + (now - f.first_t0)
+            if cfg.pro_hold_first_at == "now":
+                # "at once (0.00%)" (user 2026-11-14): every coin Candles is given is bought the first time its chart
+                # is read — before any move, whatever its age or candle count. Only the Mayhem check, Kill / Pause
+                # and the live gates can still stop it.
+                c = live_rows[-1]
+                f.first_done = True
+                self._pro_emit(f, live_rows, "BUY", {"call": "BUY", "px": c.close,
+                                                     "why": "bought at once on arrival (0.00%)"
+                                                            + (f" — coin age {age_now:.0f}s" if age_now is not None else "")},
+                               seen, first=True, now_buy=True)
+                return
             if age_now is None or age_now > PRO_FIRST_MAX_AGE_S:
                 f.first_done = True
             else:
@@ -1107,12 +1118,12 @@ class CandleMomo:
         self._pro_emit(f, rows, side, a, seen)
 
     def _pro_emit(self, f: Feed, rows: List[Candle], side: str, a: Dict[str, Any], seen: float,
-                  first: bool = False) -> None:
+                  first: bool = False, now_buy: bool = False) -> None:
         cur = rows[-1]
         lag_ms = (seen - (cur.t + 1000) / 1000.0) * 1000.0
         sig = {"id": signal_id(f.mint, cur.t, "pro"), "mint": f.mint, "ts": round(seen * 1000),
                "side": side, "open": cur.open, "prevClose": rows[-2].close if len(rows) >= 2 else cur.open,
-               "close": cur.close, "first": first,
+               "close": cur.close, "first": first, "now_buy": now_buy,
                "ref": cur.open, "deltaPct": round((cur.close / cur.open - 1) * 100, 4) if cur.open else 0.0,
                "candleTs": cur.t, "rule": "pro", "provider": f.using, "feedLagMs": round(lag_ms),
                "symbol": f.symbol, "seen": seen, "pro": True, "pro_why": str(a.get("why") or ""),
@@ -1300,7 +1311,7 @@ class CandleMomo:
         try:
             held = self.positions.get(mint) or {}
             if sig["side"] == "BUY" and not sig.get("add") and not sig.get("manual") and not sig.get("mirror"):
-                why, detail = self._entry_filters(mint, first=bool(sig.get("first")))
+                why, detail = self._entry_filters(mint, first=bool(sig.get("first")), now_buy=bool(sig.get("now_buy")))
                 if why:
                     self.skip(sig, why)
                     sig["reason"] = f"{why} ({detail})"
@@ -2411,7 +2422,7 @@ class CandleMomo:
         except RuntimeError:
             asyncio.run_coroutine_threadsafe(go(), self.loop)
 
-    def _entry_filters(self, mint: str, first: bool = False) -> Tuple[str, str]:
+    def _entry_filters(self, mint: str, first: bool = False, now_buy: bool = False) -> Tuple[str, str]:
         """New trades only (not ladder lots, not manual): money still flowing in, not far below the peak.
         -> (skip reason, detail) or ("", "")."""
         cfg = self.cfg
@@ -2440,7 +2451,7 @@ class CandleMomo:
             cur = hist[-1][1]
             if cur < old[-1]:
                 return "SOL_OUTFLOW", f"curve SOL {cur:.3f} < {old[-1]:.3f} {cfg.inflow_window_s:.0f}s ago"
-        if cfg.max_below_peak_pct > 0:
+        if cfg.max_below_peak_pct > 0 and not now_buy:
             book = f.books.get(f.using or cfg.provider)
             rows = book.rows if book else []
             if rows:
