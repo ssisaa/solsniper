@@ -272,3 +272,14 @@ def test_paused_coin_gone_to_dust_is_left(monkeypatch):
         await asyncio.sleep(0)
     asyncio.run(go())
     assert exits and "dust" in exits[0] and "paused_at" not in pos
+
+
+def test_a_buy_in_flight_counts_as_the_open_trade():
+    e = CM.CandleMomo()
+    e.cfg.auto_follow, e.cfg.rule, e.cfg.max_mints, e.cfg.reuse_coin = "mayhem_board", "pro_hold", 1, False
+    rows = [{"m": f"F{i}pump", "t": f"F{i}", "ms": "active", "age": 10 + i} for i in range(3)]
+    e._pick(rows)
+    first = next(iter(e.feeds))
+    e.busy[first] = "sig-1"                          # its buy is being sent: not booked yet
+    e._pick(rows[1:])
+    assert set(e.feeds) == {first}                   # no second coin while the first buy is in flight

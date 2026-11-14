@@ -5109,8 +5109,13 @@ function cmDrawChart(){
 }
 function cmMaxHold(p, maxS){
   maxS=Number(maxS)||0;
+  if(p.paused_at){
+    // pump paused it: held, not sold — Max hold waits; watched every second on the Paused Coins page
+    const ps=Math.max(0,(Date.now()/1000)-p.paused_at);
+    return `<a href="#paused" class="w" title="pump paused this coin: held, not sold. Max hold restarts when it moves again." onclick="showView('paused');return false;">paused · watching ${cmHeld(ps)}</a>`;
+  }
   if(maxS<=0) return '<span class="muted">off</span>';
-  const held=Math.max(0,(Date.now()/1000)-(p.entry_ts||0)), left=maxS-held, frac=Math.max(0,Math.min(1,held/maxS));
+  const held=Math.max(0,(Date.now()/1000)-(p.resumed_at||p.entry_ts||0)), left=maxS-held, frac=Math.max(0,Math.min(1,held/maxS));
   const col=left<=0?'#ff5d73':(left<=30?'#ffcc66':'#3ee0a0');
   const txt=left<=0?'selling':cmHeld(left)+' left';
   return `<span class="cm-mh" title="Max hold ${maxS.toFixed(0)}s — ${escapeHtml(txt)}"><b style="color:${col}">${escapeHtml(txt)}</b><i><s style="width:${(frac*100).toFixed(1)}%;background:${col}"></s></i></span>`;

@@ -405,7 +405,7 @@ class CandleMomo:
         now = time.time()
         for m in want:
             if (m in self.positions or m in self.busy or m in self.unusable or m in self._mirrored
-                    or len(self.active_positions()) >= max(1, int(self.cfg.max_mints or 1))):
+                    or len(self.trading()) >= max(1, int(self.cfg.max_mints or 1))):
                 continue
             self._mirrored[m] = now
             f = self.feeds.get(m)
@@ -568,7 +568,7 @@ class CandleMomo:
                     if r.get("support") == "mayhem" and mayhem_state_of(m) != "paused"]) + len(grab)
         if self.pro_hold_owns_entries("mayhem"):
             # pro_hold (or Paper) buys itself: the youngest open is only watched, and only while flat
-            if held or self.active_positions():
+            if held or self.trading():
                 return []
             young = [str(r.get("coinMint") or "") for r in mayhem_young_opens(MAYHEM_MAX_OPEN_AGE_S)]
             young = [m for m in young if m and m not in self.traded and m not in self.unusable]
@@ -754,7 +754,7 @@ class CandleMomo:
             idle = now - since >= cfg.mixed_idle_s and m not in self.busy
             if m in self.positions or (not done and not idle and (m in cmints or now - since < 10)):
                 want[m] = {"origin": f.origin}
-        if cfg.rule == "pro_hold" and self.active_positions():
+        if cfg.rule == "pro_hold" and self.trading():
             return want                       # one coin at a time: the open trade completes first
         used = set(want) | set(self.positions)
         while len(want) < slots:
@@ -893,6 +893,11 @@ class CandleMomo:
                  "checked_s": round(now - float(p.get("pause_checked") or now), 1)}
                 for m, p in self.positions.items() if p.get("paused_at")]
 
+    def trading(self) -> set:
+        """Coins with an active trade or one being sent right now (a buy is booked only when its fill lands,
+        up to ~1.6s later — 2026-11-14 a second coin was bought in that gap). One trade at a time uses this."""
+        return set(self.active_positions()) | set(self.busy) | set(self.pending)
+
     def active_positions(self) -> Dict[str, Dict[str, Any]]:
         """Open trades that are not on the Paused Coins watch: a paused coin never blocks the next coin."""
         return {m: p for m, p in self.positions.items() if not p.get("paused_at")}
@@ -907,7 +912,7 @@ class CandleMomo:
     def _single_feed(self) -> None:
         """One coin at a time, for every source and feed (user 2026-11-14): while a trade is open only the coin(s)
         held are watched; flat, one coin. The next coin comes once the trade completes."""
-        active = self.active_positions()
+        active = self.trading()
         if active:
             keep = [m for m in self.feeds if m in active]
         else:
@@ -926,7 +931,7 @@ class CandleMomo:
             self._support_sync(src)
             want = {p.mint: "support" for p in self._support_held(src)}
             ages: Dict[str, float] = {}           # coin age where the source knows it (first-candle buy)
-            for m in self.positions:
+            for m in list(self.positions) + [m for m in self.busy if m in self.feeds]:
                 want.setdefault(m, "held")
             if src == "mayhem":
                 for m in self._mayhem_grab():
@@ -946,7 +951,7 @@ class CandleMomo:
                             self._grab.pop(gm, None)
                     owns = self.pro_hold_owns_entries("dayscalp")
                     picks = list(_pks) if owns else [_pk]
-                    if owns and self.active_positions():
+                    if owns and self.trading():
                         picks = []        # one coin at a time: the open trade completes before the next coin is fed
                     for pk in picks:
                         if pk.get("mint") and time.time() - float(pk.get("ts") or 0) < 20:
@@ -1035,11 +1040,11 @@ class CandleMomo:
             if cfg.rule == "pro_hold":
                 # one coin at a time (user 2026-11-14): while a trade is open only that coin is fed; the next
                 # board coin comes once it closes
-                picks = [] if self.active_positions() else picks[:1]
+                picks = [] if self.trading() else picks[:1]
             for r in picks:
                 want.setdefault(r["m"], {"origin": "auto"})
-        for mint in list(self.positions):           # never drop a coin we hold
-            want.setdefault(mint, {"origin": self.feeds[mint].origin if mint in self.feeds else "held"})
+        for mint in list(self.positions) + [m for m in self.busy if m in self.feeds]:   # never drop a coin we hold
+            want.setdefault(mint, {"origin": self.feeds[mint].origin if mint in self.feeds else "held"})   # or are buying
         for mint, info in want.items():
             if mint not in self.feeds:
                 f = Feed(mint, cfg.count)
@@ -2882,7 +2887,8 @@ class CandleMomo:
                           "outOfOrder": book.out_of_order if book else 0, "duplicates": book.duplicates if book else 0,
                           "tail": [{"t": c.t, "o": c.open, "c": c.close, "f": c.final} for c in (book.rows[-12:] if book else [])]})
         pos = [dict({k: p.get(k) for k in ("mint", "symbol", "mode", "tokens", "entry_sol", "entry_ts", "value_sol",
-                                           "upnl_sol", "upct", "support", "value_src", "src")}, lots=len(p.get("lots") or []) or 1)
+                                           "upnl_sol", "upct", "support", "value_src", "src", "paused_at", "resumed_at",
+                                           "pause_state")}, lots=len(p.get("lots") or []) or 1)
                for p in self.positions.values()]
         recent = [{k: s.get(k) for k in ("id", "mint", "symbol", "ts", "side", "deltaPct", "candleTs", "provider",
                                          "feedLagMs", "action", "reason")} for s in list(self.recent)[:40]]
