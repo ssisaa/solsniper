@@ -348,3 +348,16 @@ def test_paused_state_survives_a_restart(tmp_path):
     e._pause_resume("RZ", pos)
     restored = {p["mint"]: p for p in Store(str(tmp_path / "r.sqlite"), str(tmp_path / "r.jsonl")).positions()}
     assert not restored["RZ"]["paused_at"]
+
+
+def test_pinned_pump_coin_takes_the_feed_slot_when_flat():
+    e = CM.CandleMomo()
+    e.cfg.auto_follow, e.cfg.rule = "mayhem_board", "pro_hold"
+    e.cfg.mints = ["PINNEDxpump"]
+    rows = [{"m": "BOARDxpump", "t": "B", "ms": "active", "age": 5}]
+    e._pick(rows)
+    assert set(e.feeds) == {"PINNEDxpump"}
+    e.positions["BOARDxpump"] = {"mint": "BOARDxpump"}
+    e.feeds["BOARDxpump"] = CM.Feed("BOARDxpump", 10)
+    e._pick(rows)
+    assert set(e.feeds) == {"BOARDxpump"}            # a trade is open: the pinned coin waits

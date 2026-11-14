@@ -948,8 +948,11 @@ class CandleMomo:
         if active:
             keep = [m for m in self.feeds if m in active]
         else:
-            # paused coins are watched on the Paused Coins page, not fed: the next coin can come
-            keep = [m for m in self.feeds if m not in self.positions][:1]
+            # paused coins are watched on the Paused Coins page, not fed: the next coin can come. A pinned coin
+            # (Pinned mints) takes the slot first.
+            free = [m for m in self.feeds if m not in self.positions]
+            pinned = [m for m in free if m in (self.cfg.mints or [])]
+            keep = (pinned or free)[:1]
         for m in list(self.feeds):
             if m not in keep:
                 self.feeds.pop(m, None)
