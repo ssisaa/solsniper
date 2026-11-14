@@ -48,6 +48,7 @@ FEED_ONLY_SOURCES = ("opencopy", "callout", "mayhem")
 SEQ_STEPS = (("launch", "Launch"), ("dayscalp", "Dayscalp"), ("callout", "CallOuts"), ("opencopy", "OpenCopy"),
              ("mayhem", "MayhemMode"), ("board:mayhem_board", "Candles · Mayhem board"), ("board:mixed", "Candles · Mixed"))
 SEQ_STEP_S = 60.0              # Source Sequence: a step with no trade moves on after this   # AutoTrade-Candles: these sources only offer tokens
+FLAT_PCT = 0.05                # "no candles yet": the only reading moved less than this (shows 0.00%)
 PRO_FIRST_START_CANDLES = 2    # first-buy "start": the chart counts as just started up to this many candles
 PRO_FIRST_MAX_AGE_S = 60.0     # pro_hold first-candle buy: only coins this young (a new coin's first candle)
 SKIP_REASONS = ("KILLED", "NO_POSITION", "ALREADY_LONG", "ENTRIES_PAUSED", "FEED_DEGRADED", "STALE_FEED",
@@ -1045,7 +1046,21 @@ class CandleMomo:
                                                             + (f" — coin age {age_now:.0f}s" if age_now is not None else "")},
                                seen, first=True, now_buy=True)
                 return
-            if age_now is None or age_now > PRO_FIRST_MAX_AGE_S:
+            if cfg.pro_hold_first_at == "flat":
+                # "no candles yet (0.00%)" (user 2026-11-14): the chart has only its price line — one reading, no
+                # candle body, 0.00%. Bought right then. While the first candle is still forming and has moved, it
+                # waits for a flat reading; once a second candle exists the moment is gone (no first buy).
+                c = live_rows[-1]
+                if len(live_rows) > 1:
+                    f.first_done = True                 # candles already showing: the moment has passed
+                elif (c.open > 0 and abs(c.close / c.open - 1) * 100 < FLAT_PCT
+                      and c.high <= c.open * (1 + FLAT_PCT / 100) and c.low >= c.open * (1 - FLAT_PCT / 100)):
+                    f.first_done = True
+                    self._pro_emit(f, live_rows, "BUY", {"call": "BUY", "px": c.close,
+                                                         "why": "no candles yet — 0.00%, bought on the price line"},
+                                   seen, first=True, now_buy=True)
+                    return
+            elif age_now is None or age_now > PRO_FIRST_MAX_AGE_S:
                 f.first_done = True
             else:
                 # The turn: the red ends and the price starts up. Checked on the candle still FORMING (every poll,

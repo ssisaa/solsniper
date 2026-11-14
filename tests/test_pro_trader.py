@@ -627,3 +627,33 @@ def test_at_once_buy_is_not_held_by_far_below_peak():
     e.feeds["P"] = f
     assert e._entry_filters("P")[0] == "FAR_BELOW_PEAK"
     assert e._entry_filters("P", first=True, now_buy=True)[0] == ""
+
+
+def _flat_engine(tmp_path, monkeypatch, candles):
+    from src.signal import candle_core as C
+    e, f, routed = _ph_first_engine(tmp_path, monkeypatch, 3)
+    e.cfg.pro_hold_first_at = "flat"
+    book = f.books["pump_rest"]
+    t = book.rows[-1].t
+    book.rows.clear()
+    book.merge([C.Candle(t=t + k * 1000, open=o, high=max(o, c), low=min(o, c), close=c, volume=1, final=(k < len(candles) - 1))
+                for k, (o, c) in enumerate(candles)])
+    return e, f, routed
+
+
+def test_flat_buys_on_the_price_line_with_no_candles(tmp_path, monkeypatch):
+    e, f, routed = _flat_engine(tmp_path, monkeypatch, [(1.0, 1.0)])
+    e._evaluate(f, time.time())
+    assert routed and routed[0]["first"] and "no candles yet" in routed[0]["pro_why"]
+
+
+def test_flat_waits_while_the_only_candle_has_moved(tmp_path, monkeypatch):
+    e, f, routed = _flat_engine(tmp_path, monkeypatch, [(1.0, 1.05)])
+    e._evaluate(f, time.time())
+    assert not routed and not getattr(f, "first_done", False)
+
+
+def test_flat_skips_a_chart_that_already_has_candles(tmp_path, monkeypatch):
+    e, f, routed = _flat_engine(tmp_path, monkeypatch, [(1.0, 1.0), (1.0, 1.0)])
+    e._evaluate(f, time.time())
+    assert not [r for r in routed if r.get("first")] and f.first_done
