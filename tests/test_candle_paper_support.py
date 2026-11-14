@@ -137,7 +137,7 @@ def test_opencopy_new_opens_feed_candles_several_at_once(monkeypatch):
     import src.observability.dashboard as D
     e = _fo(monkeypatch, "opencopy")
     e.cfg.rule = "pro_hold"
-    monkeypatch.setattr(D, "openhold_new_coins", lambda allowed_only=True: [
+    monkeypatch.setattr(D, "openhold_recent_coins", lambda window_s=900.0: [
         {"coinMint": "A1xpump", "symbol": "A1"}, {"coinMint": "B2xpump", "symbol": "B2"}, {"coinMint": "C3xpump", "symbol": "C3"}])
     e._pick([])
     assert set(e.feeds) == {"A1xpump", "B2xpump", "C3xpump"}      # OpenCopy: opened together, fed together

@@ -3098,6 +3098,67 @@ def pop_openhold_orders() -> List[Dict[str, Any]]:
     return items
 
 
+def _oh_books() -> List[Dict[str, Any]]:
+    """The callers' books shown on OpenHolds (live groups + picked callers)."""
+    from src.config.runtime import MAYHEM_USER, mayhem_on
+    _start_openholds_refresh()      # Mayhem's own book loop runs even with no page open
+    if mayhem_on():
+        # Mayhem: only Mayhem_Mode. One cached book, no OpenHolds snapshot to build first.
+        snap = {"groups": [], "picked": [_picked_cached(MAYHEM_USER, 0)]}
+    else:
+        snap = open_holds_snapshot()
+    books: List[Dict[str, Any]] = []
+    for group in snap.get("groups") or []:
+        if group.get("ok"):
+            books.append(group)
+    picked_raw = snap.get("picked") or []
+    picked_list = [picked_raw] if isinstance(picked_raw, dict) else list(picked_raw)
+    for picked in picked_list:
+        if not isinstance(picked, dict) or not picked.get("ok"):
+            continue
+        name = str(picked.get("userName") or "").casefold()
+        hit = next((group for group in books if str(group.get("userName") or "").casefold() == name), None)
+        if hit is None:
+            books.append(picked)
+        else:
+            have = {row.get("coinMint") for row in (hit.get("rows") or [])}
+            extra = [row for row in (picked.get("rows") or []) if row.get("coinMint") not in have]
+            if extra:
+                merged = dict(hit)
+                merged["rows"] = list(hit.get("rows") or []) + extra
+                books = [merged if group is hit else group for group in books]
+    return books
+
+
+def openhold_recent_coins(window_s: float = 900.0) -> List[Dict[str, Any]]:
+    """AutoTrade-Candles on OpenCopy (2026-11-15): every coin the selected callers opened in the last window_s (the
+    OpenHolds page shows 15 minutes), still open, newest first. Stateless — OpenCopy's own auto-open memory
+    (_oh_seen) is not touched."""
+    import time
+    now = time.time()
+    out: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+    for group in _oh_books():
+        rows = group.get("recent") if isinstance(group.get("recent"), list) else (group.get("rows") or [])
+        for row in rows:
+            mint = str(row.get("coinMint") or "")
+            if not mint or mint in seen or row.get("isExited"):
+                continue
+            try:
+                opened = float(row.get("openedAt") or 0)
+            except (TypeError, ValueError):
+                opened = 0.0
+            if not opened or now - opened > window_s:
+                continue
+            seen.add(mint)
+            item = dict(row)
+            item["age"] = max(0.0, now - opened)
+            item["userName"] = group.get("userName") or ""
+            out.append(item)
+    out.sort(key=lambda r: -float(r.get("openedAt") or 0))
+    return out
+
+
 def openhold_new_coins(allowed_only: bool = True) -> List[Dict[str, Any]]:
     """Coins that just appeared on a live OpenHolds user and are inside the auto-open window.
 

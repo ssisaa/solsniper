@@ -1006,10 +1006,12 @@ class CandleMomo:
                 # AutoTrade-Candles on OpenCopy (user 2026-11-15): every new open of the callers selected on OpenHolds
                 # is offered to Candles at once — no OpenCopy buy / pin / hold, no auto-open range wait
                 try:
-                    from src.observability.dashboard import openhold_new_coins
-                    for r in openhold_new_coins(allowed_only=False)[:OPENCOPY_MAX_FEEDS]:
+                    # the coins the OpenHolds page lists (opened in the last 15 minutes), not only OpenCopy's 1-minute
+                    # auto-open window; pump coins only (mint starts or ends with "pump", user 2026-11-15)
+                    from src.observability.dashboard import openhold_recent_coins
+                    for r in openhold_recent_coins(900.0)[:OPENCOPY_MAX_FEEDS]:
                         m = str(r.get("coinMint") or "")
-                        if (m.endswith("pump") or m.startswith("pump")) and m not in self.traded and m not in self.unusable:
+                        if (m.startswith("pump") or m.endswith("pump")) and m not in self.traded and m not in self.unusable:
                             self.offer("opencopy", m, str(r.get("symbol") or ""))
                 except Exception:
                     log.debug("openholds rows for Candles failed", exc_info=True)
@@ -1020,7 +1022,8 @@ class CandleMomo:
                     from src.observability.dashboard import _callout_rows
                     co_rows, _err = _callout_rows()
                     fresh = sorted((r for r in co_rows if str(r.get("call") or "").upper() == "OPEN"
-                                    and str(r.get("coinMint") or "").endswith("pump")),
+                                    and (str(r.get("coinMint") or "").startswith("pump")
+                                         or str(r.get("coinMint") or "").endswith("pump"))),
                                    key=lambda r: -float(r.get("openedAt") or 0))[:3]
                     for r in fresh:
                         m = str(r["coinMint"])
