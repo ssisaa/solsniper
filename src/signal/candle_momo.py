@@ -1675,12 +1675,8 @@ class CandleMomo:
         fill_ms = (time.time() - sig["seen"]) * 1000.0 if sig and sig.get("seen") else None
         if fill_ms is not None:
             self.fill_ms.append(fill_ms)
-        real = bool(sig) and "candleTs" in sig            # a candle signal, not a forced exit
-        if real and expected and slip > cfg.max_slippage_bps:
-            self.store.fill({"signal_id": sig["id"], "mint": mint, "side": "SELL", "ts": time.time(), "mode": "paper",
-                             "status": "failed", "error": f"slippage {slip:.0f} bps (would revert)"})
-            pos.pop("closing", None)
-            return self._failed(sig, f"slippage {slip:.0f} bps (would revert)")
+        # A sell is never refused for slippage (user 2026-11-14 "must sell"): live sells carry 95% slippage, so
+        # paper books the worse price too; a profit sell's break-even floor is still checked below.
         share = part / pos["tokens"] if pos["tokens"] else 1.0
         net_fee = self._network_fee_sol()
         if self._floored(sig):
@@ -2185,7 +2181,10 @@ class CandleMomo:
     def _floored(self, sig: Optional[Dict[str, Any]]) -> bool:
         """A green-candle sell (not a pause / max-hold / reserves exit, not your manual Exit) must return
         at least the trade's cost."""
-        return bool(sig) and "candleTs" in sig and not sig.get("manual") and bool(self.cfg.sell_only_in_profit)
+        # pro_hold's profit sell is always floored (user 2026-11-14 "must sell but on profit"): with 95% slippage
+        # the break-even floor is what keeps the sale from landing at a loss
+        return (bool(sig) and "candleTs" in sig and not sig.get("manual")
+                and (bool(self.cfg.sell_only_in_profit) or bool(sig.get("pro_hold_sell"))))
 
     def _refused(self, sig: Dict[str, Any], got: Optional[float], floor: float) -> None:
         """Sell refused below break-even: nothing sold, no fee, coins kept for the next green."""

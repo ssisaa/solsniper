@@ -1012,7 +1012,7 @@ async def run_swap(trader, side: str, mint: str, sol: float = 0.0, raw: int = 0,
     async def _try(name: str, limit: float):
         nonlocal last
         try:
-            call = _one(trader, name, side, mint, sol, raw, buy_slip, buy_fee, sell_slip, sell_fee, full)
+            call = _one(trader, name, side, mint, sol, raw, buy_slip, buy_fee, sell_slip, sell_fee, full, reason=reason)
             if name == "jupiter":
                 outcome = await call
             else:
@@ -1234,7 +1234,12 @@ async def run_swap(trader, side: str, mint: str, sol: float = 0.0, raw: int = 0,
     return {"ok": False, "sig": "", "route": order[0], "tokens": 0, "sol": 0.0, "err": str(last)[:160]}
 
 
-async def _one(trader, name: str, side: str, mint: str, sol: float, raw: int, buy_slip: int, buy_fee: float, sell_slip: int, sell_fee: float, full: bool) -> Dict[str, Any]:
+def sell_slippage_bps(reason: str) -> int:
+    """Pump sell slippage: Candles' sells must go through (95%; a profit sell keeps its break-even floor), others 30%."""
+    return 9500 if str(reason or "").startswith("candle") else 3000
+
+
+async def _one(trader, name: str, side: str, mint: str, sol: float, raw: int, buy_slip: int, buy_fee: float, sell_slip: int, sell_fee: float, full: bool, reason: str = "") -> Dict[str, Any]:
     if name == "lightning":
         pool = mint_venue(mint)
         if pool not in ("pump", "pump-amm"):
@@ -1293,7 +1298,10 @@ async def _one(trader, name: str, side: str, mint: str, sol: float, raw: int, bu
                 sell_raw = int(raw)
         try:
             signed, min_sol, err = await asyncio.wait_for(
-                pump_sell_tx(mint, int(sell_raw), slippage_bps=3000, min_sol_out=_SELL_FLOOR.get(mint, 0)),
+                # Candles' sells must go through (user 2026-11-14: a -47% move failed a 30% guard): 95% slippage;
+                # a profit sell still carries its break-even floor, so it never sells at a loss
+                pump_sell_tx(mint, int(sell_raw), slippage_bps=sell_slippage_bps(reason),
+                             min_sol_out=_SELL_FLOOR.get(mint, 0)),
                 timeout=2.5,
             )
         except asyncio.TimeoutError:

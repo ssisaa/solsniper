@@ -124,3 +124,17 @@ def test_mayhem_board_pro_hold_feeds_one_coin_at_a_time():
     e.positions[held] = {"mint": held}
     e._pick(rows[1:])
     assert set(e.feeds) == {held}                     # trade open: no new coin fed
+
+
+def test_candle_sell_uses_wide_slippage():
+    from src.execution.tx_route import sell_slippage_bps
+    assert sell_slippage_bps("candle_sell") == 9500
+    assert sell_slippage_bps("caller_closed") == 3000
+
+
+def test_pro_hold_profit_sell_is_always_floored():
+    e = CM.CandleMomo()
+    e.cfg.sell_only_in_profit = False
+    assert e._floored({"candleTs": 1, "pro_hold_sell": True})
+    assert not e._floored({"candleTs": 1})
+    assert not e._floored({"candleTs": 1, "pro_hold_sell": True, "manual": True})
