@@ -396,3 +396,45 @@ def test_paper_trades_a_graduated_coin_with_jupiter(tmp_path, monkeypatch):
     assert "GRAD" not in e.positions
     t = e.store.trades(1)[0]
     assert round(t["exit_sol"], 4) == 0.006
+
+
+def test_paper_buys_a_non_sol_quoted_coin_with_jupiter(tmp_path, monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    from src.signal.candle_store import Store
+    from src.execution import pump_curve as PC
+    e = CM.CandleMomo()
+    e.store = Store(str(tmp_path / "q.sqlite"), str(tmp_path / "q.jsonl"))
+    e.cfg.fill_lag_ms, e.cfg.max_slippage_bps = 0, 10_000
+
+    async def no_curve(mint):
+        return None, 0, "not_sol_quote"
+    monkeypatch.setattr(e, "_curve", no_curve)
+
+    async def fake_tx(*a, **k):
+        return "", 0, ""
+    monkeypatch.setattr(PC, "pump_buy_tx", fake_tx)
+
+    class J:
+        async def quote_sol_to_token(self, mint, sol, slippage_bps=0):
+            return SimpleNamespace(out_amount=5_000)
+    monkeypatch.setattr(e, "_jup", lambda: J())
+    sig = {"id": "nq", "mint": "NQxpump", "side": "BUY", "seen": time.time(), "close": 1.0, "provider": "stream",
+           "symbol": "NQ", "ts": 1, "candleTs": 1, "open": 1.0, "prevClose": 1.0, "ref": 1.0, "deltaPct": 0.0,
+           "rule": "pro_hold", "feedLagMs": 0}
+    asyncio.run(e._paper_buy(sig))
+    assert "NQxpump" in e.positions and "NQxpump" not in e.unusable
+
+
+def test_untradable_offer_is_dropped(monkeypatch):
+    e = CM.CandleMomo()
+    e.cfg.support_enabled, e.cfg.rule = True, "pro_hold"
+    monkeypatch.setattr(CM.CandleMomo, "live_filter", staticmethod(lambda: "opencopy"))
+    monkeypatch.setattr(e, "support_source", lambda: "opencopy")
+    monkeypatch.setattr(e, "_support_held", lambda s: [])
+    import src.observability.dashboard as D
+    monkeypatch.setattr(D, "openhold_recent_coins", lambda window_s=900.0: [])
+    e.offer("opencopy", "BADxpump")
+    e.unusable["BADxpump"] = "no route"
+    e._pick([])
+    assert "BADxpump" not in e.offers and "BADxpump" not in e.feeds

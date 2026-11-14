@@ -1038,8 +1038,8 @@ class CandleMomo:
                     done = m in self.traded and float(self.traded[m]) >= float(o["at"])
                     if m in self.positions:
                         continue
-                    if o["src"] != src or stale or done:
-                        self.offers.pop(m, None)
+                    if o["src"] != src or stale or done or m in self.unusable:
+                        self.offers.pop(m, None)     # an untradable coin no longer cycles back into the feed
                 slots = 1 if cfg.rule == "pro_hold" else max(1, int(cfg.max_mints or 1))
                 if src == "opencopy":
                     slots = OPENCOPY_MAX_FEEDS      # OpenCopy only: coins opened together are fed together
@@ -1892,7 +1892,8 @@ class CandleMomo:
         lat = (sent - sig["seen"]) * 1000.0
         self.lat_ms.append(lat)
         c0, bps, why = await self._curve(mint)
-        jup = self._jup() if (not c0 and why in ("graduated", "not_on_curve")) else None
+        # graduated (PumpSwap) or quoted in another coin (not SOL): Jupiter prices them (user 2026-11-15)
+        jup = self._jup() if (not c0 and why in ("graduated", "not_on_curve", "not_sol_quote")) else None
         if not c0 and jup is None:
             if why in ("not_sol_quote", "graduated", "not_on_curve"):
                 self.unusable[mint] = why          # e.g. an hSOL-quoted coin: drop it, pick another
@@ -1992,7 +1993,7 @@ class CandleMomo:
         if lat is not None:
             self.lat_ms.append(lat)
         c0, bps, why0 = await self._curve(mint)
-        jup = self._jup() if (not c0 and why0 in ("graduated", "not_on_curve")) else None
+        jup = self._jup() if (not c0 and why0 in ("graduated", "not_on_curve", "not_sol_quote")) else None
         if jup is not None and part > 0:
             # graduated coin: Jupiter quotes (pool fee inside), at send and fill_lag_ms later
             q0 = await self._jup_quote_sell(jup, mint, part)

@@ -984,7 +984,7 @@ async def run_swap(trader, side: str, mint: str, sol: float = 0.0, raw: int = 0,
         # to build, ~3s to land). A buy that misses is skipped, not retried late; a sell falls
         # back to Lightning, then Jupiter, so it always gets out.
         order = ["pump"] if side == "buy" else ["pump", "lightning"]
-        if side == "buy" and curve_why in ("graduated", "not_on_curve"):
+        if side == "buy" and curve_why in ("graduated", "not_on_curve", "not_sol_quote"):
             remember_off_curve(mint)          # its sells go straight to Lightning / Jupiter too
         if side == "sell" and _SELL_FLOOR.get(mint):
             order = ["pump"]          # only the local build can enforce the floor; others sell at any price
@@ -1004,7 +1004,7 @@ async def run_swap(trader, side: str, mint: str, sol: float = 0.0, raw: int = 0,
                     return {"ok": False, "sig": "", "route": "", "tokens": 0, "sol": 0.0, "err": "below_floor"}
                 order = ["lightning"]
                 ensure_lightning_warm()
-        if side == "buy" and (off_curve(mint) or curve_why in ("graduated", "not_on_curve")):
+        if side == "buy" and (off_curve(mint) or curve_why in ("graduated", "not_on_curve", "not_sol_quote")):
             # Graduated (PumpSwap) or never on the curve: the local build cannot buy it. Lightning routes the
             # pump-amm pool and hands a refusal to Jupiter (AMD 2026-11-14: "no_route" before this).
             order = ["lightning"]
