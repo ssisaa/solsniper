@@ -1244,7 +1244,10 @@ class CandleMomo:
                                          for l in lots):
             value = sum(float(l["sol"]) * price / float(l["px"]) for l in lots) * float(held.get("impact") or 1.0)
             net = 2 * self._network_fee_sol() * max(1, len(lots))
-            return (value - cost - net) / cost * 100.0 - 2.0
+            # pump's 1% each way is not charged on a graduated coin valued by Jupiter quotes: its pool fee is already
+            # in the quotes (and in `impact`), so no extra 2% (2026-11-14: AUfKbx needed ~+12% instead of +10%)
+            fee_pct = 0.0 if str(held.get("value_src") or "").startswith("jupiter") else 2.0
+            return (value - cost - net) / cost * 100.0 - fee_pct
         up = held.get("upct")
         if up is not None and time.time() - float(held.get("value_at") or 0) <= 2.0:
             return float(up)
