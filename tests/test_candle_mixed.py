@@ -138,3 +138,42 @@ def test_pro_hold_profit_sell_is_always_floored():
     assert e._floored({"candleTs": 1, "pro_hold_sell": True})
     assert not e._floored({"candleTs": 1})
     assert not e._floored({"candleTs": 1, "pro_hold_sell": True, "manual": True})
+
+
+def _paper_sell_engine(tmp_path, monkeypatch, value_ratio):
+    import asyncio
+    from src.signal.candle_store import Store
+    from src.execution import pump_curve as PC
+    e = CM.CandleMomo()
+    e.store = Store(str(tmp_path / "s.sqlite"), str(tmp_path / "s.jsonl"))
+    e.cfg.fill_lag_ms = 0
+    e.cfg.sell_only_in_profit = True
+    e.positions["PS"] = {"mint": "PS", "symbol": "PS", "mode": "paper", "tokens": 1_000_000.0, "entry_sol": 0.005,
+                         "entry_ts": time.time() - 10, "entry_signal": "x", "costs_sol": 0.0, "lots": [{"n": 1}]}
+    curve = {"virtual_token": 1e15, "virtual_sol": 3e10}
+
+    async def fake_curve(mint):
+        return dict(curve), 100, ""
+    monkeypatch.setattr(e, "_curve", fake_curve)
+
+    async def fake_tx(*a, **k):
+        return "", 0, ""
+    monkeypatch.setattr(PC, "pump_sell_tx", fake_tx)
+    monkeypatch.setattr(PC, "_sol_for_tokens", lambda raw, vt, vs, bps: int(0.005 * value_ratio * 1e9))
+    return e, asyncio
+
+
+def test_paper_sell_runs_and_books_in_profit(tmp_path, monkeypatch):
+    e, asyncio = _paper_sell_engine(tmp_path, monkeypatch, 1.5)
+    sig = {"id": "s1", "mint": "PS", "side": "SELL", "candleTs": 1, "ts": 1, "open": 1.0, "prevClose": 1.0, "close": 1.0, "ref": 1.0, "deltaPct": 0.0, "rule": "pro_hold", "provider": "stream", "feedLagMs": 0, "seen": time.time(), "pro_hold_sell": True,
+           "symbol": "PS"}
+    asyncio.run(e._paper_sell(sig, "take profit"))
+    assert "PS" not in e.positions                                # sold, no NameError
+
+
+def test_paper_profit_sell_below_breakeven_is_held(tmp_path, monkeypatch):
+    e, asyncio = _paper_sell_engine(tmp_path, monkeypatch, 0.5)
+    sig = {"id": "s2", "mint": "PS", "side": "SELL", "candleTs": 1, "ts": 1, "open": 1.0, "prevClose": 1.0, "close": 1.0, "ref": 1.0, "deltaPct": 0.0, "rule": "pro_hold", "provider": "stream", "feedLagMs": 0, "seen": time.time(), "pro_hold_sell": True,
+           "symbol": "PS"}
+    asyncio.run(e._paper_sell(sig, "take profit"))
+    assert "PS" in e.positions                                    # slippage would make a loss: not sold

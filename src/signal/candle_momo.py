@@ -1677,6 +1677,7 @@ class CandleMomo:
             self.fill_ms.append(fill_ms)
         # A sell is never refused for slippage (user 2026-11-14 "must sell"): live sells carry 95% slippage, so
         # paper books the worse price too; a profit sell's break-even floor is still checked below.
+        real = bool(sig) and "candleTs" in sig            # a candle signal, not a forced exit
         share = part / pos["tokens"] if pos["tokens"] else 1.0
         net_fee = self._network_fee_sol()
         if self._floored(sig):
