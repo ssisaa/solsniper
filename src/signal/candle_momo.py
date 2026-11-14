@@ -1271,7 +1271,10 @@ class CandleMomo:
         rows = f.books[f.using].finals()
         cfg = self.cfg
         live_rows = f.books[f.using].rows           # finals + the candle still forming this second
-        if (cfg.rule == "pro_hold" and cfg.pro_hold_first and live_rows
+        # a pinned coin (Pinned mints) enters ONLY on the chart's ▲ BUY (user 2026-11-14): no first-candle / green-
+        # after-red / ◆ BP entries for it; it still sells on profit like every pro_hold trade
+        pinned = f.mint in (cfg.mints or [])
+        if (cfg.rule == "pro_hold" and cfg.pro_hold_first and live_rows and not pinned
                 and not getattr(f, "first_done", False)
                 and f.mint not in self.positions
                 and not (self._avoid_mayhem_for(f) and self.mayhem_of.get(f.mint) is None and not f.board_state)):
@@ -1335,7 +1338,7 @@ class CandleMomo:
                                    seen, first=True)
                     return
         held_now = self.positions.get(f.mint)
-        if (cfg.rule == "pro_hold" and cfg.pro_hold_first and cfg.pro_hold_first_at == "gar"
+        if (cfg.rule == "pro_hold" and cfg.pro_hold_first and cfg.pro_hold_first_at == "gar" and not pinned
                 and len(live_rows) >= 2 and self._gar(f, live_rows, held_now, seen)):
             return
         if cfg.rule == "pro_hold" and held_now is not None and live_rows and not held_now.get("closing"):
@@ -1367,7 +1370,13 @@ class CandleMomo:
             self.pro_px.pop(f.mint, None)
         ctx = self.pro_context(f.mint)
         cs = [{"t": c.t, "o": c.open, "h": c.high, "l": c.low, "c": c.close, "v": c.volume} for c in rows]
-        if self.cfg.rule == "pro_hold":
+        if self.cfg.rule == "pro_hold" and pinned:
+            a = PT.analyze(cs, None, None)
+            if a.get("call") == "BUY":
+                a = {"call": "BUY", "px": a.get("px"), "why": "▲ BUY (pinned coin) — " + str(a.get("why") or "")}
+            else:
+                a = {"call": "WAIT"}                 # its exits are the pro_hold profit sell / Max hold
+        elif self.cfg.rule == "pro_hold":
             # pro_hold buys on Botpredict's call (user's choice 2026-11-14: tested +5.0%/trade on unseen coins with
             # sell-in-profit / Max hold, vs -0.7% on the Pro Trader setup); its own exits are profit / Max hold
             from src.signal import botpredict as BPm
@@ -2257,6 +2266,10 @@ class CandleMomo:
                 out["ready"] = bool(up is not None and up >= tgt)
             else:
                 from src.signal import botpredict as BPm
+                if mint in (cfg.mints or []):
+                    out["entry"] = "pinned coin: lot 1 on the chart's ▲ BUY (Pro Trader call); sells on profit"
+                    out["exit"] = "—"
+                    return out
                 extra = [x for x, on in (("a new coin's first candle", cfg.pro_hold_first),
                                          ("the green ▲ BUY", cfg.pro_hold_pro_buy)) if on]
                 out["entry"] = (f"pro_hold: lot 1 on Botpredict's BUY (◆ BP — chance of +{BPm.PRED_PCT:.0f}% first "

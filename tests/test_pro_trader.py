@@ -826,3 +826,28 @@ def test_fast_upct_has_no_pump_fee_for_jupiter_valued_coins():
     assert round(e._fast_upct(held, f, 1.1)) == 10
     held["value_src"] = "curve"
     assert round(e._fast_upct(held, f, 1.1)) == 8
+
+
+def test_pinned_coin_buys_only_on_the_pro_trader_buy(tmp_path, monkeypatch):
+    from src.signal import botpredict as BPm
+    from src.signal import pro_trader as PT
+    e, f, rows, routed = _cm_engine(tmp_path, monkeypatch)
+    e.cfg.rule, e.cfg.pro_hold_first, e.cfg.pro_hold_first_at = "pro_hold", True, "now"
+    e.cfg.mints = ["MINT"]
+    f.origin = "manual"
+    f.age = 3
+    e.mayhem_of["MINT"] = False
+    monkeypatch.setitem(BPm.MODEL, "thr", 0.0)               # Botpredict would always buy: must be ignored
+    monkeypatch.setattr(PT, "analyze", lambda cs, h, held: {"call": "WAIT"})
+    e._evaluate(f, time.time())
+    f.books["pump_rest"].merge(rows[-1:])
+    e._evaluate(f, time.time())
+    assert not [r for r in routed if r["side"] == "BUY"]      # no first-candle / BP buy for a pinned coin
+    monkeypatch.setattr(PT, "analyze", lambda cs, h, held: {"call": "BUY", "px": 1.0, "why": "VWAP dip"})
+    from src.signal import candle_core as C
+    last = rows[-1]
+    f.books["pump_rest"].merge([C.Candle(t=last.t + 1000, open=last.close, high=last.close, low=last.close,
+                                         close=last.close, volume=1, final=True)])
+    e._evaluate(f, time.time())
+    buys = [r for r in routed if r["side"] == "BUY"]
+    assert len(buys) == 1 and "pinned coin" in buys[0]["pro_why"]
