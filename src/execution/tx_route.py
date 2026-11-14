@@ -984,8 +984,26 @@ async def run_swap(trader, side: str, mint: str, sol: float = 0.0, raw: int = 0,
         # to build, ~3s to land). A buy that misses is skipped, not retried late; a sell falls
         # back to Lightning, then Jupiter, so it always gets out.
         order = ["pump"] if side == "buy" else ["pump", "lightning"]
+        if side == "buy" and curve_why in ("graduated", "not_on_curve"):
+            remember_off_curve(mint)          # its sells go straight to Lightning / Jupiter too
         if side == "sell" and _SELL_FLOOR.get(mint):
             order = ["pump"]          # only the local build can enforce the floor; others sell at any price
+            if off_curve(mint):
+                # graduated coin (no pump curve, 2026-11-14): the floor is checked on a Jupiter quote first,
+                # then Lightning / Jupiter sell it — a quote under the floor keeps the coins (no fee)
+                floor = int(_SELL_FLOOR.get(mint) or 0)
+                got = 0
+                try:
+                    q = await asyncio.wait_for(trader.jup.quote_token_to_sol(mint, int(raw), slippage_bps=1000), timeout=2.5)
+                    got = int(q.out_amount) if q else 0
+                except Exception:
+                    got = 0
+                if got < floor:
+                    log.warning("TX sell mint=%s graduated — quote %.6f SOL under the floor %.6f, not sold",
+                                mint[:8], got / 1e9, floor / 1e9)
+                    return {"ok": False, "sig": "", "route": "", "tokens": 0, "sol": 0.0, "err": "below_floor"}
+                order = ["lightning"]
+                ensure_lightning_warm()
         if side == "buy" and (off_curve(mint) or curve_why in ("graduated", "not_on_curve")):
             # Graduated (PumpSwap) or never on the curve: the local build cannot buy it. Lightning routes the
             # pump-amm pool and hands a refusal to Jupiter (AMD 2026-11-14: "no_route" before this).

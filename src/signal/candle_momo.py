@@ -1052,6 +1052,9 @@ class CandleMomo:
                                       "Candles can only chart and trade pump.fun coins. Remove it from Pinned mints.", m)
                 continue
             if m not in cfg.blacklist:
+                busy_now = self.trading()
+                if busy_now and m not in busy_now:
+                    continue          # a trade is open: the pinned coin is fed once it closes (no add / drop churn)
                 want[m] = {"origin": "manual"}
         state = {str(r.get("m") or ""): r for r in rows}
         if self.follow() == "mixed" and not cfg.whitelist_only:
@@ -1795,6 +1798,22 @@ class CandleMomo:
         cfg = self.cfg
         return (BASE_FEE_LAMPORTS + cfg.compute_units * cfg.priority_fee_micro_lamports / 1e6) / 1e9
 
+    @staticmethod
+    async def _jup_quote_buy(jup, mint: str, sol: float) -> int:
+        try:
+            q = await asyncio.wait_for(jup.quote_sol_to_token(mint, sol, slippage_bps=1000), timeout=2.5)
+            return int(q.out_amount) if q and q.out_amount > 0 else 0
+        except Exception:
+            return 0
+
+    @staticmethod
+    async def _jup_quote_sell(jup, mint: str, raw: int) -> Optional[float]:
+        try:
+            q = await asyncio.wait_for(jup.quote_token_to_sol(mint, int(raw), slippage_bps=1000), timeout=2.5)
+            return q.out_amount / 1e9 if q and q.out_amount > 0 else None
+        except Exception:
+            return None
+
     async def _paper_buy(self, sig: Dict[str, Any]) -> None:
         from src.execution import pump_curve as PC
         cfg = self.cfg
@@ -1808,7 +1827,8 @@ class CandleMomo:
         lat = (sent - sig["seen"]) * 1000.0
         self.lat_ms.append(lat)
         c0, bps, why = await self._curve(mint)
-        if not c0:
+        jup = self._jup() if (not c0 and why in ("graduated", "not_on_curve")) else None
+        if not c0 and jup is None:
             if why in ("not_sol_quote", "graduated", "not_on_curve"):
                 self.unusable[mint] = why          # e.g. an hSOL-quoted coin: drop it, pick another
                 self.feeds.pop(mint, None)
@@ -1816,14 +1836,27 @@ class CandleMomo:
                 return self.skip(sig, "NOT_TRADABLE")
             return self._failed(sig, f"not on curve ({why})")
         lam = int(size * 1e9)
-        expected = PC._tokens_for_sol(lam, c0["virtual_token"], c0["virtual_sol"], bps)
-        await asyncio.sleep(max(0.0, cfg.fill_lag_ms / 1000.0 - (time.time() - sent)))
-        if self.cfg.kill:
-            return self._failed(sig, "KILLED before fill")
-        c1, bps1, why1 = await self._curve(mint)
-        if not c1:
-            return self._failed(sig, f"curve gone before fill ({why1})")
-        tokens = PC._tokens_for_sol(lam, c1["virtual_token"], c1["virtual_sol"], bps1)
+        if jup is not None:
+            # graduated pump coin (PumpSwap pool, user 2026-11-14): priced by Jupiter quotes — at send, and again
+            # fill_lag_ms later for the fill; the pool fee is inside the quote
+            q0 = await self._jup_quote_buy(jup, mint, size)
+            if not q0:
+                return self._failed(sig, "graduated coin: no Jupiter quote")
+            expected = q0
+            await asyncio.sleep(max(0.0, cfg.fill_lag_ms / 1000.0 - (time.time() - sent)))
+            if self.cfg.kill:
+                return self._failed(sig, "KILLED before fill")
+            tokens = await self._jup_quote_buy(jup, mint, size) or expected
+            bps1 = 0
+        else:
+            expected = PC._tokens_for_sol(lam, c0["virtual_token"], c0["virtual_sol"], bps)
+            await asyncio.sleep(max(0.0, cfg.fill_lag_ms / 1000.0 - (time.time() - sent)))
+            if self.cfg.kill:
+                return self._failed(sig, "KILLED before fill")
+            c1, bps1, why1 = await self._curve(mint)
+            if not c1:
+                return self._failed(sig, f"curve gone before fill ({why1})")
+            tokens = PC._tokens_for_sol(lam, c1["virtual_token"], c1["virtual_sol"], bps1)
         slip = (expected - tokens) / expected * 1e4 if expected else 0.0
         fill_ms = (time.time() - sig["seen"]) * 1000.0
         pump_fee = size * bps1 / (1e4 + bps1)
@@ -1893,14 +1926,23 @@ class CandleMomo:
         lat = (sent - sig["seen"]) * 1000.0 if sig and sig.get("seen") and "candleTs" in sig else None
         if lat is not None:
             self.lat_ms.append(lat)
-        c0, bps, _ = await self._curve(mint)
-        expected = PC._sol_for_tokens(part, c0["virtual_token"], c0["virtual_sol"], bps) / 1e9 if c0 else 0.0
-        await asyncio.sleep(max(0.0, cfg.fill_lag_ms / 1000.0 - (time.time() - sent)))
-        c1, bps1, why1 = await self._curve(mint)
-        if c1:
-            got = PC._sol_for_tokens(part, c1["virtual_token"], c1["virtual_sol"], bps1) / 1e9
+        c0, bps, why0 = await self._curve(mint)
+        jup = self._jup() if (not c0 and why0 in ("graduated", "not_on_curve")) else None
+        if jup is not None and part > 0:
+            # graduated coin: Jupiter quotes (pool fee inside), at send and fill_lag_ms later
+            q0 = await self._jup_quote_sell(jup, mint, part)
+            await asyncio.sleep(max(0.0, cfg.fill_lag_ms / 1000.0 - (time.time() - sent)))
+            q1 = await self._jup_quote_sell(jup, mint, part)
+            expected, got, bps1 = (q0 or q1 or 0.0), (q1 or q0 or 0.0), 0
+            c0 = c1 = ({"jupiter": True} if (q0 or q1) else None)
         else:
-            got, bps1 = expected, bps          # curve gone during the lag: last known value
+            expected = PC._sol_for_tokens(part, c0["virtual_token"], c0["virtual_sol"], bps) / 1e9 if c0 else 0.0
+            await asyncio.sleep(max(0.0, cfg.fill_lag_ms / 1000.0 - (time.time() - sent)))
+            c1, bps1, why1 = await self._curve(mint)
+            if c1:
+                got = PC._sol_for_tokens(part, c1["virtual_token"], c1["virtual_sol"], bps1) / 1e9
+            else:
+                got, bps1 = expected, bps          # curve gone during the lag: last known value
         if not c0 and not c1 and not paused:
             # No price at all (RPC 429 / read failed). Booking 0 SOL out made fake -100% trades
             # (20:35-20:42): keep the position, the next SELL candle or max hold retries.

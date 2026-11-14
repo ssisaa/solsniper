@@ -103,6 +103,13 @@ fed or counted as open (`active_positions()`), so the next coin comes. Paused st
 (trader.buy: only a second buy of the same coin is refused; other open trades and leftover wallet coins don't block it; the wallet / second-buy gate is skipped for `candle`). Each lot's `px` is its REAL fill in chart units (paper: signal close × expected / got tokens; live: `_fill_px_chart` = chart close × fill price / curve price right after the fill) — GHOSTY's L1 filled 4× above its signal candle. The fast profit reading is scaled by `pos["impact"]` = real curve value / chart value from the value loop (selling a thin curve gets less than the chart shows). For the other sources a
 coin pump paused (`mayhem_state_of`, or `CandleMomo.is_paused` / `paused_mints`) holds no Max concurrent slot.
 
+**Graduated pump coins (2026-11-14, user's request)**: Candles trades coins off the pump curve (graduated / PumpSwap).
+Paper buys and sells are priced by Jupiter quotes at send and fill_lag_ms later (`_jup_quote_buy` / `_jup_quote_sell`,
+pool fee inside the quote) instead of dropping the coin as NOT_TRADABLE; live buys go Lightning → Jupiter
+(`tx_route`, off-curve remembered), and a floored (profit) sell of an off-curve coin first checks a Jupiter quote against
+the floor, then sells via Lightning / Jupiter. Values use the existing Jupiter fallback in `_value`. Charts come from
+pump's candle API (the stream has no trades for these). A pinned coin is not re-added while a trade is open.
+
 **Trade source in the Mode column (2026-11-14)**: Candles Open positions / Closed trades show "paper · Launch",
 "LIVE · Candles (Mixed: New)" … from `CandleMomo._src_label` (feed origin / support source), stored by `candle_store`
 (`src` column on positions and trades; `Store.src_hook` fills it at open, close copies it).

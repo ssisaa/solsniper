@@ -361,3 +361,38 @@ def test_pinned_pump_coin_takes_the_feed_slot_when_flat():
     e.feeds["BOARDxpump"] = CM.Feed("BOARDxpump", 10)
     e._pick(rows)
     assert set(e.feeds) == {"BOARDxpump"}            # a trade is open: the pinned coin waits
+
+
+def test_paper_trades_a_graduated_coin_with_jupiter(tmp_path, monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    from src.signal.candle_store import Store
+    from src.execution import pump_curve as PC
+    e = CM.CandleMomo()
+    e.store = Store(str(tmp_path / "g.sqlite"), str(tmp_path / "g.jsonl"))
+    e.cfg.fill_lag_ms, e.cfg.max_slippage_bps, e.cfg.sell_only_in_profit = 0, 10_000, False
+
+    async def no_curve(mint):
+        return None, 0, "graduated"
+    monkeypatch.setattr(e, "_curve", no_curve)
+
+    async def fake_tx(*a, **k):
+        return "", 0, ""
+    monkeypatch.setattr(PC, "pump_buy_tx", fake_tx)
+    monkeypatch.setattr(PC, "pump_sell_tx", fake_tx)
+
+    class J:
+        async def quote_sol_to_token(self, mint, sol, slippage_bps=0):
+            return SimpleNamespace(out_amount=1_000_000)
+        async def quote_token_to_sol(self, mint, raw, slippage_bps=0):
+            return SimpleNamespace(out_amount=6_000_000)          # 0.006 SOL back
+    monkeypatch.setattr(e, "_jup", lambda: J())
+    base = {"ts": 1, "candleTs": 1, "open": 1.0, "prevClose": 1.0, "ref": 1.0, "deltaPct": 0.0, "rule": "pro_hold",
+            "provider": "pump_rest", "feedLagMs": 0, "symbol": "GR", "close": 1.0}
+    asyncio.run(e._paper_buy(dict(base, id="gb", mint="GRAD", side="BUY", seen=time.time())))
+    assert "GRAD" in e.positions and e.positions["GRAD"]["tokens"] == 1_000_000
+    assert "GRAD" not in e.unusable
+    asyncio.run(e._paper_sell(dict(base, id="gs", mint="GRAD", side="SELL", seen=time.time()), "test sell"))
+    assert "GRAD" not in e.positions
+    t = e.store.trades(1)[0]
+    assert round(t["exit_sol"], 4) == 0.006
