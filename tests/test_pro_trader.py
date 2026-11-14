@@ -851,3 +851,39 @@ def test_pinned_coin_buys_only_on_the_pro_trader_buy(tmp_path, monkeypatch):
     e._evaluate(f, time.time())
     buys = [r for r in routed if r["side"] == "BUY"]
     assert len(buys) == 1 and "pinned coin" in buys[0]["pro_why"]
+
+
+def _pinned_held(tmp_path, monkeypatch):
+    from src.signal import pro_trader as PT
+    e, f, routed = _ph_first_engine(tmp_path, monkeypatch, 3)
+    e.cfg.mints = ["NEW"]
+    e.cfg.pinned_min_profit_pct = 1.5
+    monkeypatch.setattr(PT, "analyze", lambda cs, h, held: {"call": "WAIT"})
+    monkeypatch.setattr(e, "_network_fee_sol", lambda: 0.0)
+    e.positions["NEW"] = {"mint": "NEW", "mode": "paper", "tokens": 1.0, "entry_sol": 0.005, "entry_ts": time.time(),
+                          "value_src": "jupiter", "lots": [{"n": 1, "sol": 0.005, "px": 1.0, "src": "pump_rest"}]}
+    return e, f, routed
+
+
+def _forming(f, k, o, c):
+    from src.signal import candle_core as C
+    t = f.books["pump_rest"].rows[-1].t + 1000 * k
+    f.books["pump_rest"].merge([C.Candle(t=t, open=o, high=max(o, c), low=min(o, c), close=c, volume=1, final=False)])
+
+
+def test_pinned_rides_greens_then_sells_on_first_red_in_profit(tmp_path, monkeypatch):
+    e, f, routed = _pinned_held(tmp_path, monkeypatch)
+    _forming(f, 1, 1.00, 1.03)                 # green, +3%: in profit, keep riding
+    e._evaluate(f, time.time())
+    assert not [r for r in routed if r["side"] == "SELL"]
+    _forming(f, 2, 1.06, 1.05)                 # first red while still +5%: sell
+    e._evaluate(f, time.time())
+    sells = [r for r in routed if r["side"] == "SELL"]
+    assert len(sells) == 1 and "pinned: green run ended" in sells[0]["pro_why"]
+
+
+def test_pinned_never_sells_under_its_profit(tmp_path, monkeypatch):
+    e, f, routed = _pinned_held(tmp_path, monkeypatch)
+    _forming(f, 1, 1.02, 1.01)                 # red at +1% (< 1.5%): hold
+    e._evaluate(f, time.time())
+    assert not [r for r in routed if r["side"] == "SELL"]

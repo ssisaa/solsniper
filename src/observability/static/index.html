@@ -1228,6 +1228,7 @@ header nav.nav .navbtn[hidden]{display:none}
           <label title="Takes turns New → Movers → Graduated → New …, the youngest coin of each board (pump mints only). The coin stays while a trade is open; after its trade completes, or 60 s with no trade, the next board's youngest is fed."><input type="checkbox" class="cm-feed" data-feed="mixed"/> Mixed (New, Movers, Graduated)</label>
         </span>
         <label>Pinned mints <input class="cm-mints" id="cmMints" placeholder="mint mint …"/></label>
+        <label title="Pinned coins only: they buy on the chart's ▲ BUY. Once the whole trade is at least this % up after fees, it rides the run of green candles and sells on the first red while still in profit (never at a loss).">Pinned profit % <input class="cm-in" id="cmPinProfit" type="number" step="0.1" min="0.1"/></label>
         <button type="button" class="m2-btn" id="cmApply">Apply</button>
         <button type="button" class="m2-btn" id="cmEntBtn">Entries …</button>
         <button type="button" class="m2-btn" id="cmLiveBtn">Live: OFF</button>
@@ -4384,6 +4385,7 @@ function paintCandle(d){
       document.getElementById('cmPhPro').checked=c.pro_hold_pro_buy!==false;
       document.querySelectorAll('.cm-feed').forEach(b=>{ b.checked=(b.dataset.feed===(c.auto_follow||'mayhem_board')); });
       document.getElementById('cmMints').value=(c.mints||[]).join(' ');
+      document.getElementById('cmPinProfit').value=c.pinned_min_profit_pct!=null?c.pinned_min_profit_pct:1.5;
       document.getElementById('cmLadOn').checked=!!c.ladder_enabled;
       document.getElementById('cmLadMax').value=c.max_ladder_buys;
       document.getElementById('cmLadWait').value=c.reds_per_lot;
@@ -4491,7 +4493,7 @@ document.getElementById('cmApply').addEventListener('click',()=>{
   cmPost({rule:document.getElementById('cmRuleSel').value, min_delta_pct:document.getElementById('cmDelta').value,
           buy_size_sol:document.getElementById('cmSize').value, max_mints:document.getElementById('cmMax').value,
           reuse_coin:document.getElementById('cmReuse').checked,
-          mints:mints?mints.split(/[\s,]+/):[],
+          mints:mints?mints.split(/[\s,]+/):[], pinned_min_profit_pct:document.getElementById('cmPinProfit').value,
           ladder_enabled:document.getElementById('cmLadOn').checked, max_ladder_buys:document.getElementById('cmLadMax').value,
           reds_per_lot:document.getElementById('cmLadWait').value, ladder_count:document.getElementById('cmLadCount').value, ladder_size_mode:document.getElementById('cmLadMode').value,
           ladder_max_total_sol:document.getElementById('cmLadCap').value, sell_on_green_confirm:document.getElementById('cmLadGreen').value,

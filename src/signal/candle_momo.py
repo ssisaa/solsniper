@@ -1348,6 +1348,22 @@ class CandleMomo:
             # in the sell keeps slippage from turning it into a loss.
             c = live_rows[-1]
             up = self._fast_upct(held_now, f, c.close)
+            if f.mint in (cfg.mints or []):
+                # pinned coin (user 2026-11-14): after a ▲ BUY the price climbs in a run of small greens
+                # (+0.6%, +1%, +1.6% …). Once the whole trade is >= Pinned profit % after fees, ride the run and sell
+                # on the first red (still forming) while still in profit; under it, hold (never a loss sale).
+                pmin = float(cfg.pinned_min_profit_pct)
+                if up is not None and up >= pmin:
+                    held_now["pro_peak"] = max(float(held_now.get("pro_peak") or up), up)
+                    if c.close < c.open and time.time() - float(getattr(f, "take_at", 0) or 0) >= 1.0:
+                        f.take_at = time.time()
+                        self._pro_emit(f, live_rows, "SELL", {"call": "SELL", "px": c.close,
+                                                               "why": f"pinned: green run ended — trade {up:+.1f}% ≥ "
+                                                                      f"{pmin:g}% after fees (peak "
+                                                                      f"{float(held_now['pro_peak']):+.1f}%), sold in profit"},
+                                       seen)
+                        return
+                up = None                   # pinned coins do not use the general target below
             tgt, tgt_from = self.green_target()
             if up is not None and up >= tgt and time.time() - float(getattr(f, "take_at", 0) or 0) >= 1.0:
                 f.take_at = time.time()

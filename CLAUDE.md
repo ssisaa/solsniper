@@ -108,7 +108,7 @@ Paper buys and sells are priced by Jupiter quotes at send and fill_lag_ms later 
 pool fee inside the quote) instead of dropping the coin as NOT_TRADABLE; live buys go Lightning → Jupiter
 (`tx_route`, off-curve remembered), and a floored (profit) sell of an off-curve coin first checks a Jupiter quote against
 the floor, then sells via Lightning / Jupiter. Values use the existing Jupiter fallback in `_value`. Charts come from
-pump's candle API (the stream has no trades for these). A pinned coin is not re-added while a trade is open. **Pinned coins (Pinned mints) under pro_hold enter ONLY on the chart's ▲ BUY** (Pro Trader call; lot 1, a new ▲ BUY adds up to Max lots / Total cap) — no first-candle / green-after-red / ◆ BP entries for them; they sell on profit like any pro_hold trade. Other sources / feeds unchanged.
+pump's candle API (the stream has no trades for these). A pinned coin is not re-added while a trade is open. **Pinned coins (Pinned mints) under pro_hold enter ONLY on the chart's ▲ BUY** (Pro Trader call; lot 1, a new ▲ BUY adds up to Max lots / Total cap) — no first-candle / green-after-red / ◆ BP entries for them; they sell on their own rule: once the whole trade is ≥ **Pinned profit %** (`pinned_min_profit_pct`, default 1.5 %, after fees) it rides the run of greens and sells on the first red (forming candle) while still ≥ it; under it, hold (never a loss sale) until Max hold. Other sources / feeds unchanged.
 
 **Trade source in the Mode column (2026-11-14)**: Candles Open positions / Closed trades show "paper · Launch",
 "LIVE · Candles (Mixed: New)" … from `CandleMomo._src_label` (feed origin / support source), stored by `candle_store`
