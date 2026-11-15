@@ -1226,6 +1226,7 @@ header nav.nav .navbtn[hidden]{display:none}
         <span class="cm-feeds" title="Where Candles gets its coins when AutoTrade-Candles is off. Paper or LIVE follows the Live switch.">Feed:
           <label title="Mayhem_Mode's board: young Mayhem coins"><input type="checkbox" class="cm-feed" data-feed="mayhem_board"/> Mayhem board</label>
           <label title="On: Candles never buys a Mayhem coin from Mixed or an AutoTrade-Candles source. The Mayhem board feed lists only Mayhem coins, so it always trades them. Pump pauses Mayhem coins (most within a minute) and a paused coin cannot be sold — 27 pro_hold trades were frozen that way. Normal coins are never paused."><input type="checkbox" id="cmAvoidMayhem"/> Skip Mayhem coins <span class="muted">(Mixed &amp; AutoTrade sources; Mayhem board always trades them)</span></label>
+          <label title="On (default): Candles buys only through PumpPortal Lightning or the bot's own pump build (Local). A coin they cannot buy — e.g. a pump coin priced in USDC or another coin instead of SOL — is skipped and the next coin is taken. Jupiter is still used as the last fallback for SELLS. Off: Jupiter may also buy (slower, ~4.5 s, and a route can open extra accounts at ~0.0015 SOL each)."><input type="checkbox" id="cmNoJupBuy"/> Buy only via Lightning / Local <span class="muted">(Jupiter: sells only)</span></label>
           <label title="Takes turns New → Movers → Graduated → New …, the youngest coin of each board (pump mints only). The coin stays while a trade is open; after its trade completes, or 60 s with no trade, the next board's youngest is fed."><input type="checkbox" class="cm-feed" data-feed="mixed"/> Mixed (New, Movers, Graduated)</label>
         </span>
         <label>Pinned mints <input class="cm-mints" id="cmMints" placeholder="mint mint …"/></label>
@@ -4391,6 +4392,7 @@ function paintCandle(d){
       document.getElementById('cmMax').value=c.max_mints;
       document.getElementById('cmReuse').checked=c.reuse_coin!==false;
       document.getElementById('cmAvoidMayhem').checked=c.avoid_mayhem!==false;
+      document.getElementById('cmNoJupBuy').checked=!c.buy_jupiter;
       document.getElementById('cmPhFirst').checked=c.pro_hold_first!==false;
       document.getElementById('cmPhFirstAt').value=c.pro_hold_first_at||'start';
       document.getElementById('cmPhPro').checked=c.pro_hold_pro_buy!==false;
@@ -4493,6 +4495,9 @@ function paintCandle(d){
 document.getElementById('cmPhFirst').addEventListener('change',e=>cmPost({pro_hold_first:e.target.checked}, 'pro_hold first-candle buy '+(e.target.checked?'on':'off')));
 document.getElementById('cmPhFirstAt').addEventListener('change',e=>cmPost({pro_hold_first_at:e.target.value}, 'pro_hold first buy: '+({now:'at once (0.00%) — every coin it is given',flat:'no candles yet — only the 0.00% price line',start:'at the start of the chart',green:'at the first green',gar:'every green after a red while down or in a loss (sells on profit)'}[e.target.value]||e.target.value)));
 document.getElementById('cmPhPro').addEventListener('change',e=>cmPost({pro_hold_pro_buy:e.target.checked}, 'pro_hold ▲ BUY entry '+(e.target.checked?'on':'off')));
+document.getElementById('cmNoJupBuy').addEventListener('change',e=>{
+  cmPost({buy_jupiter:!e.target.checked}, e.target.checked?'Buys: Lightning / Local only (Jupiter sells only)':'Buys: Jupiter may buy too');
+});
 document.getElementById('cmAvoidMayhem').addEventListener('change',e=>{
   cmPost({avoid_mayhem:e.target.checked}, e.target.checked?'Skip Mayhem coins: on (never buys a coin pump can pause)':'Skip Mayhem coins: off');
 });

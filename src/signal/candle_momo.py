@@ -1903,7 +1903,9 @@ class CandleMomo:
         self.lat_ms.append(lat)
         c0, bps, why = await self._curve(mint)
         # graduated (PumpSwap) or quoted in another coin (not SOL): Jupiter prices them (user 2026-11-15)
-        jup = self._jup() if (not c0 and why in ("graduated", "not_on_curve", "not_sol_quote")) else None
+        # ...unless Jupiter buys are off: a coin priced in another coin cannot be bought by Lightning / Local
+        jup = self._jup() if (not c0 and why in ("graduated", "not_on_curve", "not_sol_quote")
+                              and (cfg.buy_jupiter or why != "not_sol_quote")) else None
         if not c0 and jup is None:
             if why in ("not_sol_quote", "graduated", "not_on_curve"):
                 self.unusable[mint] = why          # e.g. an hSOL-quoted coin: drop it, pick another

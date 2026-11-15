@@ -108,6 +108,14 @@ never sold) refused 707 Candles buys with `already_holding`; now only a second b
 Candles Results show "Net PnL (closed)", "Open trades now" and "Net incl. open". Not built (asked the user): a rule for
 dead held coins when Max hold is off.
 
+**Candles buys: Lightning / Local only (2026-11-15, user's request)**: Candles page switch "Buy only via Lightning /
+Local" (`buy_jupiter`, default false = on). `tx_route.jupiter_buy_off(side, reason)`: a Candles buy (`candle`,
+`candle_add`) never goes to Jupiter; when Jupiter was the only route left, `run_swap` returns `no_route: Jupiter buys are
+off …` and Candles drops the coin (`unusable`) and takes the next. Sells keep Jupiter as the last fallback. Paper drops a
+`not_sol_quote` coin the same way. Reason: 30 of 39 buys that day were pump coins priced in another coin (USDC …) that
+Lightning refuses ("Pool account not found") — Jupiter took ~4.5 s, opened extra accounts, and FOMO / J*B were among them.
+This supersedes "non-SOL-quoted coins route Lightning first, Jupiter fallback" for buys unless the switch is turned off.
+
 **PnL = the wallet's real SOL (2026-11-15, user's request)**: checked against all 68 on-chain transactions of the session
 (wallet −0.0044 while the Dashboard said +0.0507 and Candles +0.0076). Fixes: (1) `exec_history._parse_wallet_tx` — only
 the traded coin's own token account is a deposit; rent of any other account a route opens (~0.0015 SOL, Jupiter routes)

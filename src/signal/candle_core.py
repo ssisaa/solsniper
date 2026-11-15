@@ -184,6 +184,8 @@ class Config:
     source_seq: bool = False                 # Source Sequence: every step (>= 60s) the source moves on in SEQ_STEPS
     pinned_min_profit_pct: float = 1.5      # pinned coins: arm the profit sell at this % (whole trade, after fees);
                                              # ride the green run, sell on the first red while still >= it
+    buy_jupiter: bool = False                # False: buys go Lightning / Local only, a coin they cannot buy is dropped
+                                             # (Jupiter stays the last fallback for sells). True: Jupiter may buy too.
     avoid_mayhem: bool = True                # never buy a Mayhem coin (pump can pause it; a paused coin cannot sell)
     mixed_idle_s: float = 60.0               # mixed: a watched coin with no trade for this long hands over to the next turn
     max_mints: int = 1

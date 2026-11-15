@@ -932,6 +932,20 @@ async def _sell_landed_anyway(trader, sig: str, mint: str) -> bool:
         return False
 
 
+def jupiter_buy_off(side: str, reason: str) -> bool:
+    """Candles' buys go Lightning / Local (pump) only when its "Buy only via Lightning / Local" switch is on
+    (`buy_jupiter` false, the default — user 2026-11-15). Jupiter stays the last fallback for SELLS, always.
+    On 2026-11-15, 30 of 39 buys were Jupiter-routed coins priced in another coin (4.5 s to land, extra
+    route accounts ~0.0015 SOL each, the two big losers among them)."""
+    if side != "buy" or not str(reason or "").startswith("candle"):
+        return False
+    try:
+        from src.signal.candle_momo import get_engine
+        return not bool(getattr(get_engine().cfg, "buy_jupiter", False))
+    except Exception:
+        return False
+
+
 async def run_swap(trader, side: str, mint: str, sol: float = 0.0, raw: int = 0, reason: str = "", full: bool = True) -> Dict[str, Any]:
     """Ending pump uses the bonding curve. Starting pump uses pump-amm. Every other coin uses Jupiter."""
     t_route0 = time.perf_counter()
@@ -1022,6 +1036,16 @@ async def run_swap(trader, side: str, mint: str, sol: float = 0.0, raw: int = 0,
         ensure_lightning_warm()
         if not lightning_key():
             log.warning("TX %s Lightning selected but pumpportal.api_key is empty in sniper.yaml", side)
+    no_jup = jupiter_buy_off(side, reason)
+    jup_blocked = False            # Jupiter would have bought it, and Jupiter buys are off
+    if no_jup and "jupiter" in order:
+        jup_blocked = True
+        order = [n for n in order if n != "jupiter"]
+        if not order:
+            log.info("TX buy mint=%s reason=%s — only Jupiter could buy it and Jupiter buys are off: not bought",
+                     mint[:8], reason or "-")
+            return {"ok": False, "sig": "", "route": "", "tokens": 0, "sol": 0.0,
+                    "err": "no_route: Jupiter buys are off (Lightning / Local only)"}
     limits = {"local": 8.0, "lightning": 6.0, "pump": 3.0}
     # PumpPortal turns priorityFee into a Jito tip inside the pump transaction.
     # A pump-pool coin does not need that tip. Jupiter is not cut off.
@@ -1242,6 +1266,11 @@ async def run_swap(trader, side: str, mint: str, sol: float = 0.0, raw: int = 0,
                 _migrated(missed),
                 bool(_non_sol_quote(mint)),          # a coin quoted in another coin: Jupiter is always its fallback
             ))
+            if go_jupiter and no_jup:
+                jup_blocked = True
+                log.info("TX buy mint=%s — Lightning could not buy it (%s); Jupiter buys are off: not bought",
+                         mint[:8], missed[:80])
+                break
             if go_jupiter and "jupiter" not in names:
                 names.append("jupiter")
                 log.warning(
@@ -1254,6 +1283,10 @@ async def run_swap(trader, side: str, mint: str, sol: float = 0.0, raw: int = 0,
             if "not_sol_quote" not in missed:
                 log.warning("TX %s lightning stopped mint=%s — %s", side, mint[:8], missed[:80])
                 break
+    if jup_blocked:
+        # Lightning / Local could not buy it and Jupiter is not used for buys: Candles drops the coin (no_route)
+        return {"ok": False, "sig": "", "route": order[0], "tokens": 0, "sol": 0.0,
+                "err": ("no_route: Jupiter buys are off — " + str(last))[:160]}
     return {"ok": False, "sig": "", "route": order[0], "tokens": 0, "sol": 0.0, "err": str(last)[:160]}
 
 

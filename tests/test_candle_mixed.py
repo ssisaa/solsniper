@@ -406,6 +406,7 @@ def test_paper_buys_a_non_sol_quoted_coin_with_jupiter(tmp_path, monkeypatch):
     e = CM.CandleMomo()
     e.store = Store(str(tmp_path / "q.sqlite"), str(tmp_path / "q.jsonl"))
     e.cfg.fill_lag_ms, e.cfg.max_slippage_bps = 0, 10_000
+    e.cfg.buy_jupiter = True          # "Jupiter may buy too"; off (default) drops the coin as NOT_TRADABLE
 
     async def no_curve(mint):
         return None, 0, "not_sol_quote"
@@ -452,5 +453,40 @@ def test_non_sol_quoted_coin_tries_lightning_before_jupiter(monkeypatch):
     monkeypatch.setattr(TR, "_non_sol_quote", lambda m: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
     monkeypatch.setattr(TR, "ensure_lightning_warm", lambda: None)
     monkeypatch.setattr(TR, "lightning_held", lambda m: "")
+    monkeypatch.setattr(TR, "jupiter_buy_off", lambda side, reason: False)      # "Jupiter may buy too"
     out = asyncio.run(TR.run_swap(None, "buy", "Qx" + "a" * 38 + "pump", sol=0.005, reason="candle"))
     assert tried[:2] == ["lightning", "jupiter"] and not out["ok"]
+
+
+def test_candle_buy_never_uses_jupiter_when_switch_on_but_sell_does(monkeypatch):
+    """2026-11-15 (user): buys Lightning / Local only; Jupiter is a one-way fallback for sells."""
+    import asyncio
+    from src.execution import tx_route as TR
+    tried = []
+
+    async def fake_one(trader, name, side, mint, *a, **k):
+        tried.append((side, name))
+        return {"status": "skip", "err": 'lightning_400:{"errors":["Pool account not found"]}' if name == "lightning" else "NO_ROUTES_FOUND"}
+    monkeypatch.setattr(TR, "_one", fake_one)
+    monkeypatch.setattr(TR, "_non_sol_quote", lambda m: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
+    monkeypatch.setattr(TR, "ensure_lightning_warm", lambda: None)
+    monkeypatch.setattr(TR, "lightning_held", lambda m: "")
+    monkeypatch.setattr(TR, "jupiter_buy_off", lambda side, reason: side == "buy" and reason.startswith("candle"))
+    mint = "Qy" + "a" * 38 + "pump"
+    out = asyncio.run(TR.run_swap(None, "buy", mint, sol=0.005, reason="candle"))
+    assert tried == [("buy", "lightning")] and not out["ok"]
+    assert out["err"].startswith("no_route")                # Candles drops the coin and takes the next one
+    tried.clear()
+    asyncio.run(TR.run_swap(None, "sell", mint, raw=1000, reason="candle_sell"))
+    assert ("sell", "jupiter") in tried
+
+
+def test_jupiter_buy_off_follows_the_candles_switch(monkeypatch):
+    from src.execution import tx_route as TR
+    from src.signal import candle_momo as CM
+    eng = CM.get_engine()
+    monkeypatch.setattr(eng.cfg, "buy_jupiter", False, raising=False)
+    assert TR.jupiter_buy_off("buy", "candle") and TR.jupiter_buy_off("buy", "candle_add")
+    assert not TR.jupiter_buy_off("sell", "candle_sell") and not TR.jupiter_buy_off("buy", "dayscalp")
+    monkeypatch.setattr(eng.cfg, "buy_jupiter", True, raising=False)
+    assert not TR.jupiter_buy_off("buy", "candle")
