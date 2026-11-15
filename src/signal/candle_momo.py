@@ -1524,6 +1524,27 @@ class CandleMomo:
         tgt, tgt_from = self.green_target()
         return (float(up), tgt, tgt_from) if float(up) >= tgt else None
 
+    @staticmethod
+    def _late_buy(PT: Any, cs: List[Dict[str, Any]], prev_eval: Optional[int]) -> Optional[str]:
+        """The chart's ▲ BUY on a candle that arrived in a batch (user 2026-11-16: pump_rest delivered several
+        candles at once, only the newest was read, and the ▲ BUY tags at 02:35:10 / 02:35:14 never bought). Every
+        candle that is new since the last read is read too; a ▲ BUY on one of them, at most 5 s before the newest
+        candle, still buys. Returns the reason text, else None."""
+        if prev_eval is None or len(cs) < 2:
+            return None
+        last_t = cs[-1]["t"]
+        for i in range(len(cs) - 2, max(len(cs) - 7, 0), -1):
+            t = cs[i]["t"]
+            if t <= prev_eval or last_t - t > 5000:
+                break
+            try:
+                p = PT.analyze(cs[:i + 1], None, None)
+            except Exception:
+                return None
+            if p.get("call") == "BUY":
+                return (f"{p.get('why') or ''} (signal {(last_t - t) / 1000:.0f}s ago — its candle arrived late)").strip()
+        return None
+
     def _pro_evaluate(self, f: Feed, seen: float) -> None:
         """Rule "pro": a day trader's read of the 1s chart (src/signal/pro_trader.py) once per new candle.
         Flat + BUY call -> BUY; holding + SELL call (target / stop / time stop) -> SELL."""
@@ -1534,7 +1555,11 @@ class CandleMomo:
         # a pinned coin (Pinned mints) enters ONLY on the chart's ▲ BUY (user 2026-11-14): no first-candle / green-
         # after-red / ◆ BP entries for it; it still sells on profit like every pro_hold trade
         pinned = f.mint in (cfg.mints or [])
-        if (cfg.rule == "pro_hold" and cfg.pro_hold_first and live_rows and not pinned
+        # "only on the ▲ BUY signal" (user 2026-11-16): no first-candle / green-after-red / ◆ BP buys at all — a lot
+        # is bought only when the chart shows ▲ BUY (each new ▲ BUY adds one, up to Max lots / Total cap); it sells
+        # at the profit target like every pro_hold trade
+        sig_only = cfg.rule == "pro_hold" and cfg.pro_hold_first and cfg.pro_hold_first_at == "signal" and not pinned
+        if (cfg.rule == "pro_hold" and cfg.pro_hold_first and live_rows and not pinned and not sig_only
                 and not getattr(f, "first_done", False)
                 and f.mint not in self.positions
                 and not (self._avoid_mayhem_for(f) and self.mayhem_of.get(f.mint) is None and not f.board_state)):
@@ -1642,6 +1667,7 @@ class CandleMomo:
             return
         if rows[-1].t <= f.last_eval_t:
             return
+        prev_eval = f.last_eval_t
         f.last_eval_t = rows[-1].t
         cur = rows[-1]
         held = self.positions.get(f.mint)
@@ -1649,12 +1675,18 @@ class CandleMomo:
             self.pro_px.pop(f.mint, None)
         ctx = self.pro_context(f.mint)
         cs = [{"t": c.t, "o": c.open, "h": c.high, "l": c.low, "c": c.close, "v": c.volume} for c in rows]
-        if self.cfg.rule == "pro_hold" and pinned:
+        if self.cfg.rule == "pro_hold" and (pinned or sig_only):
             a = PT.analyze(cs, None, None)
             if a.get("call") == "BUY":
-                a = {"call": "BUY", "px": a.get("px"), "why": "▲ BUY (pinned coin) — " + str(a.get("why") or "")}
+                a = {"call": "BUY", "px": a.get("px"),
+                     "why": ("▲ BUY (pinned coin) — " if pinned else "▲ BUY signal — ") + str(a.get("why") or "")}
             else:
-                a = {"call": "WAIT"}                 # its exits are the pro_hold profit sell / Max hold
+                late = self._late_buy(PT, cs, prev_eval)
+                if late is not None:
+                    a = {"call": "BUY", "px": cur.close,
+                         "why": ("▲ BUY (pinned coin) — " if pinned else "▲ BUY signal — ") + late}
+                else:
+                    a = {"call": "WAIT"}             # its exits are the pro_hold profit sell / Max hold
         elif self.cfg.rule == "pro_hold":
             # pro_hold buys on Botpredict's call (user's choice 2026-11-14: tested +5.0%/trade on unseen coins with
             # sell-in-profit / Max hold, vs -0.7% on the Pro Trader setup); its own exits are profit / Max hold

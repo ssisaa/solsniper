@@ -985,3 +985,52 @@ def test_lot_marker_sits_on_the_candle_the_order_was_sent_in():
     assert int(CM.CandleMomo._mark_ts({"ts": 1794751388.30, "lot_t": 1794751387000})) == 1794751387
     assert CM.CandleMomo._mark_ts({"ts": 1794751377.49, "lot_t": 1794751373000}) == 1794751377.49   # slow feed: fill time
     assert CM.CandleMomo._mark_ts({"ts": 5.0}) == 5.0                                                # old lots
+
+
+def test_signal_only_buys_just_on_the_chart_buy(tmp_path, monkeypatch):
+    """pro_hold first buy "signal" (user 2026-11-16): no buy at the start, no green-after-red, no ◆ BP — only ▲ BUY."""
+    from src.signal import botpredict as BPm
+    from src.signal import pro_trader as PT
+    from src.signal import candle_core as C
+    e, f, rows, routed = _cm_engine(tmp_path, monkeypatch)
+    e.cfg.rule, e.cfg.pro_hold_first, e.cfg.pro_hold_first_at = "pro_hold", True, "signal"
+    f.age = 3
+    e.mayhem_of["MINT"] = False
+    monkeypatch.setitem(BPm.MODEL, "thr", 0.0)               # Botpredict would always buy: must be ignored
+    monkeypatch.setattr(PT, "analyze", lambda cs, h, held: {"call": "WAIT"})
+    e._evaluate(f, time.time())
+    f.books["pump_rest"].merge(rows[-1:])
+    e._evaluate(f, time.time())
+    assert not [r for r in routed if r["side"] == "BUY"]      # a new coin, but no ▲ BUY yet: nothing bought
+    monkeypatch.setattr(PT, "analyze", lambda cs, h, held: {"call": "BUY", "px": 1.0, "why": "VWAP dip"})
+    last = rows[-1]
+    f.books["pump_rest"].merge([C.Candle(t=last.t + 1000, open=last.close, high=last.close, low=last.close,
+                                         close=last.close, volume=1, final=True)])
+    e._evaluate(f, time.time())
+    buys = [r for r in routed if r["side"] == "BUY"]
+    assert len(buys) == 1 and buys[0]["pro_why"].startswith("▲ BUY signal") and not buys[0]["first"]
+
+
+def test_signal_on_a_candle_that_arrived_in_a_batch_still_buys(tmp_path, monkeypatch):
+    """2026-11-16: three candles came at once; the ▲ BUY was on the middle one and only the newest was read."""
+    from src.signal import pro_trader as PT
+    from src.signal import candle_core as C
+    e, f, rows, routed = _cm_engine(tmp_path, monkeypatch)
+    e.cfg.rule, e.cfg.pro_hold_first, e.cfg.pro_hold_first_at = "pro_hold", True, "signal"
+    e.mayhem_of["MINT"] = False
+    monkeypatch.setattr(PT, "analyze", lambda cs, h, held: {"call": "WAIT"})
+    e._evaluate(f, time.time())
+    f.books["pump_rest"].merge(rows[-1:])
+    e._evaluate(f, time.time())
+    last = rows[-1]
+    buy_t = last.t + 2000                                     # the ▲ BUY candle: the 2nd of the 3 new ones
+    monkeypatch.setattr(PT, "analyze", lambda cs, h, held: {"call": "BUY", "px": 1.0, "why": "VWAP dip"}
+                        if cs[-1]["t"] == buy_t else {"call": "WAIT"})
+    f.books["pump_rest"].merge([C.Candle(t=last.t + k * 1000, open=last.close, high=last.close, low=last.close,
+                                         close=last.close, volume=1, final=True) for k in (1, 2, 3)])
+    e._evaluate(f, time.time())
+    buys = [r for r in routed if r["side"] == "BUY"]
+    assert len(buys) == 1 and "arrived late" in buys[0]["pro_why"]
+    # a ▲ BUY more than 5 s before the newest candle is too old
+    from src.signal import candle_momo as CM
+    assert CM.CandleMomo._late_buy(PT, [{"t": 0}, {"t": 1000}, {"t": 9000}], 0) is None

@@ -229,6 +229,14 @@ was bought above it — a lot from another feed is now compared by this chart's 
 (`_lot_low(…, f.using)`), and "below" is strictly lower. Chart lot markers sit on the candle the order was SENT in (`_mark_ts`, `lot_t`; fill
 > 2 s later keeps the fill time) — drawn at the fill ~0.5 s later, L3 / L4 looked like the 2nd green after the red.
 
+**pro_hold "buy only on the ▲ BUY signal" (2026-11-16, user's request)**: first-buy dropdown `pro_hold_first_at` =
+`signal` (`sig_only` in `_pro_evaluate`): no first-candle, green-after-red or ◆ BP buy — a lot is bought only on the
+chart's ▲ BUY (Pro Trader call, read at each closed candle; reason "▲ BUY signal — …"), every new ▲ BUY adds a lot up to
+Max lots / Total cap, and it sells at `green_target()` like every pro_hold trade (not the pinned-coin rule). The normal
+entry checks still apply to these buys. The Pro Trader read needs 25 candles, so trades are rare on young coins. A ▲ BUY on a candle that arrived in a batch
+(pump_rest delivers several at once; only the newest was read — tags at 02:35:10 / 02:35:14 on a pinned coin never
+bought) still buys when it is ≤ 5 s before the newest candle (`_late_buy`, also for pinned coins; reason "… arrived late").
+
 **Candles avoid_mayhem (2026-11-14, user's request)**: Candles page "Skip Mayhem coins" (default on): no new
 Candles trade on a Mayhem coin (`MAYHEM_COIN` in `_entry_filters`; board `ms` or pump's mayhem-state, checked once per
 coin `_check_mayhem`); Mixed skips Mayhem rows. Reason: pump pauses Mayhem coins and a paused coin can't sell —
