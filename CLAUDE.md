@@ -103,6 +103,11 @@ fed or counted as open (`active_positions()`), so the next coin comes. Paused st
 (trader.buy: only a second buy of the same coin is refused; other open trades and leftover wallet coins don't block it; the wallet / second-buy gate is skipped for `candle`). Each lot's `px` is its REAL fill in chart units (paper: signal close × expected / got tokens; live: `_fill_px_chart` = chart close × fill price / curve price right after the fill) — GHOSTY's L1 filled 4× above its signal candle. The fast profit reading is scaled by `pos["impact"]` = real curve value / chart value from the value loop (selling a thin curve gets less than the chart shows). For the other sources a
 coin pump paused (`mayhem_state_of`, or `CandleMomo.is_paused` / `paused_mints`) holds no Max concurrent slot.
 
+**2026-11-15**: `_buy_live` still counted Candles' open trades against Max concurrent (2): FOMO + die (−96 %, Max hold 0 =
+never sold) refused 707 Candles buys with `already_holding`; now only a second buy of the same coin is refused there too.
+Candles Results show "Net PnL (closed)", "Open trades now" and "Net incl. open". Not built (asked the user): a rule for
+dead held coins when Max hold is off.
+
 **Graduated / non-SOL-quoted pump coins (2026-11-14/15, user's request)**: Candles trades coins off the pump curve (graduated / PumpSwap) and pump coins whose curve is quoted in another coin (`not_sol_quote`, common among callers' coins).
 Paper buys and sells are priced by Jupiter quotes at send and fill_lag_ms later (`_jup_quote_buy` / `_jup_quote_sell`,
 pool fee inside the quote) instead of dropping the coin as NOT_TRADABLE; live buys go Lightning → Jupiter

@@ -4434,6 +4434,8 @@ function paintCandle(d){
   const kv=(l,v,cls)=>`<div><span>${l}</span><b class="${cls||''}">${v}</b></div>`;
   const hrs=a.firstSignalTs?((Date.now()/1000-a.firstSignalTs)/3600).toFixed(1)+' h':'—';
   cmSet('cmResN', `· data ${hrs} (report needs ≥ 24 h)`);
+  // open (unsold) trades are not in Net PnL: show their loss / gain next to it
+  const cmOpenPnl=(d.positions||[]).reduce((s,p)=>s+(p.upct==null?0:Number(p.upnl_sol||0)),0);
   cmSet('cmRes', [
     kv('Signals BUY / SELL', `${st.signals?.BUY||0} / ${st.signals?.SELL||0}`),
     kv('Executed / failed', `${st.executed||0} / ${st.execFailed||0}`),
@@ -4441,7 +4443,9 @@ function paintCandle(d){
     kv('Win rate', a.winRate==null?'—':a.winRate+'%'),
     kv('Gross PnL', cmSol(a.grossPnlSol), m2Cls(a.grossPnlSol)),
     kv('Costs', (a.costsSol||0).toFixed(5)),
-    kv('Net PnL', cmSol(a.netPnlSol), m2Cls(a.netPnlSol)),
+    kv('Net PnL (closed)', cmSol(a.netPnlSol), m2Cls(a.netPnlSol)),
+    kv('Open trades now', cmSol(cmOpenPnl), m2Cls(cmOpenPnl)),
+    kv('Net incl. open', cmSol((a.netPnlSol||0)+cmOpenPnl), m2Cls((a.netPnlSol||0)+cmOpenPnl)),
     kv('Worst case (paused = 0)', cmSol(a.worstCasePnlSol), m2Cls(a.worstCasePnlSol)),
     kv('Signal→signed p50/p95', `${m2Num(st.latencyMs?.p50,0)} / ${m2Num(st.latencyMs?.p95,0)} ms`),
     kv('Signal→fill p50', `${m2Num(st.fillMs?.p50,0)} ms`),

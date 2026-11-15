@@ -2256,7 +2256,9 @@ class Trader:
             ]
             same = [p for p in live_open if p.mint == mint]
             callouts = [p for p in live_open if p not in foreign]
-            blocked = bool(same or len(callouts) >= cap)
+            # Candles keeps its own count: only a second buy of the same coin is refused, the Live Controls
+            # Max concurrent is not its limit (2026-11-15: two dead held coins refused 707 Candles buys in a row)
+            blocked = bool(same) if source == "candle" else bool(same or len(callouts) >= cap)
         else:
             blocked = any(p.status == "OPEN" for p in self.manager.positions.values())
         if blocked:
