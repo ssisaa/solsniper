@@ -903,6 +903,8 @@ def _garl(tmp_path, monkeypatch, candles, lots):
     for lot in lots:
         if "k" in lot:
             lot["lot_t"] = t + lot.pop("k") * 1000
+        if "ts_k" in lot:
+            lot["ts"] = (t + lot.pop("ts_k") * 1000) / 1000.0 + 0.5
     e.positions["NEW"] = {"mint": "NEW", "mode": "paper", "upct": -5.0, "value_at": time.time(), "lots": lots,
                           "entry_sol": 0.005, "tokens": 1.0, "entry_ts": time.time()}
     return e, f, routed
@@ -954,3 +956,32 @@ def test_gar_low_starts_with_a_buy_and_plain_gar_is_unchanged(tmp_path, monkeypa
     e.cfg.pro_hold_first_at = "gar"
     e._evaluate(f, time.time())
     assert [r for r in routed if r["side"] == "BUY" and "lower the average" in r["pro_why"]]
+
+
+def test_gar_low_lot1_bought_on_another_feed_uses_this_charts_candle(tmp_path, monkeypatch):
+    """SXSN 2026-11-15: lot 1 was bought on pump_rest (price 2.157e-06), the chart then ran on the stream (2.5e-08):
+    every candle looked below lot 1, and lot 2 was bought ABOVE it. The low is now this chart's candle at the buy."""
+    chart = [(2.55, 2.55, 2.55, 2.55), (2.55, 3.3, 2.55, 3.3), (3.3, 3.3, 2.46, 3.0), (3.0, 3.2, 3.0, 3.2)]
+    lot1 = {"n": 1, "src": "stream", "px": 215.7, "lot_t": 1, "ts_k": 0}
+    e, f, routed = _garl(tmp_path, monkeypatch, chart, [dict(lot1)])
+    e._evaluate(f, time.time())
+    assert not [r for r in routed if r["side"] == "BUY"]          # green opens at 3.0, above lot 1's low 2.55
+    chart = [(2.55, 2.55, 2.55, 2.55), (2.55, 2.6, 2.3, 2.4), (2.4, 2.5, 2.4, 2.5)]
+    e, f, routed = _garl(tmp_path, monkeypatch, chart, [dict(lot1)])
+    e._evaluate(f, time.time())
+    assert len([r for r in routed if r["side"] == "BUY"]) == 1    # red low 2.3 and green open 2.4 are under 2.55
+
+
+def test_gar_low_equal_low_is_not_lower(tmp_path, monkeypatch):
+    e, f, routed = _garl(tmp_path, monkeypatch, [(2.0, 2.1, 1.9, 2.0), (2.0, 2.0, 1.9, 1.9), (1.9, 2.0, 1.9, 2.0)],
+                         [{"n": 1, "k": 0}])
+    e._evaluate(f, time.time())
+    assert not [r for r in routed if r["side"] == "BUY"]
+
+
+def test_lot_marker_sits_on_the_candle_the_order_was_sent_in():
+    from src.signal import candle_momo as CM
+    # sent 0.76 s into candle 387, filled at 388.3: the marker belongs to candle 387
+    assert int(CM.CandleMomo._mark_ts({"ts": 1794751388.30, "lot_t": 1794751387000})) == 1794751387
+    assert CM.CandleMomo._mark_ts({"ts": 1794751377.49, "lot_t": 1794751373000}) == 1794751377.49   # slow feed: fill time
+    assert CM.CandleMomo._mark_ts({"ts": 5.0}) == 5.0                                                # old lots

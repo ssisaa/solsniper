@@ -1299,11 +1299,11 @@ class CandleMomo:
             # "buy green after red – low below" (user 2026-11-15): a new lot only when the red candle's low AND this
             # green's open are not higher than the previous lot's low (L1: the low of the candle it was bought in;
             # later lots: their own red's low / green's open). Each lot sits lower than the one before.
-            ref = self._lot_low(held, live_rows)
+            ref = self._lot_low(held, live_rows, f.using)
             low_ref = min(prev.low, c.open)
-            if ref is None or held.get("closing") or not (prev.low <= ref and c.open <= ref):
+            if ref is None or held.get("closing") or not (prev.low < ref and c.open < ref):
                 return False
-            why = (f"green after red, low below — red low {prev.low:.4g} and green open {c.open:.4g} are not above the "
+            why = (f"green after red, low below — red low {prev.low:.4g} and green open {c.open:.4g} are under the "
                    f"last lot's low {ref:.4g}: buys again lower (sells on profit)")
         elif held is None:
             peak = max(x.high for x in live_rows)
@@ -1324,21 +1324,30 @@ class CandleMomo:
         return True
 
     @staticmethod
-    def _lot_low(held: Dict[str, Any], rows: List[Candle]) -> Optional[float]:
-        """The last lot's low for "low below": its stored red low / green open (lots 2+), else the low of the candle
-        the lot was bought in (lot 1; found by the signal's candle, else by the fill time), else its buy price."""
+    def _lot_low(held: Dict[str, Any], rows: List[Candle], using: str = "") -> Optional[float]:
+        """The last lot's low for "low below", in the units of the chart now used (`rows`).
+        Same feed as the lot: its stored red low / green open (lots 2+), else the low of the candle it was bought in.
+        Other feed (the lot was bought on pump_rest, the chart is now the stream — their prices are in different
+        units: SXSN 2026-11-15, lot 1 at 2.157e-06 vs 2.5e-08, so every later candle looked "below"): the low of this
+        chart's candle at the lot's fill time (lots 2+: also the candle before it). No such candle -> None (no buy)."""
         lots = held.get("lots") or []
         last = lots[-1] if lots else {}
+        same = not using or last.get("src") in (None, using)
         ref = float(last.get("low_ref") or 0)
-        if ref > 0:
+        if same and ref > 0:
             return ref
-        t = last.get("lot_t")
+        t = last.get("lot_t") if same else None
         ts = float(last.get("ts") or held.get("entry_ts") or 0) * 1000.0
-        for x in reversed(rows):
+        for k in range(len(rows) - 1, -1, -1):
+            x = rows[k]
             if (t is not None and x.t == t) or (t is None and x.t <= ts):
-                return float(x.low) if x.low > 0 else None
-        px = float(last.get("px") or 0)
-        return px if px > 0 else None
+                if t is None and ts - x.t > 5000:
+                    return None                       # the chart has no candle near the buy
+                low = float(x.low)
+                if len(lots) > 1 and k > 0:
+                    low = min(low, float(rows[k - 1].low))
+                return low if low > 0 else None
+        return None
 
     def _fast_upct(self, held: Dict[str, Any], f: Feed, price: float) -> Optional[float]:
         """Whole trade % after fees from the chart price: each lot's buy price (same feed units) against the price
@@ -2342,10 +2351,23 @@ class CandleMomo:
         self.started_at = time.time()
         return moved
 
+    @staticmethod
+    def _mark_ts(lot: Dict[str, Any]) -> Any:
+        """Where a lot's marker sits on the chart: the candle its order was SENT in (`lot_t`), not the fill ~0.5 s
+        later — a buy sent late in a green was drawn under the NEXT candle (SXSN 2026-11-15: L3 / L4 looked like the
+        2nd green after the red). A fill more than 2 s after its candle (slow feed) keeps the fill time."""
+        ts, t = lot.get("ts"), lot.get("lot_t")
+        try:
+            if t and ts and 0 <= float(ts) - float(t) / 1000.0 <= 2.0:
+                return float(t) / 1000.0 + 0.5
+        except (TypeError, ValueError):
+            pass
+        return ts
+
     def chart_marks(self, mint: str) -> Dict[str, Any]:
         """Entries / exits to draw on the chart: the open trade's lots and the last closed trades."""
         held = self.positions.get(mint) or {}
-        lots = [{"ts": l.get("ts"), "n": l.get("n"), "sol": l.get("sol"), "px": l.get("px")} for l in (held.get("lots") or [])]
+        lots = [{"ts": self._mark_ts(l), "n": l.get("n"), "sol": l.get("sol"), "px": l.get("px")} for l in (held.get("lots") or [])]
         if held and not lots:
             lots = [{"ts": held.get("entry_ts"), "n": 1, "sol": held.get("entry_sol")}]
         closed = []

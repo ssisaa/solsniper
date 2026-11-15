@@ -198,7 +198,11 @@ dropdown (`pro_hold_first_at` = `gar_low`). Lot 1 at the start like "gar"; flat 
 green after a red adds a lot only when that red's low AND the green's open are not higher than the last lot's low
 (`_lot_low`: lot 1 = the low of the candle it was bought in, `lot_t`; lots 2+ = their own min(red low, green open),
 `low_ref`, both stored on the lot) — each lot sits below the one before; no trade-in-loss reading needed. Max lots /
-Total cap still limit it. "gar" and every other choice are unchanged.
+Total cap still limit it. "gar" and every other choice are unchanged. Fixed the same day (SXSN): lot 1 was bought on pump_rest
+(2.157e-06) and the chart then ran on the stream (2.5e-08, other units), so every candle looked below lot 1 and lot 2
+was bought above it — a lot from another feed is now compared by this chart's candle at its fill time
+(`_lot_low(…, f.using)`), and "below" is strictly lower. Chart lot markers sit on the candle the order was SENT in (`_mark_ts`, `lot_t`; fill
+> 2 s later keeps the fill time) — drawn at the fill ~0.5 s later, L3 / L4 looked like the 2nd green after the red.
 
 **Candles avoid_mayhem (2026-11-14, user's request)**: Candles page "Skip Mayhem coins" (default on): no new
 Candles trade on a Mayhem coin (`MAYHEM_COIN` in `_entry_filters`; board `ms` or pump's mayhem-state, checked once per
