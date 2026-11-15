@@ -18,7 +18,7 @@ log = logging.getLogger("sol-sniper.exec_history")
 
 ROOT = Path(__file__).resolve().parents[2]
 HISTORY_PATH = ROOT / "logs" / "exec_history.jsonl"
-WALLET_KEEP = 50
+WALLET_KEEP = 150      # a day's trades must stay in view: buys that rolled out of 50 made closed trades look cheaper
 WALLET_SHOW = 50
 WALLET_HISTORY_PATH = ROOT / "logs" / "wallet_exec.jsonl"
 
@@ -609,9 +609,7 @@ async def _parse_wallet_tx(client, url: str, sig: str, pubkey: str) -> Dict[str,
     # It comes back when the coin is sold and the account closes. The trade is
     # max position plus the network fee only.
     # Sign matters: an account opened in this tx took SOL out of the wallet, one closed put SOL back.
-    # A sell routed through another token (e.g. coin -> MUSK4 -> SOL) opens a MUSK4 account: that
-    # rent is a deposit, so it is added back to the sale, not subtracted from it.
-    opened_rent = 0.0
+    opened: Dict[int, float] = {}
     closed_rent = 0.0
     for i, pre in enumerate(pre_b):
         if i == user_i or i >= len(post_b):
@@ -619,15 +617,10 @@ async def _parse_wallet_tx(client, url: str, sig: str, pubkey: str) -> Dict[str,
         pre_v = int(pre or 0)
         post_v = int(post_b[i] or 0)
         if pre_v == 0 and post_v > 0:
-            opened_rent += post_v / 1_000_000_000
+            opened[i] = post_v / 1_000_000_000
         elif pre_v > 0 and post_v == 0:
             closed_rent += pre_v / 1_000_000_000
-    if sol_delta > 0:
-        trade_sol = sol_delta + opened_rent - closed_rent      # sell: SOL that came from the swap
-    else:
-        trade_sol = -sol_delta - opened_rent + closed_rent     # buy: SOL that went into the swap
-    if trade_sol < 0.00002:
-        trade_sol = 0.0
+    opened_rent = sum(opened.values())
 
     def token_bals(key: str) -> Dict[str, float]:
         out: Dict[str, float] = {}
@@ -649,6 +642,20 @@ async def _parse_wallet_tx(client, url: str, sig: str, pubkey: str) -> Dict[str,
         delta = post_t.get(mint, 0.0) - pre_t.get(mint, 0.0)
         if abs(delta) > abs(best_delta):
             best_mint, best_delta = mint, delta
+    # Only the traded coin's own token account is a deposit that comes back when the coin is sold.
+    # Any other account a route opens (a pass-through coin, a pool account: ~0.0015 SOL each) is paid by
+    # the wallet and does not come back by itself — it is part of what the trade cost (2026-11-15: six
+    # such accounts, 0.0092 SOL, were in no PnL figure).
+    own_rent = 0.0
+    for b in meta.get("postTokenBalances") or []:
+        if (b.get("owner") or "") == pubkey and best_mint and (b.get("mint") or "") == best_mint:
+            own_rent += opened.get(int(b.get("accountIndex") if b.get("accountIndex") is not None else -1), 0.0)
+    if sol_delta > 0:
+        trade_sol = sol_delta + own_rent - closed_rent         # sell: SOL the wallet really got
+    else:
+        trade_sol = -sol_delta - own_rent + closed_rent        # buy: SOL the wallet really paid
+    if trade_sol < 0.00002:
+        trade_sol = 0.0
     if not best_mint:
         for mint in _walk_mints(msg.get("instructions") or []):
             best_mint = mint

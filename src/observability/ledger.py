@@ -468,6 +468,10 @@ class TradeLedger:
         log.warning("PNL total cleared")
         return self.pnl_board()
 
+    def set_open_mints(self, mints) -> None:
+        """Coins the bot holds as an open trade now (they are not 'unsold' leftovers)."""
+        self._open_mints = set(mints or ())
+
     def set_chain_rows(self, rows: List[Dict[str, Any]]) -> None:
         """Latest wallet transactions. These are the SOL amounts on Solscan."""
         self._chain_rows = list(rows or [])
@@ -535,6 +539,16 @@ class TradeLedger:
             elif lots and sell["sol"] > 0 and sell["tokens"] <= 0:
                 cost = lots[-1]["sol"]
                 lots[-1]["sol"] = 0.0
+            # The wallet list is a window: when the buys it still shows do not cover the coins sold (older
+            # buys rolled out), the cost is the ledger's own close row for this sale, not the partial sum.
+            booked = None
+            if not lots or (sell["tokens"] > 0 and need > 0.02 * sell["tokens"]):
+                near = [e for e in self.entries if e.side == "CLOSE" and e.mint == sell["mint"]
+                        and abs(float(e.ts or 0) - sell["ts"]) <= 180]
+                if near:
+                    booked = min(near, key=lambda e: abs(float(e.ts or 0) - sell["ts"]))
+            if booked is not None:
+                cost = float(booked.entry_sol or 0) + float(booked.entry_fee_sol or 0) + float(booked.entry_tip_sol or 0)
             elif not lots:
                 opened = [
                     e for e in self.entries
@@ -676,7 +690,27 @@ class TradeLedger:
         # list. Wallet equity − invested (which also counts coins still held / stuck in the wallet) is
         # its own figure, "Wallet vs invested". Mixing them showed −0.0043 next to 85% wins.
         daily_out, d30_out, total_out = daily, d30, total
+        # Coins bought this session and never sold (flagged dust / left in the wallet) are no sale, so
+        # they are in no card above. Their cost is shown on its own line (J*B: 0.0201 SOL, 2026-11-15).
+        unsold = 0.0
+        unsold_n = 0
+        open_now = set(getattr(self, "_open_mints", None) or ())
+        last_close: Dict[str, float] = {}
+        for e in self.entries:
+            if e.side == "CLOSE" and e.mint:
+                last_close[e.mint] = max(last_close.get(e.mint, 0.0), float(e.ts or 0))
+        for c in chain:
+            last_close[c["mint"]] = max(last_close.get(c["mint"], 0.0), float(c["ts"] or 0))
+        for e in self.entries:
+            if e.side != "OPEN" or not e.mint or float(e.ts or 0) < epoch or e.mint in open_now:
+                continue
+            if now - float(e.ts or 0) < 120 or last_close.get(e.mint, 0.0) >= float(e.ts or 0) - 1:
+                continue
+            unsold += float(e.entry_sol or 0) + float(e.entry_fee_sol or 0) + float(e.entry_tip_sol or 0)
+            unsold_n += 1
         return {
+            "pnl_unsold_sol": round(-unsold, 6),
+            "pnl_unsold_n": unsold_n,
             "pnl_daily_sol": round(daily_out, 6),
             "pnl_live_sol": round(float(self._live or 0), 6),
             "pnl_30d_sol": round(d30_out, 6),
@@ -1537,7 +1571,9 @@ class TradeLedger:
                 # for this trip's own sell, but never take the next trip's buy (it is matched by sig).
                 buy_end = min(buy_end, stop - 1.5)
                 end = min(end, stop)
-            own_sigs = ([op.signature] + list(op.add_sigs or [])) if op is not None else []
+            # each signature once: an old pass could store a ladder buy's signature as the open's own, and
+            # that buy was then counted twice (GREGORY / billie / DICKCOIN one buy too many, 2026-11-15)
+            own_sigs = list(dict.fromkeys([op.signature] + list(op.add_sigs or []))) if op is not None else []
             own_buys = [buy_by_sig[s] for s in own_sigs if s and s in buy_by_sig and s not in used]
             if own_buys and own_buys[0]["sig"] == (op.signature if op is not None else None):
                 seg_buys = own_buys
@@ -1591,63 +1627,73 @@ class TradeLedger:
             fee_sol = sum(f["sol"] for f in seg_fees)
             source = str((op.source if op else closes[0].source) or "").lower()
             known = {"launch": 0.00005, "dayscalp": 0.00002, "predict": 0.00002, "callout": 0.00002}.get(source)
-            # The wallet labels the SOL above the 0.015 buy as a 0.0015 fee.
-            # Launch and Dayscalp do not. The fee is the priority fee only.
-            if known is None:
-                try:
-                    from src.config.runtime import get_config
-                    cap = float(get_config().max_position_sol or 0)
-                except Exception:
-                    cap = 0.0
-                cap *= max(1, len(seg_buys))
-                if cap > 0 and buy_sol > cap + 0.00005 and (buy_sol - cap) <= 0.006:
-                    spill = round(buy_sol - cap, 6)
-                    buy_sol = round(cap, 6)
-                    if fee_sol <= 0.00005:
-                        fee_sol = spill
+            # The wallet list is a window (latest 150 transactions) and lags a few seconds behind a new buy.
+            # When it shows fewer buys than the ledger itself counted (lot 1 + ladder adds), it is not the
+            # whole trade: keep the ledger's cost. Using the partial list booked GREGORY with 2 of 4 buys
+            # and billie with 3 of 5 (2026-11-15: +0.0121 and +0.0223 shown, +0.0005 and +0.0078 real).
+            incomplete = op is not None and len(seg_buys) < len({s for s in [op.signature or "lot1"] + list(op.add_sigs or []) if s})
+            if incomplete:
+                buy_sol = float(op.entry_sol or 0)
+                buy_tokens = float(op.token_amount or 0)
+                fee_sol = float(op.entry_fee_sol or 0)
             else:
-                try:
-                    from src.config.runtime import get_config
-                    cap = float(get_config().max_position_sol or 0)
-                except Exception:
-                    cap = 0.0
-                # Each wallet BUY row is the SOL that went into that buy (rent is its own RENT row). Only a
-                # single buy that is above Max position by about a token-account rent is trimmed back. The old
-                # whole-trade cap cut Candles ladder trades (2-3 buys) and Lightning overpays to one Max
-                # position, so losses were booked as wins (COOK, Huang 2026-11-13).
-                if cap > 0:
-                    trimmed = 0.0
-                    for b in seg_buys:
-                        sol_b = float(b["sol"] or 0)
-                        if 0.0014 <= sol_b - cap <= 0.0021:
-                            sol_b = cap
-                        trimmed += sol_b
-                    buy_sol = round(trimmed, 9)
-                fee_sol = known * max(1, len(seg_buys))
-                if op is not None:
-                    op.entry_tip_sol = 0.0
-            if op is not None and buy_sol > 0:
-                changed = False
-                if abs(float(op.entry_sol or 0) - buy_sol) > 0.00005:
-                    op.entry_sol = round(buy_sol, 6)
-                    changed = True
-                if buy_tokens > 0 and abs(float(op.token_amount or 0) - buy_tokens) > 0.01:
-                    op.token_amount = buy_tokens
-                    changed = True
-                if abs(float(op.entry_fee_sol or 0) - fee_sol) > 1e-8 or (known is not None and abs(float(op.entry_tip_sol or 0)) > 1e-9):
-                    op.entry_fee_sol = round(fee_sol, 8)
-                    if known is not None:
+                # The wallet labels the SOL above the 0.015 buy as a 0.0015 fee.
+                # Launch and Dayscalp do not. The fee is the priority fee only.
+                if known is None:
+                    try:
+                        from src.config.runtime import get_config
+                        cap = float(get_config().max_position_sol or 0)
+                    except Exception:
+                        cap = 0.0
+                    cap *= max(1, len(seg_buys))
+                    if cap > 0 and buy_sol > cap + 0.00005 and (buy_sol - cap) <= 0.006:
+                        spill = round(buy_sol - cap, 6)
+                        buy_sol = round(cap, 6)
+                        if fee_sol <= 0.00005:
+                            fee_sol = spill
+                else:
+                    try:
+                        from src.config.runtime import get_config
+                        cap = float(get_config().max_position_sol or 0)
+                    except Exception:
+                        cap = 0.0
+                    # Each wallet BUY row is the SOL that went into that buy (rent is its own RENT row). Only a
+                    # single buy that is above Max position by about a token-account rent is trimmed back. The old
+                    # whole-trade cap cut Candles ladder trades (2-3 buys) and Lightning overpays to one Max
+                    # position, so losses were booked as wins (COOK, Huang 2026-11-13).
+                    if cap > 0:
+                        trimmed = 0.0
+                        for b in seg_buys:
+                            sol_b = float(b["sol"] or 0)
+                            if 0.0014 <= sol_b - cap <= 0.0021:
+                                sol_b = cap
+                            trimmed += sol_b
+                        buy_sol = round(trimmed, 9)
+                    fee_sol = known * max(1, len(seg_buys))
+                    if op is not None:
                         op.entry_tip_sol = 0.0
-                    changed = True
-                op.cost_basis_sol = round(float(op.entry_sol or 0) + float(op.entry_fee_sol or 0) + float(op.entry_tip_sol or 0), 6)
-                buy_sig = next((b["sig"] for b in seg_buys if b["sig"]), "")
-                if buy_sig and op.signature != buy_sig:
-                    op.signature = buy_sig
-                    op.solscan_tx = solscan_tx_url(buy_sig)
-                    changed = True
-                if changed:
-                    fixed += 1
-                    self._push_remote(op)
+                if op is not None and buy_sol > 0:
+                    changed = False
+                    if abs(float(op.entry_sol or 0) - buy_sol) > 0.00005:
+                        op.entry_sol = round(buy_sol, 6)
+                        changed = True
+                    if buy_tokens > 0 and abs(float(op.token_amount or 0) - buy_tokens) > 0.01:
+                        op.token_amount = buy_tokens
+                        changed = True
+                    if abs(float(op.entry_fee_sol or 0) - fee_sol) > 1e-8 or (known is not None and abs(float(op.entry_tip_sol or 0)) > 1e-9):
+                        op.entry_fee_sol = round(fee_sol, 8)
+                        if known is not None:
+                            op.entry_tip_sol = 0.0
+                        changed = True
+                    op.cost_basis_sol = round(float(op.entry_sol or 0) + float(op.entry_fee_sol or 0) + float(op.entry_tip_sol or 0), 6)
+                    buy_sig = next((b["sig"] for b in seg_buys if b["sig"]), "")
+                    if buy_sig and op.signature != buy_sig and buy_sig not in (op.add_sigs or []):
+                        op.signature = buy_sig
+                        op.solscan_tx = solscan_tx_url(buy_sig)
+                        changed = True
+                    if changed:
+                        fixed += 1
+                        self._push_remote(op)
             if (op is not None and not closes and seg_sells and buy_sol > 0
                     and time.time() - max(s["ts"] for s in seg_sells) > 30):
                 # The wallet sold every token of a trade the ledger still lists as open (the bot was

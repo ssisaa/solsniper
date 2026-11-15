@@ -2900,12 +2900,49 @@ class CandleMomo:
                     return "FAR_BELOW_PEAK", f"{(1 - price / peak) * 100:.0f}% below the coin's high"
         return "", ""
 
+    def _sync_wallet_cash(self) -> int:
+        """Closed LIVE trades take the Trade Ledger's wallet figures (SOL really paid and got back).
+
+        Candles books a trade at the planned lot size and the sell reply; the wallet also paid for accounts a
+        route opened (~0.0015 SOL each) and lots that filled above / below the size (2026-11-15: Candles showed
+        +0.0076 SOL while the wallet was −0.0044). The ledger is matched to the wallet's transactions a few
+        seconds after each sale, so its row is the truer one. Rows with no ledger sale are left as they are."""
+        if not self.store:
+            return 0
+        from src.observability.ledger import get_ledger
+        closes = [e for e in get_ledger().entries if e.side == "CLOSE" and e.mint and float(e.exit_sol or 0) > 0]
+        if not closes:
+            return 0
+        n = 0
+        cut = time.time() - 86400
+        for t in self.store.trades(200):
+            if t.get("mode") != "live" or float(t.get("exit_ts") or 0) < cut or str(t.get("why") or "").startswith("sold by "):
+                continue
+            near = [e for e in closes if e.mint == t.get("mint") and abs(float(e.ts or 0) - float(t["exit_ts"])) <= 180]
+            if len(near) != 1:
+                continue          # no ledger sale, or a sale in parts: keep Candles' own figures
+            e = near[0]
+            cost = float(e.entry_sol or 0) + float(e.entry_fee_sol or 0) + float(e.entry_tip_sol or 0)
+            pnl = float(e.exit_sol or 0) - cost - float(e.exit_fee_sol or 0)
+            if cost <= 0 or abs(pnl - float(t.get("pnl_sol") or 0)) <= 0.00005:
+                continue
+            self.store.set_trade_cash(t["id"], cost, float(e.exit_sol or 0), pnl)
+            n += 1
+        return n
+
     # ---------- valuation
     async def _value_loop(self) -> None:
         from src.execution import pump_curve as PC
         warm_at = 0.0
+        cash_at = 0.0
         while True:
             await asyncio.sleep(1.0 if self.positions else 2.0)   # 1s while holding: the pause guard reacts fast
+            if time.time() - cash_at >= 20.0:
+                cash_at = time.time()
+                try:
+                    self._sync_wallet_cash()
+                except Exception:
+                    log.debug("candle wallet-cash sync failed", exc_info=True)
             if time.time() - warm_at >= 1.9:      # warm-up stays every 2s
                 warm_at = time.time()
                 try:
@@ -2932,7 +2969,7 @@ class CandleMomo:
                         if time.time() - gone < 10 and not self._find_exit(mint, float(pos.get("entry_ts") or 0)):
                             continue
                         self._live_closed(mint, None, f"sold by {pos['support']}'s own rule"
-                                          if pos.get("support") else "no longer open in the bot (sold or closed elsewhere)")
+                                          if pos.get("support") else "sold — the sale confirmed late (or a manual Sell), amount taken from the wallet")
                         continue
                     pos.pop("gone_at", None)
                 if pos.get("paused_at"):

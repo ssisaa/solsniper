@@ -288,3 +288,72 @@ def test_paper_strategy_trades_a_coin_once(monkeypatch):
 
     assert "one trade per coin" in asyncio.run(go())
     assert e._trade_done(e.pin) == "its paper copy trade closed"
+
+
+def _iso_ledger(tmp_path, monkeypatch, cap=0.005):
+    from src.observability import ledger as L
+    monkeypatch.setattr(L.TradeLedger, "_push_remote", lambda self, e: None)
+    monkeypatch.setattr(L.TradeLedger, "_load_remote", lambda self: None)
+    monkeypatch.setattr(L.TradeLedger, "_book_path", lambda self: tmp_path / "book.json")
+    import src.observability.email_alert as email
+    monkeypatch.setattr(email, "notify_open", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(email, "notify_close", lambda *a, **k: None, raising=False)
+    from src.config import runtime
+    monkeypatch.setattr(runtime, "get_config", lambda: type("C", (), {"max_position_sol": cap})())
+    return L.TradeLedger(tmp_path / "ledger.jsonl")
+
+
+def test_reconcile_keeps_cost_when_wallet_window_misses_buys(tmp_path, monkeypatch):
+    """2026-11-15: buys that rolled out of the wallet list booked a 4-buy trade with 2 buys' cost."""
+    lg = _iso_ledger(tmp_path, monkeypatch)
+    t = float(int(time.time()) - 4000)
+    op = lg.record_open(id="o", mint=MINT, symbol="GRE", mode="live", token_amount=1e4, entry_sol=0.005,
+                        entry_fee_sol=0.000025, entry_tip_sol=0.0, price_sol_per_token=0.0, signature="B1", source="candle")
+    op.ts = t
+    for i in (2, 3, 4):
+        lg.add_to_open(MINT, 0.005, 0.000025, 1e4, f"B{i}")
+    cl = lg.record_close(id="c", mint=MINT, symbol="GRE", mode="live", token_amount=4e4, entry_sol=0.02,
+                         entry_fee_sol=0.0001, entry_tip_sol=0.0, exit_sol=0.0221, exit_fee_sol=0.00001,
+                         hold_seconds=50, reason="candle_sell", signature="S1", source="candle", ts=t + 55)
+    # the wallet list now shows only the last two buys and the sell
+    rows = [
+        {"signature": "B3", "side": "BUY", "mint": MINT, "sol_amount": 0.005025, "token_amount": 1e4, "ts": t + 30},
+        {"signature": "B4", "side": "BUY", "mint": MINT, "sol_amount": 0.005025, "token_amount": 1e4, "ts": t + 40},
+        {"signature": "S1", "side": "SELL", "mint": MINT, "sol_amount": 0.0221, "token_amount": 4e4, "ts": t + 55},
+    ]
+    lg.set_chain_rows(rows)
+    lg.reconcile_wallet_sells(rows)
+    assert abs(op.entry_sol - 0.02) < 1e-9                      # not shrunk to the two buys still listed
+    assert abs(cl.pnl_sol - (0.0221 - 0.0201 - 0.00001)) < 1e-6
+    assert abs(lg.pnl_board()["pnl_total_sol"] - cl.pnl_sol) < 1e-5   # the card uses the ledger row, not 2 buys
+
+
+def test_board_shows_unsold_coin_cost(tmp_path, monkeypatch):
+    lg = _iso_ledger(tmp_path, monkeypatch)
+    op = lg.record_open(id="o", mint=MINT, symbol="JOB", mode="live", token_amount=1e4, entry_sol=0.02,
+                        entry_fee_sol=0.0001, entry_tip_sol=0.0, price_sol_per_token=0.0, signature="B1", source="candle")
+    op.ts = time.time() - 600
+    lg.set_open_mints({MINT})
+    assert lg.pnl_board()["pnl_unsold_sol"] == 0                # still an open trade
+    lg.set_open_mints(set())
+    b = lg.pnl_board()
+    assert abs(b["pnl_unsold_sol"] + 0.0201) < 1e-9 and b["pnl_unsold_n"] == 1
+
+
+def test_reconcile_counts_each_buy_once_when_open_sig_is_a_ladder_sig(tmp_path, monkeypatch):
+    lg = _iso_ledger(tmp_path, monkeypatch)
+    t = float(int(time.time()) - 4000)
+    op = lg.record_open(id="o", mint=MINT, symbol="GRE", mode="live", token_amount=1e4, entry_sol=0.005,
+                        entry_fee_sol=0.0, entry_tip_sol=0.0, price_sol_per_token=0.0, signature="B1", source="candle")
+    op.ts = t
+    for i in (2, 3):
+        lg.add_to_open(MINT, 0.005, 0.0, 1e4, f"B{i}")
+    op.signature = "B3"                                     # what an old pass left behind
+    cl = lg.record_close(id="c", mint=MINT, symbol="GRE", mode="live", token_amount=3e4, entry_sol=0.015,
+                         entry_fee_sol=0.0, entry_tip_sol=0.0, exit_sol=0.0166, exit_fee_sol=0.00001,
+                         hold_seconds=50, reason="candle_sell", signature="S1", source="candle", ts=t + 55)
+    rows = [{"signature": f"B{i}", "side": "BUY", "mint": MINT, "sol_amount": 0.005025, "token_amount": 1e4, "ts": t + i}
+            for i in (1, 2, 3)]
+    rows.append({"signature": "S1", "side": "SELL", "mint": MINT, "sol_amount": 0.0166, "token_amount": 3e4, "ts": t + 55})
+    lg.reconcile_wallet_sells(rows)
+    assert abs(cl.entry_sol + cl.entry_fee_sol - 0.015075) < 1e-6      # three buys, not four

@@ -108,6 +108,18 @@ never sold) refused 707 Candles buys with `already_holding`; now only a second b
 Candles Results show "Net PnL (closed)", "Open trades now" and "Net incl. open". Not built (asked the user): a rule for
 dead held coins when Max hold is off.
 
+**PnL = the wallet's real SOL (2026-11-15, user's request)**: checked against all 68 on-chain transactions of the session
+(wallet −0.0044 while the Dashboard said +0.0507 and Candles +0.0076). Fixes: (1) `exec_history._parse_wallet_tx` — only
+the traded coin's own token account is a deposit; rent of any other account a route opens (~0.0015 SOL, Jupiter routes)
+is part of the BUY / SELL amount. (2) Wallet list keeps 150 transactions (`WALLET_KEEP`, was 50; page still shows 50).
+(3) `reconcile_wallet_sells` keeps the ledger's cost when the wallet list shows fewer buys than the ledger counted
+(`incomplete`), counts each buy signature once, and never stores a ladder buy's signature as the open's own.
+(4) `_chain_cash` uses the ledger close when the listed buys don't cover the coins sold. (5) Dashboard line "Bought and
+not sold" (`pnl_unsold_sol`: OPEN rows of the session with no sale and no open trade — dust is still never booked as a
+sale). (6) `CandleMomo._sync_wallet_cash` (every 20 s) copies the ledger's wallet figures into Candles' closed LIVE
+trades (last 24 h, one ledger sale within 180 s). Known leftover: each restart adds a 0-PnL J*B row to Candles' Closed
+trades (dust coin restored, then flagged dust again).
+
 **Graduated / non-SOL-quoted pump coins (2026-11-14/15, user's request)**: Candles trades coins off the pump curve (graduated / PumpSwap) and pump coins whose curve is quoted in another coin (`not_sol_quote`, common among callers' coins).
 Paper buys and sells are priced by Jupiter quotes at send and fill_lag_ms later (`_jup_quote_buy` / `_jup_quote_sell`,
 pool fee inside the quote) instead of dropping the coin as NOT_TRADABLE; live buys go Lightning → Jupiter

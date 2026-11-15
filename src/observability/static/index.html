@@ -859,6 +859,7 @@ header nav.nav .navbtn[hidden]{display:none}
       <div class="pnl-card" style="--accent:#f0c14a"><div class="k">PnL · 30 days <button type="button" id="btnClear30" class="lite">clear</button></div><div class="n" id="pnl30">0.0000</div><div class="s">closed trades after fees</div><div class="fx" id="pnl30Fx">—</div></div>
       <div class="pnl-card" style="--accent:#9b8cff"><div class="k">PnL · total <button type="button" id="btnClearTotal" class="lite">clear</button></div><div class="n" id="pnlTotal">0.0000</div><div class="s">closed trades after fees</div><div class="fx" id="pnlTotalFx">—</div></div>
     </div>
+    <div class="pnl-check" id="pnlUnsold" style="display:none"><span class="muted" title="Coins bought this session and never sold (flagged dust or left in the wallet). They are not a sale, so the cards above do not count them. This line is what they cost.">Bought and not sold</span><b id="pnlUnsoldVal"></b></div>
     <div class="pnl-check" id="pnlCheck"><span class="muted" title="Wallet SOL + market value of every coin still in the wallet − invested. Includes coins that are held or stuck, so it differs from the closed-trade PnL.">Wallet vs invested</span><b id="pnlCheckVal">set invested SOL</b></div>
     <div class="card live-chart-card">
       <div class="row-between"><h2 style="margin:0">Live chart</h2><span class="muted" id="liveChartMeta">No open trade</span></div>
@@ -2341,6 +2342,16 @@ function paintPnl(s){
       fx.classList.add('fx', n<0?'r':'g');
     }
   });
+  if(s.pnl_unsold_sol!=null){
+    const u=Number(s.pnl_unsold_sol)||0, box=document.getElementById('pnlUnsold');
+    if(box){
+      box.style.display=u<0?'':'none';
+      const tot=Number(_lastPnl.pnl_total_sol||0)+u;
+      const v=document.getElementById('pnlUnsoldVal');
+      v.textContent=u.toFixed(4)+' ('+(s.pnl_unsold_n||0)+' coin'+((s.pnl_unsold_n||0)===1?'':'s')+') · total with these '+(tot>0?'+':'')+tot.toFixed(4);
+      v.classList.remove('g','r'); v.classList.add(tot<0?'r':'g');
+    }
+  }
   if(s.pnl_daily_sol!=null){
     const n=Number(s.pnl_daily_sol);
     setText('sPnl', Number.isFinite(n)?((n>0?'+':'')+n.toFixed(4)):'0.0000');

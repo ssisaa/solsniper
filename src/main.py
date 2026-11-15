@@ -4343,7 +4343,7 @@ async def live_feed_demo(
                 hist = get_exec_history()
                 if pk:
                     try:
-                        rows, sigs = await build_wallet_rows(pk, limit=50, parse_budget=4)
+                        rows, sigs = await build_wallet_rows(pk, limit=150, parse_budget=4)
                         if sigs:
                             hist.set_from_wallet(rows, sigs)
                             await _book_wallet_buys(rows)
@@ -4354,6 +4354,7 @@ async def live_feed_demo(
                     bag = [e.to_dict() for e in hist.wallet_entries]
                     led = get_ledger()
                     led.set_chain_rows(bag)
+                    led.set_open_mints({p.mint for p in manager.positions.values() if p.status == "OPEN" and p.mint})
                     changed = led.reconcile_wallet_sells(bag)
                     _fix_open_cost_from_chain(bag, led)
                     if enable_ui and changed:

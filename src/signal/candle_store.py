@@ -192,6 +192,17 @@ class Store:
             names = [d[0] for d in cur.description]
             return [dict(zip(names, r)) for r in cur.fetchall()]
 
+    def set_trade_cash(self, trade_id: Any, entry_sol: float, exit_sol: float, pnl_sol: float) -> None:
+        """A closed live trade's figures replaced by what the wallet really paid and got."""
+        with self.lock:
+            row = self.db.execute("SELECT costs_sol FROM trades WHERE id=?", (trade_id,)).fetchone()
+            costs = float((row[0] if row else 0) or 0)
+            self.db.execute(
+                "UPDATE trades SET entry_sol=?, exit_sol=?, pnl_sol=?, pct=?, gross_pnl_sol=? WHERE id=?",
+                (round(entry_sol, 9), round(exit_sol, 9), round(pnl_sol, 9),
+                 round(pnl_sol / entry_sol * 100.0, 2) if entry_sol > 0 else 0.0, round(pnl_sol + costs, 9), trade_id))
+            self.db.commit()
+
     def totals(self) -> Dict[str, Any]:
         with self.lock:
             t = self.db.execute(
