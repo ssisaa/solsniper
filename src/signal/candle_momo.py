@@ -22,6 +22,7 @@ Files: config/candle.yaml (hot-reloaded), logs/candle_momo.sqlite, logs/candle_a
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import threading
@@ -808,6 +809,7 @@ class CandleMomo:
         """pump paused the coin while held: do not sell (pump refuses sells then, and paused coins often move
         again). It goes to the Paused Coins page, watched every second by _paused_loop."""
         now = time.time()
+        self._watch_rec(mint, pos, None, "paused_hold:" + str(state))
         pos["paused_at"] = now
         pos["pause_state"] = state
         pos.pop("closing", None)
@@ -838,11 +840,15 @@ class CandleMomo:
                 if not pos.get("paused_at"):
                     # an open trade from any source / feed: is pump pausing it? (every 2s; the board only covers
                     # the Mayhem board / Mixed feeds)
-                    if tick % 2 or pos.get("closing") or time.time() - float(pos.get("resumed_at") or 0) < 15:
+                    # every second for the first 30 s of a trade (20 of 35 pauses hit within 11 s), then every 2 s
+                    young = time.time() - float(pos.get("entry_ts") or 0) <= 30
+                    if ((tick % 2 and not young) or pos.get("closing")
+                            or time.time() - float(pos.get("resumed_at") or 0) < 15):
                         continue
                     try:
                         body = await asyncio.to_thread(mayhem2_get, STATE_URL.format(mint=mint), "candlepaused", 2.0)
                         st = str((body or {}).get("state") or "").lower() if isinstance(body, dict) else ""
+                        self._watch_rec(mint, pos, body, "paused" if st == "paused" else "")
                         if st == "paused":
                             self._pause_hold(mint, pos, st)
                         elif st == "completed":
@@ -929,6 +935,42 @@ class CandleMomo:
                           f"(sells on profit; Max hold restarts).", mint)
         if self.store:
             self.store.audit("paused_resume", mint=mint, after_s=round(held, 1))
+
+    def _watch_rec(self, mint: str, pos: Dict[str, Any], body: Any, event: str = "") -> None:
+        """Pause recorder (user 2026-11-16): one line per state read of an open trade in logs/pause_watch.jsonl —
+        seconds held, coin age, the last 1s candle, the trade's value and pump's whole mayhem-state record (state,
+        mode, the Mayhem agent's buy / sell counts and SOL). Read later to look for a warning sign before a pause.
+        Never raises; the file rolls over at 50 MB."""
+        try:
+            now = time.time()
+            f = self.feeds.get(mint)
+            c = None
+            if f is not None and f.using and f.books[f.using].rows:
+                c = f.books[f.using].rows[-1]
+            row = {"ts": round(now, 2), "mint": mint, "symbol": pos.get("symbol"), "mode": pos.get("mode"),
+                   "event": event, "held_s": round(now - float(pos.get("entry_ts") or now), 1),
+                   "lots": len(pos.get("lots") or []) or 1, "entry_sol": pos.get("entry_sol"),
+                   "value_sol": pos.get("value_sol"), "upct": pos.get("upct"),
+                   "age": getattr(f, "age", None) if f is not None else None,
+                   "board": getattr(f, "board_state", "") if f is not None else "",
+                   "feed": f.using if f is not None else "", "feed_status": f.status if f is not None else "",
+                   "candle": ({"t": c.t, "o": c.open, "h": c.high, "l": c.low, "c": c.close, "v": c.volume}
+                              if c is not None else None),
+                   "state": body if isinstance(body, dict) else None}
+            # tests must not write into the live bot's file (they set _watch_path to a temp file)
+            path = getattr(self, "_watch_path", None) or (
+                "" if "PYTEST_CURRENT_TEST" in os.environ else os.path.join("logs", "pause_watch.jsonl"))
+            if not path:
+                return
+            try:
+                if os.path.getsize(path) > 50_000_000:
+                    os.replace(path, path + ".1")
+            except OSError:
+                pass
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(row, default=str) + "\n")
+        except Exception:
+            log.debug("pause watch record failed", exc_info=True)
 
     def _completed_sell(self, mint: str, pos: Dict[str, Any]) -> None:
         """pump's state is "completed" (the Mayhem run is over), not "paused": the coin can be sold, so it is sold

@@ -556,3 +556,18 @@ def test_completed_dust_coin_is_left_not_retried(monkeypatch):
     e.positions["DUSTpump"] = pos
     e._completed_sell("DUSTpump", pos)
     assert left == [("DUSTpump", 0.00008)] and not pos.get("closing")
+
+
+def test_pause_recorder_writes_one_line_per_read(tmp_path, monkeypatch):
+    import json
+    (tmp_path / "logs").mkdir()
+    e = CM.CandleMomo()
+    e._watch_path = str(tmp_path / "logs" / "pause_watch.jsonl")
+    pos = {"mint": "RECpump", "symbol": "REC", "mode": "paper", "entry_ts": time.time() - 4, "entry_sol": 0.005,
+           "value_sol": 0.0046, "upct": -8.0}
+    e._watch_rec("RECpump", pos, {"state": "active", "stats": {"buyCount": 3}})
+    e._watch_rec("RECpump", pos, {"state": "paused"}, "paused")
+    e._watch_rec("RECpump", pos, "not a dict")                      # never raises
+    rows = [json.loads(l) for l in open(tmp_path / "logs" / "pause_watch.jsonl")]
+    assert len(rows) == 3 and rows[0]["state"]["stats"]["buyCount"] == 3 and rows[1]["event"] == "paused"
+    assert 3 <= rows[0]["held_s"] <= 6 and rows[2]["state"] is None

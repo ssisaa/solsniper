@@ -118,6 +118,12 @@ still resumes via `_pause_resume`. Offers / Mixed / Dayscalp / MayhemMode alread
 Jupiter route) — CHIMP was retried 124 times in 16 min and held the one-trade slot, so nothing traded. `_completed_sell`
 now books it as dust (`_pause_leave`); any other completed sell that fails 6 times goes back to the normal exits.
 
+**Pause recorder (2026-11-16, user's request)**: `CandleMomo._watch_rec` writes one line per mayhem-state read of an open
+Candles trade to `logs/pause_watch.jsonl` (held_s, coin age, last 1s candle, value / upct, pump's whole state record incl.
+the Mayhem agent's buy / sell counts and SOL; `event` = paused / paused_hold:…; rolls at 50 MB). The read is every second
+for a trade's first 30 s, then every 2 s. Purpose: find a warning sign before a pause (paper run 2026-11-15/16: 35 of 101
+buys paused, 20 within 11 s, none came back; 51 of 58 winners sold within 20 s). Not analysed yet.
+
 **Live buy limits (2026-11-14)**: Candles' live buys (source `candle`) are not under the Live Controls Max concurrent
 (trader.buy: only a second buy of the same coin is refused; other open trades and leftover wallet coins don't block it; the wallet / second-buy gate is skipped for `candle`). Each lot's `px` is its REAL fill in chart units (paper: signal close × expected / got tokens; live: `_fill_px_chart` = chart close × fill price / curve price right after the fill) — GHOSTY's L1 filled 4× above its signal candle. The fast profit reading is scaled by `pos["impact"]` = real curve value / chart value from the value loop (selling a thin curve gets less than the chart shows). For the other sources a
 coin pump paused (`mayhem_state_of`, or `CandleMomo.is_paused` / `paused_mints`) holds no Max concurrent slot.
