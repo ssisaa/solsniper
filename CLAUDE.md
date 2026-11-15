@@ -114,6 +114,10 @@ Coins watch, state "moving again — sells on profit or at Max hold", and `_movi
 `green_target()`, else at Max hold counted from `moving_at`. OpenCopy + AutoTrade-Candles (several coins by design)
 still resumes via `_pause_resume`. Offers / Mixed / Dayscalp / MayhemMode already took the newest at that moment.
 
+**Completed dust (2026-11-16)**: a completed coin worth < 0.0002 SOL / 2 % of cost cannot be priced or sold (graduated, no
+Jupiter route) — CHIMP was retried 124 times in 16 min and held the one-trade slot, so nothing traded. `_completed_sell`
+now books it as dust (`_pause_leave`); any other completed sell that fails 6 times goes back to the normal exits.
+
 **Live buy limits (2026-11-14)**: Candles' live buys (source `candle`) are not under the Live Controls Max concurrent
 (trader.buy: only a second buy of the same coin is refused; other open trades and leftover wallet coins don't block it; the wallet / second-buy gate is skipped for `candle`). Each lot's `px` is its REAL fill in chart units (paper: signal close × expected / got tokens; live: `_fill_px_chart` = chart close × fill price / curve price right after the fill) — GHOSTY's L1 filled 4× above its signal candle. The fast profit reading is scaled by `pos["impact"]` = real curve value / chart value from the value loop (selling a thin curve gets less than the chart shows). For the other sources a
 coin pump paused (`mayhem_state_of`, or `CandleMomo.is_paused` / `paused_mints`) holds no Max concurrent slot.

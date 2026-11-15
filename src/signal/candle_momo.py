@@ -941,6 +941,18 @@ class CandleMomo:
             return
         pos["completed_try"] = time.time()
         pos["pause_state"] = "completed"
+        # A completed coin worth almost nothing cannot be priced or sold (graduated, no Jupiter route): CHIMP
+        # 2026-11-16 was retried 124 times over 16 minutes and held the one-trade slot. Dust is booked and left;
+        # anything else that still fails after 6 tries (30 s) goes back to the normal exits (Max hold).
+        v, cost = pos.get("value_sol"), float(pos.get("entry_sol") or 0)
+        if v is not None and cost > 0 and float(v) < max(PAUSED_DUST_SOL, cost * PAUSED_DUST_FRAC):
+            return self._pause_leave(mint, pos, float(v))
+        pos["completed_tries"] = int(pos.get("completed_tries") or 0) + 1
+        if pos["completed_tries"] > 6:
+            pos["was_completed"] = True
+            if pos.get("paused_at"):
+                self._pause_resume(mint, pos)
+            return
         pos["closing"] = True
         self.note("warn", f"{pos.get('symbol') or mint[:6]} is COMPLETED on pump (Mayhem run over, not paused) — "
                           f"selling it off.", mint)

@@ -545,3 +545,14 @@ def test_paused_coin_moving_again_is_sold_from_the_watch_not_fed(monkeypatch):
         await asyncio.sleep(0)
         assert len(sold) == 2 and "max hold" in sold[1]
     asyncio.run(run())
+
+
+def test_completed_dust_coin_is_left_not_retried(monkeypatch):
+    """CHIMP 2026-11-16: a completed coin worth 0.00008 SOL could not be sold; 124 tries held the slot 16 minutes."""
+    e = CM.CandleMomo()
+    left = []
+    monkeypatch.setattr(e, "_pause_leave", lambda m, p, v: left.append((m, v)))
+    pos = {"mint": "DUSTpump", "mode": "paper", "tokens": 1, "entry_sol": 0.005, "value_sol": 0.00008}
+    e.positions["DUSTpump"] = pos
+    e._completed_sell("DUSTpump", pos)
+    assert left == [("DUSTpump", 0.00008)] and not pos.get("closing")
