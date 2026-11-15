@@ -300,7 +300,9 @@ def _iso_ledger(tmp_path, monkeypatch, cap=0.005):
     monkeypatch.setattr(email, "notify_close", lambda *a, **k: None, raising=False)
     from src.config import runtime
     monkeypatch.setattr(runtime, "get_config", lambda: type("C", (), {"max_position_sol": cap})())
-    return L.TradeLedger(tmp_path / "ledger.jsonl")
+    lg = L.TradeLedger(tmp_path / "ledger.jsonl")
+    lg._epoch = lg._cut_30 = lg._cut_total = 0.0     # not the live bot's Clear session / reset times
+    return lg
 
 
 def test_reconcile_keeps_cost_when_wallet_window_misses_buys(tmp_path, monkeypatch):

@@ -490,3 +490,26 @@ def test_jupiter_buy_off_follows_the_candles_switch(monkeypatch):
     assert not TR.jupiter_buy_off("sell", "candle_sell") and not TR.jupiter_buy_off("buy", "dayscalp")
     monkeypatch.setattr(eng.cfg, "buy_jupiter", True, raising=False)
     assert not TR.jupiter_buy_off("buy", "candle")
+
+
+def test_completed_coin_is_sold_not_held_as_paused(monkeypatch):
+    """pump state "completed" (Mayhem run over) is not a pause: the held coin is sold off (user 2026-11-15)."""
+    import asyncio
+    e = CM.CandleMomo()
+    sold = []
+
+    async def fake_exit(mint, why):
+        sold.append((mint, why))
+    monkeypatch.setattr(e, "_forced_exit", fake_exit)
+
+    async def run():
+        pos = {"mint": "DONEpump", "symbol": "DONE", "mode": "paper", "tokens": 1000, "entry_sol": 0.005,
+               "paused_at": time.time() - 60, "pause_state": "paused"}
+        e.positions["DONEpump"] = pos
+        e._completed_sell("DONEpump", pos)
+        e._completed_sell("DONEpump", pos)          # already closing: one sell only
+        await asyncio.sleep(0)
+        return pos
+    pos = asyncio.run(run())
+    assert sold and sold[0][0] == "DONEpump" and "completed" in sold[0][1].lower() and len(sold) == 1
+    assert pos["closing"] and pos["pause_state"] == "completed"

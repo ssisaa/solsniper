@@ -99,6 +99,12 @@ second. `_paused_loop` checks each held paused coin every second: mayhem-state a
 fed or counted as open (`active_positions()`), so the next coin comes. Paused state is saved with the position (`positions.paused_at` / `pause_state` columns), and a restored trade's Max hold counts from the restart (`resumed_at`), so a restart neither forgets nor force-sells a paused coin. Pump refuses sells of a paused coin (error
 0x1788 / 6024 seen on KRILLION; $ANIMAL sold in the first second after its board said paused).
 
+**Completed is not paused (2026-11-15, user's request)**: pump state "completed" (the Mayhem run is over) can be sold, so
+a held coin is sold off at once (`_completed_sell` → `_forced_exit`, retried every 5 s) instead of going to / staying on
+the Paused Coins page — from the board state (`_pick`) and from `_paused_loop` when a paused coin turns completed. Only
+"paused" is held. An open trade is also checked on pump's mayhem-state every 2 s (a coin that left the board has no
+board state — HALH sat open while completed); a coin bought already completed (`was_completed`) trades normally. `paused_mints` is pruned of coins no longer held.
+
 **Live buy limits (2026-11-14)**: Candles' live buys (source `candle`) are not under the Live Controls Max concurrent
 (trader.buy: only a second buy of the same coin is refused; other open trades and leftover wallet coins don't block it; the wallet / second-buy gate is skipped for `candle`). Each lot's `px` is its REAL fill in chart units (paper: signal close × expected / got tokens; live: `_fill_px_chart` = chart close × fill price / curve price right after the fill) — GHOSTY's L1 filled 4× above its signal candle. The fast profit reading is scaled by `pos["impact"]` = real curve value / chart value from the value loop (selling a thin curve gets less than the chart shows). For the other sources a
 coin pump paused (`mayhem_state_of`, or `CandleMomo.is_paused` / `paused_mints`) holds no Max concurrent slot.

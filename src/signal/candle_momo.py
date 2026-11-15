@@ -830,6 +830,8 @@ class CandleMomo:
             await asyncio.sleep(1.0)
             tick = getattr(self, "_paused_tick", 0) + 1
             self._paused_tick = tick
+            for m in [m for m in self.paused_mints if m not in self.positions]:
+                self.paused_mints.pop(m, None)          # sold / closed: no longer a paused coin
             for mint, pos in list(self.positions.items())[:8]:
                 if mint in self.busy:
                     continue
@@ -843,6 +845,15 @@ class CandleMomo:
                         st = str((body or {}).get("state") or "").lower() if isinstance(body, dict) else ""
                         if st == "paused":
                             self._pause_hold(mint, pos, st)
+                        elif st == "completed":
+                            # A coin that left the board has no board state (HALH 2026-11-15 sat open, completed).
+                            # Bought already completed (first reading within 10 s of the buy): a normal trade.
+                            if "was_completed" not in pos:
+                                pos["was_completed"] = time.time() - float(pos.get("entry_ts") or 0) < 10
+                            if not pos["was_completed"]:
+                                self._completed_sell(mint, pos)
+                        else:
+                            pos.setdefault("was_completed", False)
                     except Exception:
                         pass
                     continue
@@ -863,6 +874,8 @@ class CandleMomo:
                     cost = float(pos.get("entry_sol") or 0)
                     if v is not None and cost > 0 and v < max(PAUSED_DUST_SOL, cost * PAUSED_DUST_FRAC):
                         self._pause_leave(mint, pos, v)
+                    elif state == "completed":
+                        self._completed_sell(mint, pos)
                     elif state == "active":
                         self._pause_resume(mint, pos)
                 except Exception:
@@ -883,6 +896,24 @@ class CandleMomo:
                           f"(sells on profit; Max hold restarts).", mint)
         if self.store:
             self.store.audit("paused_resume", mint=mint, after_s=round(held, 1))
+
+    def _completed_sell(self, mint: str, pos: Dict[str, Any]) -> None:
+        """pump's state is "completed" (the Mayhem run is over), not "paused": the coin can be sold, so it is sold
+        off now instead of sitting on the Paused Coins page (user 2026-11-15). A failed sell is retried: a coin on
+        the watch stays there (next second), any other trade keeps its normal exits."""
+        if pos.get("closing") or mint in self.busy:
+            return
+        last = float(pos.get("completed_try") or 0)
+        if time.time() - last < 5:
+            return
+        pos["completed_try"] = time.time()
+        pos["pause_state"] = "completed"
+        pos["closing"] = True
+        self.note("warn", f"{pos.get('symbol') or mint[:6]} is COMPLETED on pump (Mayhem run over, not paused) — "
+                          f"selling it off.", mint)
+        if self.store:
+            self.store.audit("completed_sell", mint=mint)
+        asyncio.ensure_future(self._forced_exit(mint, "Mayhem completed (not paused) — sold off"))
 
     def _pause_leave(self, mint: str, pos: Dict[str, Any], v: float) -> None:
         """Gone to dust while paused: stop watching. Booked at its value; the coins are left in the wallet."""
@@ -1161,7 +1192,10 @@ class CandleMomo:
             f = self.feeds.get(mint)
             if (f and f.board_state in ("paused", "completed") and not pos.get("closing") and not pos.get("paused_at")
                     and time.time() - float(pos.get("resumed_at") or 0) > 15):
-                self._pause_hold(mint, pos, f.board_state)
+                if f.board_state == "completed":
+                    self._completed_sell(mint, pos)      # Mayhem run over, not paused: it can be sold
+                else:
+                    self._pause_hold(mint, pos, f.board_state)
 
     # ---------- polling
     async def _poll_loop(self) -> None:
