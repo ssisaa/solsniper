@@ -105,6 +105,15 @@ the Paused Coins page — from the board state (`_pick`) and from `_paused_loop`
 "paused" is held. An open trade is also checked on pump's mayhem-state every 2 s (a coin that left the board has no
 board state — HALH sat open while completed); a coin bought already completed (`was_completed`) trades normally. `paused_mints` is pruned of coins no longer held.
 
+**Newest coin only; a resumed paused coin stays off the feed (2026-11-15, user's request)**: one trade and one feed at
+a time, and the feed is always the newest coin at the moment the trade completes — no coin waits for a turn. (1) Mayhem
+board: a coin whose trade completed is no longer kept (`keep` excludes `self.traded`); the pick is the board's youngest
+right then (the same coin only if it still is the youngest). (2) A paused coin that moves again (G6S / PPAWS came back
+next to OLRGTA5 = three open trades) never rejoins the feed / open trades (`_resume_off_feed`): it stays on the Paused
+Coins watch, state "moving again — sells on profit or at Max hold", and `_moving_exit` sells it there — at once at
+`green_target()`, else at Max hold counted from `moving_at`. OpenCopy + AutoTrade-Candles (several coins by design)
+still resumes via `_pause_resume`. Offers / Mixed / Dayscalp / MayhemMode already took the newest at that moment.
+
 **Live buy limits (2026-11-14)**: Candles' live buys (source `candle`) are not under the Live Controls Max concurrent
 (trader.buy: only a second buy of the same coin is refused; other open trades and leftover wallet coins don't block it; the wallet / second-buy gate is skipped for `candle`). Each lot's `px` is its REAL fill in chart units (paper: signal close × expected / got tokens; live: `_fill_px_chart` = chart close × fill price / curve price right after the fill) — GHOSTY's L1 filled 4× above its signal candle. The fast profit reading is scaled by `pos["impact"]` = real curve value / chart value from the value loop (selling a thin curve gets less than the chart shows). For the other sources a
 coin pump paused (`mayhem_state_of`, or `CandleMomo.is_paused` / `paused_mints`) holds no Max concurrent slot.

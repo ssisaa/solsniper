@@ -762,11 +762,15 @@ def test_reuse_coin_on_keeps_coin_until_paused(engine):
     A = "A" * 40 + "pump"; B = "B" * 40 + "pump"
     e._pick([_board(A, 10)])
     assert list(e.feeds) == [A]
-    e.traded[A] = time.time()
-    e._pick([_board(A, 400), _board(B, 5)])          # A old and traded: still kept (reuse on)
+    e._pick([_board(A, 400), _board(B, 5)])          # A old but not traded yet: still kept
     assert list(e.feeds) == [A]
-    e._pick([_board(A, 410, "paused"), _board(B, 6)])
+    e.traded[A] = time.time()
+    e._pick([_board(A, 20)])                          # its trade completed, A is still the youngest: A again (reuse on)
+    assert list(e.feeds) == [A]
+    e._pick([_board(A, 400), _board(B, 5)])          # user 2026-11-15: a completed trade -> the youngest coin then
     assert list(e.feeds) == [B]
+    e._pick([_board(B, 410, "paused"), _board(A, 6)])
+    assert list(e.feeds) == [A]
 
 
 def test_reuse_coin_off_moves_on_after_one_trade(engine):

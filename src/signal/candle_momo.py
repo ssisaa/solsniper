@@ -877,9 +877,42 @@ class CandleMomo:
                     elif state == "completed":
                         self._completed_sell(mint, pos)
                     elif state == "active":
-                        self._pause_resume(mint, pos)
+                        if self._resume_off_feed():
+                            # one trade at a time, and the feed is always the newest coin (user 2026-11-15: G6S and
+                            # PPAWS came back while OLRGTA5 was open — three open trades; a coin that waited is no
+                            # longer the latest): it never goes back to the feed. It is sold from this watch.
+                            self._moving_exit(mint, pos)
+                        else:
+                            self._pause_resume(mint, pos)
+                    else:
+                        pos.pop("moving_at", None)          # paused again
                 except Exception:
                     log.debug("paused watch failed", exc_info=True)
+
+    def _resume_off_feed(self) -> bool:
+        """A paused coin that moves again does not rejoin the feed / open trades (one trade at a time, newest coin
+        only). OpenCopy with AutoTrade-Candles trades several coins together: there it rejoins as before."""
+        return not (self.support_source() == "opencopy" and self.feeds_only("opencopy"))
+
+    def _moving_exit(self, mint: str, pos: Dict[str, Any]) -> None:
+        """A paused coin trades again: it stays on the Paused Coins watch (valued every second) and is sold from
+        there — at once when the whole trade is >= the profit target, else at Max hold counted from the moment it
+        moved again. It never takes the feed or the one-trade slot."""
+        now = time.time()
+        moving = float(pos.setdefault("moving_at", now))
+        pos["pause_state"] = "moving again — sells on profit or at Max hold"
+        if pos.get("closing") or mint in self.busy:
+            return
+        up, fresh = pos.get("upct"), now - float(pos.get("value_at") or 0) <= 3
+        tgt, _from = self.green_target()
+        why = ""
+        if up is not None and fresh and float(up) >= tgt:
+            why = f"moved again after a pause — take profit, trade {float(up):+.1f}% ≥ {tgt:g}% after fees"
+        elif self.cfg.max_hold_s and now - moving > self.cfg.max_hold_s:
+            why = f"max hold {self.cfg.max_hold_s:.0f}s (counted from when it moved again after a pause)"
+        if why:
+            pos["closing"] = True
+            asyncio.ensure_future(self._forced_exit(mint, why))
 
     def _pause_resume(self, mint: str, pos: Dict[str, Any]) -> None:
         held = time.time() - float(pos.get("paused_at") or time.time())
@@ -1151,7 +1184,10 @@ class CandleMomo:
             young.sort(key=lambda r: float(r.get("age") or 0))
             # Keep the coin already watched. Reuse on: until it is paused / completed (no age limit) —
             # it stays while the board lists it active. Reuse off: dropped once one trade on it closed.
+            # A coin whose trade completed is NOT kept (user 2026-11-15): the moment a trade completes the feed is
+            # the board's youngest coin right then (the same coin again only if it still is the youngest).
             keep = [r for r in rows if ok(r) and r["m"] in self.feeds and self.feeds[r["m"]].origin == "auto"
+                    and r["m"] not in self.traded
                     and (cfg.reuse_coin or float(r.get("age") or 0) <= cfg.max_age_s)]
             fresh = [r for r in young if r["m"] not in {k["m"] for k in keep}]
             picks = (keep + fresh)[:cfg.max_mints]

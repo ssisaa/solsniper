@@ -513,3 +513,35 @@ def test_completed_coin_is_sold_not_held_as_paused(monkeypatch):
     pos = asyncio.run(run())
     assert sold and sold[0][0] == "DONEpump" and "completed" in sold[0][1].lower() and len(sold) == 1
     assert pos["closing"] and pos["pause_state"] == "completed"
+
+
+def test_paused_coin_moving_again_is_sold_from_the_watch_not_fed(monkeypatch):
+    """G6S / PPAWS 2026-11-15: paused coins came back as open trades next to the new one. Now they stay on the
+    Paused Coins watch and are sold there on profit or at Max hold; the feed stays the newest coin."""
+    import asyncio
+    e = CM.CandleMomo()
+    sold = []
+
+    async def fake_exit(mint, why):
+        sold.append(why)
+    monkeypatch.setattr(e, "_forced_exit", fake_exit)
+    monkeypatch.setattr(e, "green_target", lambda: (10.0, "Min profit"))
+    e.cfg.max_hold_s = 100
+    assert e._resume_off_feed()
+
+    async def run():
+        pos = {"mint": "PAUS", "paused_at": time.time() - 20, "tokens": 1, "entry_sol": 0.005,
+               "upct": -30.0, "value_at": time.time()}
+        e.positions["PAUS"] = pos
+        e._moving_exit("PAUS", pos)
+        assert not sold and pos["paused_at"] and "PAUS" not in e.active_positions()     # in a loss: held, not fed
+        pos["upct"] = 12.0
+        e._moving_exit("PAUS", pos)
+        await asyncio.sleep(0)
+        assert len(sold) == 1 and "take profit" in sold[0]
+        pos.pop("closing")
+        pos["upct"], pos["moving_at"] = -30.0, time.time() - 101
+        e._moving_exit("PAUS", pos)
+        await asyncio.sleep(0)
+        assert len(sold) == 2 and "max hold" in sold[1]
+    asyncio.run(run())
