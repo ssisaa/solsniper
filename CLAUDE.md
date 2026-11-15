@@ -124,6 +124,12 @@ the Mayhem agent's buy / sell counts and SOL; `event` = paused / paused_hold:…
 for a trade's first 30 s, then every 2 s. Purpose: find a warning sign before a pause (paper run 2026-11-15/16: 35 of 101
 buys paused, 20 within 11 s, none came back; 51 of 58 winners sold within 20 s). Not analysed yet.
 
+**Instant take-profit (2026-11-16, user's request)**: a held coin (stream chart, not paused / closing) is re-evaluated on
+EVERY trade from the trade socket, not only on the 0.5 s poll: `_on_stream_trade` (socket thread) → `_wake_trade` →
+`_idle` (the wait between two polls) re-reads the stream candles (local) and runs `_evaluate` (≤ ~30/s; `m["instant_evals"]`).
+A take-profit fired this way says "(instant: on a trade)" in its reason, so its refusals / fills can be compared with the
+polled ones. Same rules, only checked sooner (also gar adds while holding). The sale still takes ~0.45 s to land.
+
 **Live buy limits (2026-11-14)**: Candles' live buys (source `candle`) are not under the Live Controls Max concurrent
 (trader.buy: only a second buy of the same coin is refused; other open trades and leftover wallet coins don't block it; the wallet / second-buy gate is skipped for `candle`). Each lot's `px` is its REAL fill in chart units (paper: signal close × expected / got tokens; live: `_fill_px_chart` = chart close × fill price / curve price right after the fill) — GHOSTY's L1 filled 4× above its signal candle. The fast profit reading is scaled by `pos["impact"]` = real curve value / chart value from the value loop (selling a thin curve gets less than the chart shows). For the other sources a
 coin pump paused (`mayhem_state_of`, or `CandleMomo.is_paused` / `paused_mints`) holds no Max concurrent slot.

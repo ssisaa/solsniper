@@ -571,3 +571,37 @@ def test_pause_recorder_writes_one_line_per_read(tmp_path, monkeypatch):
     rows = [json.loads(l) for l in open(tmp_path / "logs" / "pause_watch.jsonl")]
     assert len(rows) == 3 and rows[0]["state"]["stats"]["buyCount"] == 3 and rows[1]["event"] == "paused"
     assert 3 <= rows[0]["held_s"] <= 6 and rows[2]["state"] is None
+
+
+def test_a_trade_on_a_held_coin_runs_the_rules_at_once(monkeypatch):
+    """Instant take-profit: the 0.5 s wait between polls ends on a trade of the held coin."""
+    import asyncio
+    from src.signal import candle_core as C
+    e = CM.CandleMomo()
+    f = CM.Feed("HOLDpump", 50)
+    f.using = "stream"
+    e.feeds["HOLDpump"] = f
+    e.positions["HOLDpump"] = {"mint": "HOLDpump", "tokens": 1, "entry_sol": 0.005}
+    calls = []
+    monkeypatch.setattr(e, "_evaluate", lambda feed, seen: calls.append((time.time(), e._instant)))
+
+    async def fetch(mint, cfg):
+        return [C.Candle(t=1000, open=1.0, high=1.2, low=1.0, close=1.2, volume=1, final=False)]
+    monkeypatch.setattr(e.providers["stream"], "fetch", fetch)
+
+    async def run():
+        e.loop = asyncio.get_running_loop()
+        t0 = time.time()
+        task = asyncio.ensure_future(e._idle("HOLDpump", f, 0.5))
+        await asyncio.sleep(0.05)
+        e._on_stream_trade({"mint": "HOLDpump", "trade_px": 1.2, "ts": time.time()})
+        await asyncio.sleep(0.1)
+        assert len(calls) == 1 and calls[0][0] - t0 < 0.3 and calls[0][1] is True      # evaluated on the trade
+        e._on_stream_trade({"mint": "OTHERpump", "trade_px": 1.0})                     # not held: nothing
+        await task
+        assert len(calls) == 1 and not e._instant
+        # flat coin: a plain wait, no evaluation
+        e.positions.clear()
+        await e._idle("HOLDpump", f, 0.05)
+        assert len(calls) == 1
+    asyncio.run(run())

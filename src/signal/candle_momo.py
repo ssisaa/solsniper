@@ -216,6 +216,8 @@ class CandleMomo:
         self.seq_board = ""                           # Source Sequence board step: "mayhem_board" | "mixed" | ""
         self.seq: Dict[str, Any] = {"i": -1, "at": 0.0, "trade_at": 0.0, "state": "off"}
         self.offers: Dict[str, Dict[str, Any]] = {}
+        self._trade_ev: Dict[str, asyncio.Event] = {}      # held coin -> a trade just arrived (instant take-profit)
+        self._instant = False
         self.paused_mints: Dict[str, float] = {}
         self._pin_warned: set = set()
         self._named: set = set()                       # mints whose name was looked up (pinned / unnamed feeds)      # coins pump paused / completed while Candles held them    # AutoTrade-Candles feed-only sources: mint -> offer
@@ -1327,7 +1329,61 @@ class CandleMomo:
         self._health(f)
         if f.using:
             self._evaluate(f, time.time())     # the signal exists once the data has arrived
-        await asyncio.sleep(max(0.0, cfg.poll_ms / 1000.0 - (time.time() - t0)))
+        await self._idle(mint, f, max(0.0, cfg.poll_ms / 1000.0 - (time.time() - t0)))
+
+    # ---------- instant take-profit (user 2026-11-16): a held coin is re-read on EVERY trade, not every 0.5 s
+    def _on_stream_trade(self, ev: Dict[str, Any]) -> None:
+        """Trade socket thread. The trade goes into the stream candles as before; for a coin with an open trade
+        the poll's wait is ended at once so the profit check runs on this very trade."""
+        self.providers["stream"].on_trade(ev)
+        try:
+            mint = str(ev.get("mint") or "")
+            if mint in self.positions and self.loop is not None:
+                self.loop.call_soon_threadsafe(self._wake_trade, mint)
+        except Exception:
+            pass
+
+    def _wake_trade(self, mint: str) -> None:
+        ev = self._trade_ev.get(mint)
+        if ev is not None:
+            ev.set()
+
+    async def _idle(self, mint: str, f: Feed, wait: float) -> None:
+        """The pause between two polls. Flat: a plain sleep. Holding (stream chart): every trade on the coin ends
+        the wait, the stream candles are re-read (local, no request) and the rules run right then — a coin that
+        touched the target and fell back inside the 0.5 s between polls was never seen before. At most ~30 a second."""
+        end = time.time() + wait
+        if mint not in self.positions:
+            self._trade_ev.pop(mint, None)
+            await asyncio.sleep(wait)
+            return
+        ev = self._trade_ev.setdefault(mint, asyncio.Event())
+        while True:
+            left = end - time.time()
+            if left <= 0:
+                return
+            try:
+                await asyncio.wait_for(ev.wait(), left)
+            except asyncio.TimeoutError:
+                return
+            ev.clear()
+            pos = self.positions.get(mint)
+            if (pos is None or pos.get("paused_at") or pos.get("closing") or mint in self.busy
+                    or f.using != "stream" or self.feeds.get(mint) is not f):
+                continue
+            try:
+                rows = await self.providers["stream"].fetch(mint, self.cfg)
+                f.books["stream"].merge(rows)
+                f.ok_at["stream"] = time.time()
+                self.m["instant_evals"] = int(self.m.get("instant_evals") or 0) + 1
+                self._instant = True
+                try:
+                    self._evaluate(f, time.time())
+                finally:
+                    self._instant = False
+            except Exception:
+                log.debug("instant evaluation failed", exc_info=True)
+            await asyncio.sleep(0.03)
 
     def _healthy(self, f: Feed, name: str) -> bool:
         return f.fails[name] < self.cfg.fail_degrade and time.time() - f.ok_at[name] <= self.cfg.stale_s
@@ -1575,7 +1631,9 @@ class CandleMomo:
                 held_now["pro_peak"] = max(float(held_now.get("pro_peak") or up), up)
                 self._pro_emit(f, live_rows, "SELL", {"call": "SELL", "px": c.close,
                                                        "why": f"take profit — trade {up:+.1f}% ≥ {tgt:g}% after fees "
-                                                              f"({tgt_from}), sold at once"}, seen)
+                                                              f"({tgt_from}), sold at once"
+                                                              + (" (instant: on a trade)" if getattr(self, "_instant", False) else "")},
+                                       seen)
                 return
         if len(rows) < 2:
             return
@@ -3226,7 +3284,7 @@ class CandleMomo:
             self.note("info", f"Restored {len(self.positions)} position(s) from SQLite ({live} live: matched to the bot's open trades).")
         try:
             from src.data.caller_stream import get_stream
-            get_stream().add_raw_listener(self.providers["stream"].on_trade)
+            get_stream().add_raw_listener(self._on_stream_trade)
         except Exception:
             log.debug("candle stream hook failed", exc_info=True)
         for coro in (self._board_loop(), self._poll_loop(), self._value_loop(), self._reserve_loop(), self._seq_loop(),
