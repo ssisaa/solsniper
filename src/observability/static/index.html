@@ -962,6 +962,20 @@ header nav.nav .navbtn[hidden]{display:none}
 <div id="view-settings" class="view" data-view="settings">
   <div class="page">
     <div class="card" style="margin-bottom:12px">
+      <h2>Paid RPC</h2>
+      <p class="hint">The paid RPC the bot uses for buys, sells and fast reads. <b>Automatic</b> tries every paid RPC in the list in order. Pick one and only that one is used as paid; if it fails, the bot falls back to the free public RPCs (always there, not listed). Only the host is shown — the address holds your API key and stays on this machine.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <select id="rpcSel" style="min-width:280px"></select>
+        <button type="button" class="lite" id="rpcDel" title="Remove the RPC shown in the list">Remove</button>
+        <span class="hint" id="rpcNow"></span>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+        <input type="password" id="rpcNew" placeholder="https://… new paid RPC address (with its key)" autocomplete="off" style="min-width:380px"/>
+        <button type="button" class="lite" id="rpcAdd">Add RPC</button>
+        <span class="hint" id="rpcMsg"></span>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:12px">
       <h2>Buy and sell route</h2>
       <p class="hint">Used for every manual click and every auto buy and sell. The route you pick runs first. Jupiter runs only if that route returns no signature. Picking Jupiter uses Jupiter only.</p>
       <div class="route-list" id="setRouteList">
@@ -2324,6 +2338,40 @@ async function refreshFx(){
 }
 refreshFx();
 setInterval(refreshFx, 120000);
+// ---- Settings: paid RPC picker (ids + hosts only; the URL with its key never comes to the page)
+function rpcPaint(d){
+  if(!d||!d.rpcs) return;
+  const sel=document.getElementById('rpcSel'); if(!sel) return;
+  sel.innerHTML='<option value="">Automatic — try every paid RPC in order</option>'+d.rpcs.map(r=>`<option value="${escapeHtml(r.id)}">${escapeHtml(r.host)}${r.ok?'':' — not answering'}</option>`).join('');
+  sel.value=d.selected||'';
+  document.getElementById('rpcNow').textContent='in use now: '+(d.active||'—')+(d.active_paid?'':' (public fallback)');
+  if(d.note) document.getElementById('rpcMsg').textContent=d.note;
+}
+async function rpcCall(body){
+  const msg=document.getElementById('rpcMsg');
+  try{
+    const r=await fetch('/api/rpc', body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:undefined);
+    const d=await r.json();
+    if(!d.ok){ if(msg) msg.textContent=d.error||'failed'; return null; }
+    if(body&&msg&&!d.note) msg.textContent='saved';
+    rpcPaint(d); return d;
+  }catch(e){ if(msg) msg.textContent='no answer from the bot'; return null; }
+}
+document.addEventListener('DOMContentLoaded',()=>{
+  const sel=document.getElementById('rpcSel'); if(!sel) return;
+  rpcCall(); setInterval(()=>{ if(document.activeElement!==sel) rpcCall(); }, 15000);
+  sel.addEventListener('change',()=>rpcCall({action:'select',id:sel.value}));
+  document.getElementById('rpcAdd').addEventListener('click',async()=>{
+    const inp=document.getElementById('rpcNew'); const url=(inp.value||'').trim(); if(!url) return;
+    document.getElementById('rpcMsg').textContent='testing…';
+    if(await rpcCall({action:'add',url})) inp.value='';
+  });
+  document.getElementById('rpcDel').addEventListener('click',()=>{
+    if(!sel.value){ document.getElementById('rpcMsg').textContent='pick an RPC in the list first'; return; }
+    const name=sel.options[sel.selectedIndex].textContent;
+    if(confirm('Remove '+name+' from the list? The bot stops using it.')) rpcCall({action:'remove',id:sel.value});
+  });
+});
 function paintPnl(s){
   if(!s) return;
   _lastPnl=Object.assign(_lastPnl||{}, s);

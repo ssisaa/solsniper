@@ -866,8 +866,8 @@ class Trader:
         except Exception:
             paid = ""
         try:
-            from src.execution.rpc_pool import paid_urls
-            paid_all = set(paid_urls())
+            from src.execution.rpc_pool import all_paid_urls
+            paid_all = set(all_paid_urls())
         except Exception:
             paid_all = set()
         if env and env != paid and env not in paid_all and "fluxrpc.com" not in env.lower():

@@ -795,7 +795,8 @@ def _get_tx_sync(sig: str, timeout: float = 1.5):
         "jsonrpc": "2.0", "id": 1, "method": "getTransaction",
         "params": [sig, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0, "commitment": "confirmed"}],
     }
-    urls = rpc_pool.healthy_paid() or rpc_pool.paid_urls()
+    # paid RPC(s) down: the public nodes answer it too (with one picked primary there is no second paid RPC)
+    urls = rpc_pool.healthy_paid() or (rpc_pool.public_urls()[:2] + rpc_pool.paid_urls())
     if not urls:
         return None
     try:

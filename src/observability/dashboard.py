@@ -4201,6 +4201,11 @@ def start_http_static_server(port: int = DEFAULT_HTTP_PORT) -> ThreadingHTTPServ
             if self._refuse():
                 return
             path = self.path.split("?", 1)[0]
+            if path == "/api/rpc":
+                # Settings page: the paid RPC list (id + host only — a URL carries its API key and never leaves)
+                from src.execution import rpc_pool
+                self._json(200, rpc_pool.settings_view())
+                return
             if path == "/api/callouts":
                 rows, err = _callout_page_rows()
                 shown = {row.get("coinMint") for row in rows}
@@ -4301,6 +4306,28 @@ def start_http_static_server(port: int = DEFAULT_HTTP_PORT) -> ThreadingHTTPServ
             if self._refuse():
                 return
             path = self.path.split("?", 1)[0]
+            if path == "/api/rpc":
+                # {"action": "select", "id": "<id>" | ""} | {"action": "add", "url": "https://…"} | {"action": "remove", "id": …}
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    body = json.loads((self.rfile.read(n) if n > 0 else b"{}").decode("utf-8") or "{}")
+                except Exception:
+                    body = {}
+                from src.execution import rpc_pool
+                act = str((body or {}).get("action") or "") if isinstance(body, dict) else ""
+                try:
+                    if act == "select":
+                        out = rpc_pool.select_rpc(str(body.get("id") or ""))
+                    elif act == "add":
+                        out = rpc_pool.add_rpc(str(body.get("url") or ""))
+                    elif act == "remove":
+                        out = rpc_pool.remove_rpc(str(body.get("id") or ""))
+                    else:
+                        out = {"ok": False, "error": "Unknown action"}
+                except Exception as e:
+                    out = {"ok": False, "error": type(e).__name__}
+                self._json(200 if out.get("ok") else 400, out)
+                return
             if path == "/api/restart":
                 if not _http_restart:
                     self._json(503, {"ok": False, "error": "Restart is not ready yet"})

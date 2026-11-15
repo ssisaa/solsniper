@@ -116,6 +116,14 @@ off …` and Candles drops the coin (`unusable`) and takes the next. Sells keep 
 Lightning refuses ("Pool account not found") — Jupiter took ~4.5 s, opened extra accounts, and FOMO / J*B were among them.
 This supersedes "non-SOL-quoted coins route Lightning first, Jupiter fallback" for buys unless the switch is turned off.
 
+**Paid RPC picker (2026-11-15, user's request)**: Settings page card "Paid RPC" — dropdown of the paid RPCs (host only),
+Add RPC field, Remove button (`/api/rpc` GET / POST `select` | `add` | `remove`; `rpc_pool.settings_view`, `select_rpc`,
+`add_rpc`, `remove_rpc`). "Automatic" (default) = the ordered failover through all paid RPCs as before. One picked =
+`paid_urls()` is that one alone, so a failure goes to the public nodes, not to another paid RPC. Pick / added / removed
+are saved in `logs/rpc_choice.json` (URLs carry keys: never in Git, never sent to the browser — ids are `rpc_id`);
+`config/sniper.yaml` is not rewritten (a removed yaml RPC is only hidden). `all_paid_urls()` keeps every known paid URL out
+of the public lists. Takes effect within 10 s, no restart.
+
 **PnL = the wallet's real SOL (2026-11-15, user's request)**: checked against all 68 on-chain transactions of the session
 (wallet −0.0044 while the Dashboard said +0.0507 and Candles +0.0076). Fixes: (1) `exec_history._parse_wallet_tx` — only
 the traded coin's own token account is a deposit; rent of any other account a route opens (~0.0015 SOL, Jupiter routes)

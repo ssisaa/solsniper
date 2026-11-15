@@ -260,8 +260,8 @@ def _rpc_urls() -> List[str]:
     urls = []
     primary = primary_url()
     try:
-        from src.execution.rpc_pool import paid_urls
-        paid_all = set(paid_urls())
+        from src.execution.rpc_pool import all_paid_urls
+        paid_all = set(all_paid_urls())
     except Exception:
         paid_all = set()
     for u in (

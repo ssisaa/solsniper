@@ -13,15 +13,23 @@ cooling down. A paid call that fails (connect error, timeout, HTTP 401/403/429/5
 RPC bad for COOL_S seconds and rpc_post() moves on to the next one, then to the public nodes.
 A small health probe (getSlot every PROBE_S seconds per paid RPC) brings a recovered RPC back.
 
+Settings page (2026-11-15): the user may pick ONE paid RPC as the primary. Then only that one is used as
+paid and a failure goes straight to the public nodes (not to the other paid ones). No pick ("Automatic") =
+the ordered failover above. RPCs can be added and removed there; the pick, the added URLs and the removed
+ones live in logs/rpc_choice.json (never in Git: the URLs carry API keys; yaml is not rewritten).
+
 Never log a full URL: the API key is in it. host() is the only thing that goes to logs.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
 import threading
 import time
-from typing import List
+from pathlib import Path
+from typing import Any, Dict, List
 
 log = logging.getLogger("sol-sniper.rpc")
 
@@ -34,12 +42,42 @@ BAD_HTTP = {401, 402, 403, 408, 429}
 _lock = threading.Lock()
 _cool: dict = {}
 _no_method: set = set()  # (url, method) the plan does not allow, e.g. Chainstack free getTokenAccountsByOwner
-_cache = {"at": 0.0, "paid": [], "public": []}
+_cache = {"at": 0.0, "paid": [], "public": [], "listed": [], "known": [], "selected": ""}
+CHOICE_PATH = Path(__file__).resolve().parents[2] / "logs" / "rpc_choice.json"
 _probe_started = False
 
 
 def host(url: str) -> str:
     return str(url or "").split("//")[-1].split("/")[0].split("?")[0] or "?"
+
+
+def rpc_id(url: str) -> str:
+    """Short id for the dashboard: the URL itself (it carries the key) never goes to the browser."""
+    return hashlib.sha1(str(url or "").encode()).hexdigest()[:12]
+
+
+def _read_choice() -> Dict[str, Any]:
+    try:
+        d = json.loads(CHOICE_PATH.read_text() or "{}")
+    except Exception:
+        d = {}
+    if not isinstance(d, dict):
+        d = {}
+    return {"selected": str(d.get("selected") or ""),
+            "added": [str(u) for u in (d.get("added") or []) if str(u).startswith("http")],
+            "removed": [str(u) for u in (d.get("removed") or []) if u]}
+
+
+def _write_choice(d: Dict[str, Any]) -> None:
+    CHOICE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CHOICE_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(d))
+    try:
+        os.chmod(tmp, 0o600)
+    except OSError:
+        pass
+    tmp.replace(CHOICE_PATH)
+    _cache["at"] = 0.0
 
 
 def _load() -> None:
@@ -48,6 +86,7 @@ def _load() -> None:
         return
     paid: List[str] = []
     public: List[str] = []
+    choice = _read_choice()
     try:
         from src.config.file_config import load_config
         rpc = (load_config() or {}).get("rpc") or {}
@@ -61,15 +100,102 @@ def _load() -> None:
                 public.append(u)
     except Exception:
         log.debug("rpc config read failed", exc_info=True)
+    for u in choice["added"]:
+        if u not in paid:
+            paid.append(u)
+    known = list(paid)                                     # every paid URL, removed ones too: never a "public" node
+    public = [u for u in public if u not in known]
+    listed = [u for u in paid if u not in choice["removed"]]
     for u in PUBLIC_DEFAULT:
-        if u not in public and u not in paid:
+        if u not in public and u not in known:
             public.append(u)
-    _cache.update(at=now, paid=paid, public=public)
+    selected = choice["selected"] if choice["selected"] in listed else ""
+    # a picked RPC is the only paid one in use: its failure falls back to the public nodes
+    _cache.update(at=now, paid=[selected] if selected else listed, public=public, listed=listed,
+                  known=known, selected=selected)
 
 
 def paid_urls() -> List[str]:
+    """The paid RPCs in use: the picked one alone, or (Automatic) all listed ones in order."""
     _load()
     return list(_cache["paid"])
+
+
+def all_paid_urls() -> List[str]:
+    """Every paid URL the bot knows (picked or not, removed ones too) — to keep them out of public lists."""
+    _load()
+    return list(_cache["known"])
+
+
+def settings_view() -> Dict[str, Any]:
+    """For the Settings page: id + host only, never a URL."""
+    _load()
+    now = time.time()
+    rows = [{"id": rpc_id(u), "host": host(u), "ok": _ok_now(u, now)} for u in _cache["listed"]]
+    active = active_paid()
+    return {"ok": True, "rpcs": rows, "selected": rpc_id(_cache["selected"]) if _cache["selected"] else "",
+            "active": host(active), "active_paid": active in _cache["paid"]}
+
+
+def _by_id(rid: str) -> str:
+    _load()
+    return next((u for u in _cache["listed"] if rpc_id(u) == str(rid or "")), "")
+
+
+def select_rpc(rid: str) -> Dict[str, Any]:
+    """rid "" = Automatic (ordered failover through every listed paid RPC)."""
+    url = _by_id(rid) if rid else ""
+    if rid and not url:
+        return {"ok": False, "error": "That RPC is not in the list"}
+    d = _read_choice()
+    d["selected"] = url
+    _write_choice(d)
+    log.warning("RPC primary set on the Settings page: %s", host(url) + " (failure → public nodes)" if url
+                else "Automatic (failover through all paid RPCs)")
+    return settings_view()
+
+
+def add_rpc(url: str) -> Dict[str, Any]:
+    url = str(url or "").strip()
+    if not url.startswith("https://") or len(url) > 400 or any(c.isspace() for c in url) or "." not in host(url):
+        return {"ok": False, "error": "Enter the full https:// RPC URL"}
+    d = _read_choice()
+    _load()
+    if url in _cache["listed"]:
+        return {"ok": False, "error": "That RPC is already in the list"}
+    answers = False
+    try:
+        from src.execution.tx_route import sync_https, _rpc_url
+        status, text = sync_https("POST", _rpc_url(url), json_body={"jsonrpc": "2.0", "id": 1, "method": "getSlot"}, timeout=4.0)
+        if isinstance(text, bytes):
+            text = text.decode("utf-8", "replace")
+        answers = status == 200 and bool((json.loads(text or "{}") or {}).get("result"))
+    except Exception:
+        answers = False
+    d["removed"] = [u for u in d["removed"] if u != url]
+    if url not in _cache["known"] and url not in d["added"]:
+        d["added"].append(url)
+    _write_choice(d)
+    log.warning("RPC added on the Settings page: %s (%s)", host(url), "answers" if answers else "did not answer the test")
+    out = settings_view()
+    out["note"] = f"{host(url)} added — it answers." if answers else f"{host(url)} added, but it did not answer the test call."
+    return out
+
+
+def remove_rpc(rid: str) -> Dict[str, Any]:
+    url = _by_id(rid)
+    if not url:
+        return {"ok": False, "error": "That RPC is not in the list"}
+    d = _read_choice()
+    if url in d["added"]:
+        d["added"] = [u for u in d["added"] if u != url]
+    else:
+        d["removed"].append(url)          # from sniper.yaml: hidden and unused, the yaml file is not rewritten
+    if d["selected"] == url:
+        d["selected"] = ""
+    _write_choice(d)
+    log.warning("RPC removed on the Settings page: %s", host(url))
+    return settings_view()
 
 
 def public_urls() -> List[str]:
