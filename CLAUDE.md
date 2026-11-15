@@ -193,6 +193,13 @@ Dayscalp's scan tokens carry `age` (LAST_CANDLE_PICKS) and MayhemMode's young op
 the first-candle buy too; OpenCopy / CallOuts / Launch buy lot 1 themselves (that is their first-candle buy) and
 pro_hold adds on ◆ BP / ▲ BUY.
 
+**pro_hold "buy green after red – low below" (2026-11-15, user's request)**: new entry in the pro_hold first-buy
+dropdown (`pro_hold_first_at` = `gar_low`). Lot 1 at the start like "gar"; flat re-entries as "gar". While holding, a
+green after a red adds a lot only when that red's low AND the green's open are not higher than the last lot's low
+(`_lot_low`: lot 1 = the low of the candle it was bought in, `lot_t`; lots 2+ = their own min(red low, green open),
+`low_ref`, both stored on the lot) — each lot sits below the one before; no trade-in-loss reading needed. Max lots /
+Total cap still limit it. "gar" and every other choice are unchanged.
+
 **Candles avoid_mayhem (2026-11-14, user's request)**: Candles page "Skip Mayhem coins" (default on): no new
 Candles trade on a Mayhem coin (`MAYHEM_COIN` in `_entry_filters`; board `ms` or pump's mayhem-state, checked once per
 coin `_check_mayhem`); Mixed skips Mayhem rows. Reason: pump pauses Mayhem coins and a paused coin can't sell —

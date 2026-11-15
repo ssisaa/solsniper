@@ -887,3 +887,70 @@ def test_pinned_never_sells_under_its_profit(tmp_path, monkeypatch):
     _forming(f, 1, 1.02, 1.01)                 # red at +1% (< 1.5%): hold
     e._evaluate(f, time.time())
     assert not [r for r in routed if r["side"] == "SELL"]
+
+
+def _garl(tmp_path, monkeypatch, candles, lots):
+    """candles: (open, high, low, close); the last one is still forming."""
+    from src.signal import candle_core as C
+    e, f, routed = _ph_first_engine(tmp_path, monkeypatch, 30)
+    e.cfg.pro_hold_first_at = "gar_low"
+    f.first_done = True
+    book = f.books["pump_rest"]
+    t = book.rows[-1].t
+    book.rows.clear()
+    book.merge([C.Candle(t=t + k * 1000, open=o, high=h, low=l, close=c, volume=1, final=(k < len(candles) - 1))
+                for k, (o, h, l, c) in enumerate(candles)])
+    for lot in lots:
+        if "k" in lot:
+            lot["lot_t"] = t + lot.pop("k") * 1000
+    e.positions["NEW"] = {"mint": "NEW", "mode": "paper", "upct": -5.0, "value_at": time.time(), "lots": lots,
+                          "entry_sol": 0.005, "tokens": 1.0, "entry_ts": time.time()}
+    return e, f, routed
+
+
+def test_gar_low_buys_lot2_only_below_lot1s_candle_low(tmp_path, monkeypatch):
+    # L1 bought in candle 0 (low 1.9). Red low 1.5, green opens 1.5: both under 1.9 -> lot 2
+    e, f, routed = _garl(tmp_path, monkeypatch, [(2.0, 2.1, 1.9, 2.0), (2.0, 2.0, 1.5, 1.5), (1.5, 1.6, 1.5, 1.6)],
+                         [{"n": 1, "k": 0}])
+    e._evaluate(f, time.time())
+    buys = [r for r in routed if r["side"] == "BUY"]
+    assert len(buys) == 1 and "low below" in buys[0]["pro_why"] and buys[0]["low_ref"] == 1.5
+
+
+def test_gar_low_skips_a_green_after_red_above_the_last_lots_low(tmp_path, monkeypatch):
+    # L1's candle low 1.0; the red's low (1.4) and the green's open (1.5) are higher -> no lot
+    e, f, routed = _garl(tmp_path, monkeypatch, [(1.0, 2.0, 1.0, 2.0), (2.0, 2.0, 1.4, 1.5), (1.5, 1.6, 1.5, 1.6)],
+                         [{"n": 1, "k": 0}])
+    e._evaluate(f, time.time())
+    assert not [r for r in routed if r["side"] == "BUY"]
+
+
+def test_gar_low_lot3_must_be_below_lot2(tmp_path, monkeypatch):
+    # lot 2 was bought with red low / green open 1.5; this red's low 1.6 is above it -> no lot 3
+    e, f, routed = _garl(tmp_path, monkeypatch, [(2.0, 2.1, 1.9, 2.0), (2.0, 2.0, 1.6, 1.7), (1.7, 1.8, 1.7, 1.8)],
+                         [{"n": 1, "k": 0}, {"n": 2, "low_ref": 1.5}])
+    e._evaluate(f, time.time())
+    assert not [r for r in routed if r["side"] == "BUY"]
+    # red low under 1.5 but the green opens above it -> still no lot
+    e, f, routed = _garl(tmp_path, monkeypatch, [(2.0, 2.1, 1.9, 2.0), (1.7, 1.7, 1.4, 1.55), (1.55, 1.6, 1.55, 1.6)],
+                         [{"n": 1, "k": 0}, {"n": 2, "low_ref": 1.5}])
+    e._evaluate(f, time.time())
+    assert not [r for r in routed if r["side"] == "BUY"]
+    # both under 1.5 -> lot 3
+    e, f, routed = _garl(tmp_path, monkeypatch, [(2.0, 2.1, 1.9, 2.0), (1.6, 1.6, 1.3, 1.4), (1.4, 1.45, 1.4, 1.45)],
+                         [{"n": 1, "k": 0}, {"n": 2, "low_ref": 1.5}])
+    e._evaluate(f, time.time())
+    assert len([r for r in routed if r["side"] == "BUY"]) == 1
+
+
+def test_gar_low_starts_with_a_buy_and_plain_gar_is_unchanged(tmp_path, monkeypatch):
+    e, f, routed = _gar_engine(tmp_path, monkeypatch, [(1.0, 1.0)])
+    e.cfg.pro_hold_first_at = "gar_low"
+    e._evaluate(f, time.time())
+    assert len(routed) == 1 and "bought at the start" in routed[0]["pro_why"]
+    # plain "gar": a green after a red above lot 1's low still adds while the trade is in a loss
+    e, f, routed = _garl(tmp_path, monkeypatch, [(1.0, 2.0, 1.0, 2.0), (2.0, 2.0, 1.4, 1.5), (1.5, 1.6, 1.5, 1.6)],
+                         [{"n": 1, "k": 0}])
+    e.cfg.pro_hold_first_at = "gar"
+    e._evaluate(f, time.time())
+    assert [r for r in routed if r["side"] == "BUY" and "lower the average" in r["pro_why"]]

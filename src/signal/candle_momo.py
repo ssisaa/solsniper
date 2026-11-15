@@ -1294,7 +1294,18 @@ class CandleMomo:
         c, prev = live_rows[-1], live_rows[-2]
         if c.t == getattr(f, "gar_t", None) or not (prev.close < prev.open) or not (c.close > c.open):
             return False
-        if held is None:
+        low_ref = None
+        if held is not None and self.cfg.pro_hold_first_at == "gar_low":
+            # "buy green after red – low below" (user 2026-11-15): a new lot only when the red candle's low AND this
+            # green's open are not higher than the previous lot's low (L1: the low of the candle it was bought in;
+            # later lots: their own red's low / green's open). Each lot sits lower than the one before.
+            ref = self._lot_low(held, live_rows)
+            low_ref = min(prev.low, c.open)
+            if ref is None or held.get("closing") or not (prev.low <= ref and c.open <= ref):
+                return False
+            why = (f"green after red, low below — red low {prev.low:.4g} and green open {c.open:.4g} are not above the "
+                   f"last lot's low {ref:.4g}: buys again lower (sells on profit)")
+        elif held is None:
             peak = max(x.high for x in live_rows)
             if not (peak > 0 and c.close < peak):
                 return False
@@ -1309,8 +1320,25 @@ class CandleMomo:
         # "every green after red" means every one: the SOL-outflow / Min reserve / far-below-high / cooldown checks
         # refused 57 of 77 (2026-11-14) — skipped here; Total cap still limits the adds, Max hold still exits
         self._pro_emit(f, live_rows, "BUY", {"call": "BUY", "px": c.close, "why": why}, seen,
-                       first=True, now_buy=True, gar=True)
+                       first=True, now_buy=True, gar=True, low_ref=low_ref)
         return True
+
+    @staticmethod
+    def _lot_low(held: Dict[str, Any], rows: List[Candle]) -> Optional[float]:
+        """The last lot's low for "low below": its stored red low / green open (lots 2+), else the low of the candle
+        the lot was bought in (lot 1; found by the signal's candle, else by the fill time), else its buy price."""
+        lots = held.get("lots") or []
+        last = lots[-1] if lots else {}
+        ref = float(last.get("low_ref") or 0)
+        if ref > 0:
+            return ref
+        t = last.get("lot_t")
+        ts = float(last.get("ts") or held.get("entry_ts") or 0) * 1000.0
+        for x in reversed(rows):
+            if (t is not None and x.t == t) or (t is None and x.t <= ts):
+                return float(x.low) if x.low > 0 else None
+        px = float(last.get("px") or 0)
+        return px if px > 0 else None
 
     def _fast_upct(self, held: Dict[str, Any], f: Feed, price: float) -> Optional[float]:
         """Whole trade % after fees from the chart price: each lot's buy price (same feed units) against the price
@@ -1362,19 +1390,20 @@ class CandleMomo:
             if not hasattr(f, "first_t0"):
                 f.first_t0, f.first_age0 = now, f.age
             age_now = None if f.first_age0 is None else float(f.first_age0) + (now - f.first_t0)
-            if cfg.pro_hold_first_at in ("now", "gar"):
+            if cfg.pro_hold_first_at in ("now", "gar", "gar_low"):
                 # "at once (0.00%)" (user 2026-11-14): every coin Candles is given is bought the first time its chart
                 # is read — before any move, whatever its age or candle count. Only the Mayhem check, Kill / Pause
                 # and the live gates can still stop it.
                 c = live_rows[-1]
                 f.first_done = True
-                gar = cfg.pro_hold_first_at == "gar"
+                gar = cfg.pro_hold_first_at in ("gar", "gar_low")
                 # "buy green after red" always starts with this buy too (user 2026-11-14), then _gar buys each green
                 # after a red
                 self._pro_emit(f, live_rows, "BUY", {"call": "BUY", "px": c.close,
                                                      "why": ("bought at the start" if gar else "bought at once on arrival (0.00%)")
                                                             + (f" — coin age {age_now:.0f}s" if age_now is not None else "")
-                                                            + ("; then buys every green after a red" if gar else "")},
+                                                            + ("; then buys every green after a red" if gar else "")
+                                                            + (" whose low is below the last lot's" if cfg.pro_hold_first_at == "gar_low" else "")},
                                seen, first=True, now_buy=True, gar=gar)
                 return
             if cfg.pro_hold_first_at == "flat":
@@ -1415,7 +1444,7 @@ class CandleMomo:
                                    seen, first=True)
                     return
         held_now = self.positions.get(f.mint)
-        if (cfg.rule == "pro_hold" and cfg.pro_hold_first and cfg.pro_hold_first_at == "gar" and not pinned
+        if (cfg.rule == "pro_hold" and cfg.pro_hold_first and cfg.pro_hold_first_at in ("gar", "gar_low") and not pinned
                 and len(live_rows) >= 2 and self._gar(f, live_rows, held_now, seen)):
             return
         if cfg.rule == "pro_hold" and held_now is not None and live_rows and not held_now.get("closing"):
@@ -1505,12 +1534,13 @@ class CandleMomo:
         self._pro_emit(f, rows, side, a, seen)
 
     def _pro_emit(self, f: Feed, rows: List[Candle], side: str, a: Dict[str, Any], seen: float,
-                  first: bool = False, now_buy: bool = False, gar: bool = False) -> None:
+                  first: bool = False, now_buy: bool = False, gar: bool = False,
+                  low_ref: Optional[float] = None) -> None:
         cur = rows[-1]
         lag_ms = (seen - (cur.t + 1000) / 1000.0) * 1000.0
         sig = {"id": signal_id(f.mint, cur.t, "pro"), "mint": f.mint, "ts": round(seen * 1000),
                "side": side, "open": cur.open, "prevClose": rows[-2].close if len(rows) >= 2 else cur.open,
-               "close": cur.close, "first": first, "now_buy": now_buy, "gar": gar,
+               "close": cur.close, "first": first, "now_buy": now_buy, "gar": gar, "low_ref": low_ref,
                "ref": cur.open, "deltaPct": round((cur.close / cur.open - 1) * 100, 4) if cur.open else 0.0,
                "candleTs": cur.t, "rule": "pro", "provider": f.using, "feedLagMs": round(lag_ms),
                "symbol": f.symbol, "seen": seen, "pro": True, "pro_why": str(a.get("why") or ""),
@@ -1993,7 +2023,8 @@ class CandleMomo:
         if px > 0 and expected and tokens:
             px = px * float(expected) / float(tokens)
         lot = {"n": 1, "sol": size, "tokens": float(tokens), "ts": time.time(), "signal": sig["id"],
-               "px": px or sig.get("close"), "src": sig.get("provider")}
+               "px": px or sig.get("close"), "src": sig.get("provider"),
+               "lot_t": sig.get("candleTs"), "low_ref": sig.get("low_ref")}
         if add and mint not in self.positions:
             # the trade closed (pause / max hold / stop) while this lot was being priced: no lot
             return self._failed(sig, "ladder add skipped — the trade closed meanwhile")
@@ -2500,7 +2531,7 @@ class CandleMomo:
         rec.setdefault("lots", [{"n": 1, "sol": rec["entry_sol"], "tokens": rec["tokens"], "ts": rec["entry_ts"],
                                  "signal": rec["entry_signal"]}])
         lot = {"n": len(rec["lots"]) + 1, "sol": size, "tokens": got, "ts": time.time(), "signal": sig["id"],
-               "px": await self._fill_px_chart(mint, size, got, sig), "src": sig.get("provider")}
+               "px": await self._fill_px_chart(mint, size, got, sig), "src": sig.get("provider"), "lot_t": sig.get("candleTs"), "low_ref": sig.get("low_ref")}
         rec["lots"].append(lot)
         rec["tokens"] = float(rec["tokens"]) + got
         rec["entry_sol"] = float(rec["entry_sol"]) + size
