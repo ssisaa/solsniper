@@ -641,3 +641,21 @@ def test_two_losses_in_a_row_pause_new_trades_then_take_the_newest(monkeypatch):
     e.cfg.loss_pause_n = 0
     e._note_result(-1, "X"); e._note_result(-1, "Y"); e._note_result(-1, "Z")
     assert e.loss_pause_left() == 0
+
+
+def test_coin_rebought_during_handover_is_dropped_after_its_trade():
+    """MONY 2026-11-16: its trade closed, a new buy was in flight at the hand-over (start time dropped, feed kept);
+    after that the coin must still leave the feed once flat, not stay for ever."""
+    e = _eng()
+    rows = _rows()
+    e._pick(rows)
+    assert list(e.feeds) == ["BBBBpump"]
+    e.traded["BBBBpump"] = time.time() + 0.001
+    e.busy["BBBBpump"] = "sig"                         # re-buy in flight while the feed is handed over
+    e._pick(rows)
+    assert "BBBBpump" in e.feeds and "BBBBpump" not in e._mx_since
+    e.busy.clear()                                     # the buy failed / the trade closed: flat again
+    e.traded["BBBBpump"] = time.time() + 0.002
+    e._pick(rows)
+    e._pick(rows)
+    assert "BBBBpump" not in e.feeds and len(e.feeds) == 1       # the next board coin took its place

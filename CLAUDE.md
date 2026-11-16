@@ -95,6 +95,12 @@ slots (pro_hold: one). Paper / LIVE follow Candles' Live switch. Graduated coins
 label "Mixed (New, Movers)"). Add "graduated" back to that tuple to restore it. Mayhem2's own Mixed feed still uses all
 three boards. This overrides the "Graduated" part of the Candles Mixed feed paragraph above.
 
+**Mixed feed stuck on a finished coin (2026-11-16)**: MONY stayed on the feed 8 min, flat, nothing else traded. Its
+trade closed, the hand-over dropped `_mx_since[m]`, but a re-buy in flight (`busy`) kept the feed; from then on "since"
+was "now" on every pick, so the coin was never done or idle. `_mixed_want` now restores the start time from
+`traded[m]` (else now, once). Still open (offered): with Reuse same coin off, "gar" re-buys the coin in the ~1 s before
+the next pick drops it (MONY was traded 3 times) — the guard exists only for `bp` / `signal`.
+
 **Paused Coins (2026-11-14, user's request)**: a Candles trade whose coin pump pauses is NOT sold
 (`_pause_hold`: `pos["paused_at"]`; board state for Mayhem board / Mixed feeds, pump's mayhem-state every 2 s for every
 other open trade). New dashboard tab **Paused Coins** (`paused` in `/api/candle`, `paused_view()`), refreshed every
@@ -219,7 +225,7 @@ the value loop's fresh `upct`), retried every 1 s; no red-candle wait and no `_i
 floor in the sell stays). The forming-red / candle-close take-profit below is now only a backstop.
 
 **Source Sequence (2026-11-14, user's request)**: Candles page button (`source_seq`, default off). On: `_seq_loop` steps
-through `SEQ_STEPS` Launch → MayhemMode → Candles · Mayhem board → Candles · Mixed → (Dayscalp / CallOuts / OpenCopy removed 2026-11-14) →
+through `SEQ_STEPS` MayhemMode → Candles · Mayhem board → Candles · Mixed → (Dayscalp / CallOuts / OpenCopy removed 2026-11-14, Launch removed 2026-11-16) →
 again. Source steps switch the Live Controls source through the dashboard config handler (`_seq_apply_source`, same as
 the Settings page) with AutoTrade-Candles on (`update`, no wipe, Live/Paper untouched); board steps set `seq_board`
 (`support_source()` = "", `follow()` = the board) while MayhemMode stays the source and only offers. A step waits up to

@@ -48,7 +48,8 @@ BASE_FEE_LAMPORTS = 5000
 FEED_ONLY_SOURCES = ("opencopy", "callout", "mayhem")
 OPENCOPY_MAX_FEEDS = 5         # AutoTrade-Candles on OpenCopy: coins fed (and traded) at the same time
 # Dayscalp, CallOuts and OpenCopy taken out at the user's request (2026-11-14)
-SEQ_STEPS = (("launch", "Launch"), ("mayhem", "MayhemMode"), ("board:mayhem_board", "Candles · Mayhem board"),
+# Launch removed from the sequence (user 2026-11-16)
+SEQ_STEPS = (("mayhem", "MayhemMode"), ("board:mayhem_board", "Candles · Mayhem board"),
              ("board:mixed", "Candles · Mixed"))
 SEQ_STEP_S = 60.0              # Source Sequence: a step with no trade moves on after this   # AutoTrade-Candles: these sources only offer tokens
 FLAT_PCT = 0.05                # "no candles yet": the only reading moved less than this (shows 0.00%)
@@ -787,7 +788,11 @@ class CandleMomo:
         for m, f in list(self.feeds.items()):
             if not str(f.origin).startswith("mixed"):
                 continue
-            since = float(self._mx_since.get(m) or now)
+            if not self._mx_since.get(m):
+                # its start time was dropped at a hand-over, but a buy in flight kept the feed (MONY 2026-11-16:
+                # "since" was then "now" on every pick, so the coin was never done or idle and stayed for 8 min)
+                self._mx_since[m] = float(self.traded.get(m) or now)
+            since = float(self._mx_since[m])
             done = m in self.traded and float(self.traded[m]) >= since
             idle = now - since >= cfg.mixed_idle_s and m not in self.busy
             if m in self.positions or (not done and not idle and (m in cmints or now - since < 10)):
