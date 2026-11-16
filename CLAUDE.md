@@ -232,8 +232,10 @@ was bought above it — a lot from another feed is now compared by this chart's 
 **pro_hold "buy only on the ▲ BUY signal" (2026-11-16, user's request)**: first-buy dropdown `pro_hold_first_at` =
 `signal` (`sig_only` in `_pro_evaluate`): no first-candle, green-after-red or ◆ BP buy — a lot is bought only on the
 chart's ▲ BUY (Pro Trader call, read at each closed candle; reason "▲ BUY signal — …"), every new ▲ BUY adds a lot up to
-Max lots / Total cap, and it sells at `green_target()` like every pro_hold trade (not the pinned-coin rule). The normal
-entry checks still apply to these buys. The Pro Trader read needs 25 candles, so trades are rare on young coins. A ▲ BUY on a candle that arrived in a batch
+Max lots / Total cap, and it sells at `green_target()` like every pro_hold trade (not the pinned-coin rule). These buys skip the
+SOL_OUTFLOW, FAR_BELOW_PEAK, Min reserve and cooldown checks (sig `first` + `now_buy` + `gar`; Doggles' first two ▲ BUY
+tags were refused by SOL_OUTFLOW) — Skip Mayhem coins, Max lots and Total cap still apply. On a coin fed by pump_rest
+(no stream trades) candles arrive 1–4 s late, so the lot lands that much after the tag: not fixable in the bot. The Pro Trader read needs 25 candles, so trades are rare on young coins. A ▲ BUY on a candle that arrived in a batch
 (pump_rest delivers several at once; only the newest was read — tags at 02:35:10 / 02:35:14 on a pinned coin never
 bought) still buys when it is ≤ 5 s before the newest candle (`_late_buy`, also for pinned coins; reason "… arrived late").
 
@@ -324,6 +326,8 @@ per-page Stop buttons; ticking AutoTrade-Candles also turning Auto Trade ON.
 
 - Investigate with the log (`logs/run.out`, `logs/candle_audit.jsonl`, `logs/candle_momo.sqlite`) before
   changing code; explain the cause with times and numbers.
-- After code changes: tests → rebuild `deploy/caller_stream_update.tar.gz` (same file list) → safe restart →
+- After code changes: tests → rebuild `deploy/caller_stream_update.tar.gz`
+  (`tar czf deploy/caller_stream_update.tar.gz -T deploy/caller_stream_files.txt` — the list is in the repo since
+  2026-11-16; it was rebuilt from the 2026-11-12 bundle after a reboot wiped the temp copy) → safe restart →
   confirm no `Traceback` in `logs/run.out`.
 - Commit with the user's name; push to `origin main` only when the user asks.

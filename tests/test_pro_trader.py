@@ -1008,7 +1008,11 @@ def test_signal_only_buys_just_on_the_chart_buy(tmp_path, monkeypatch):
                                          close=last.close, volume=1, final=True)])
     e._evaluate(f, time.time())
     buys = [r for r in routed if r["side"] == "BUY"]
-    assert len(buys) == 1 and buys[0]["pro_why"].startswith("▲ BUY signal") and not buys[0]["first"]
+    assert len(buys) == 1 and buys[0]["pro_why"].startswith("▲ BUY signal")
+    # bought ON the signal: the SOL-outflow / far-below-high / Min reserve / cooldown checks do not hold it back
+    assert buys[0]["first"] and buys[0]["now_buy"] and buys[0]["gar"]
+    e.cfg.inflow_window_s, e.cfg.max_below_peak_pct = 5, 10
+    assert e._entry_filters("MINT", first=True, now_buy=True)[0] == ""
 
 
 def test_signal_on_a_candle_that_arrived_in_a_batch_still_buys(tmp_path, monkeypatch):

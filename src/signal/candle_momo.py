@@ -1720,6 +1720,13 @@ class CandleMomo:
                          f"(red candle; peak {float(held.get('pro_peak') or up):+.1f}%)")}
         else:
             return
+        if side == "BUY" and sig_only:
+            # "buy only on the ▲ BUY signal" buys ON the signal (user 2026-11-16: Doggles' first two ▲ BUY tags were
+            # refused by SOL_OUTFLOW and the lot came 6 s later on a third): the SOL-outflow history, far-below-high,
+            # Min reserve and cooldown checks are skipped, like the other pro_hold first buys. Skip Mayhem coins,
+            # Max lots and Total cap still apply.
+            self._pro_emit(f, rows, side, a, seen, first=True, now_buy=True, gar=True)
+            return
         self._pro_emit(f, rows, side, a, seen)
 
     def _pro_emit(self, f: Feed, rows: List[Candle], side: str, a: Dict[str, Any], seen: float,
