@@ -605,3 +605,39 @@ def test_a_trade_on_a_held_coin_runs_the_rules_at_once(monkeypatch):
         await e._idle("HOLDpump", f, 0.05)
         assert len(calls) == 1
     asyncio.run(run())
+
+
+def test_two_losses_in_a_row_pause_new_trades_then_take_the_newest(monkeypatch):
+    """User 2026-11-16, common to every source / feed / rule: 2 losing trades in a row -> no new trade for 30 s; flat,
+    nothing is watched meanwhile, so the pick after the pause is the newest coin then."""
+    e = CM.CandleMomo()
+    assert e.cfg.loss_pause_n == 2 and e.cfg.loss_pause_s == 30.0
+    e._note_result(-0.001, "A")
+    assert e.loss_pause_left() == 0                      # one loss: nothing yet
+    e._note_result(+0.002, "B")                          # a win resets the count
+    e._note_result(-0.001, "C")
+    assert e.loss_pause_left() == 0
+    e._note_result(-0.001, "D")                          # second loss in a row
+    assert 29 < e.loss_pause_left() <= 30 and e.loss_streak == 0
+    # no new trade while paused; a manual Entry still goes through the gate
+    f = CM.Feed("NEWpump", 10)
+    f.status = "OK"
+    e.feeds["NEWpump"] = f
+    monkeypatch.setattr(e, "_start", lambda sig: "intent")
+    sig = {"id": "s1", "mint": "NEWpump", "side": "BUY", "pro": True, "_counted": True, "deltaPct": 0.0}
+    assert e._route(dict(sig)) == "LOSS_PAUSE"
+    # flat and paused: the watched coin is dropped and nothing is picked
+    picked = []
+    monkeypatch.setattr(e, "_pick_feeds", lambda rows: picked.append(1))
+    e._pick([])
+    assert not e.feeds and not picked
+    # after the pause the normal pick runs again (the newest coin then)
+    e.loss_pause_until = time.time() - 1
+    monkeypatch.setattr(e, "_single_feed", lambda: None)
+    monkeypatch.setattr(e, "_name_feeds", lambda: None)
+    e._pick([])
+    assert picked == [1]
+    # off switch
+    e.cfg.loss_pause_n = 0
+    e._note_result(-1, "X"); e._note_result(-1, "Y"); e._note_result(-1, "Z")
+    assert e.loss_pause_left() == 0

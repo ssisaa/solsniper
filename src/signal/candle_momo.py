@@ -62,7 +62,7 @@ PRO_FIRST_MAX_AGE_S = 60.0     # pro_hold first-candle buy: only coins this youn
 SKIP_REASONS = ("KILLED", "NO_POSITION", "ALREADY_LONG", "ENTRIES_PAUSED", "FEED_DEGRADED", "STALE_FEED",
                 "BLACKLIST", "NOT_WHITELISTED", "DAILY_LOSS", "RATE_LIMIT", "COOLDOWN", "MAX_EXPOSURE",
                 "MAX_TRADE", "NOT_READY", "CIRCUIT_BREAKER", "BUY_UNRESOLVED", "DUPLICATE", "COALESCED", "STALE", "IN_FLIGHT", "NOT_TRADABLE", "LADDER_WAIT", "LADDER_MAX", "LADDER_CAP", "GREEN_CONFIRM", "NOT_IN_PROFIT", "LOW_RESERVES", "CRASH_CANDLE", "BELOW_BREAKEVEN", "SOL_OUTFLOW",
-                "FAR_BELOW_PEAK", "LADDER_ABOVE", "SUPPORT_NO_ENTRY", "AUTO_TRADE_OFF", "MAYHEM_COIN")
+                "FAR_BELOW_PEAK", "LADDER_ABOVE", "SUPPORT_NO_ENTRY", "AUTO_TRADE_OFF", "MAYHEM_COIN", "LOSS_PAUSE")
 
 
 # ---------------------------------------------------------------- providers
@@ -221,6 +221,8 @@ class CandleMomo:
         self.offers: Dict[str, Dict[str, Any]] = {}
         self._trade_ev: Dict[str, asyncio.Event] = {}      # held coin -> a trade just arrived (instant take-profit)
         self.unsold: List[Dict[str, Any]] = []             # trades set aside unsold (price unreadable) — Unsold Coins page
+        self.loss_streak = 0                               # losing trades in a row (any source / feed / rule)
+        self.loss_pause_until = 0.0                        # no new trade before this time (pause after losses)
         self._instant = False
         self.paused_mints: Dict[str, float] = {}
         self._pin_warned: set = set()
@@ -419,7 +421,7 @@ class CandleMomo:
         now = time.time()
         for m in want:
             if (m in self.positions or m in self.busy or m in self.unusable or m in self._mirrored
-                    or len(self.trading()) >= max(1, int(self.cfg.max_mints or 1))):
+                    or len(self.trading()) >= max(1, int(self.cfg.max_mints or 1)) or self.loss_pause_left() > 0):
                 continue
             self._mirrored[m] = now
             f = self.feeds.get(m)
@@ -804,7 +806,35 @@ class CandleMomo:
             want[pick["m"]] = {"origin": "mixed-" + pick["_grp"], "row": pick}
         return want
 
+    # ---------- pause after losses in a row (user 2026-11-16): common to every source, feed and rule
+    def loss_pause_left(self) -> float:
+        return max(0.0, float(self.loss_pause_until or 0) - time.time())
+
+    def _note_result(self, pnl: Optional[float], symbol: str = "") -> None:
+        """A trade closed. `loss_pause_n` losses in a row -> no new trade for `loss_pause_s`; flat, no coin is
+        watched meanwhile, so afterwards the newest coin of the source / feed is taken. A win resets the count."""
+        if pnl is None:
+            return
+        if float(pnl) >= 0:
+            self.loss_streak = 0
+            return
+        self.loss_streak += 1
+        n, wait = int(self.cfg.loss_pause_n or 0), float(self.cfg.loss_pause_s or 0)
+        if n > 0 and wait > 0 and self.loss_streak >= n:
+            self.loss_streak = 0
+            self.loss_pause_until = time.time() + wait
+            self.note("warn", f"{n} losing trades in a row{(' (last: ' + symbol + ')') if symbol else ''} — no new trade for "
+                              f"{wait:.0f}s, then the newest coin is taken.")
+            if self.store:
+                self.store.audit("loss_pause", n=n, wait_s=wait)
+
     def _pick(self, rows: List[Dict[str, Any]]) -> None:
+        if self.loss_pause_left() > 0 and not self.trading():
+            # pause after losses: flat, nothing is watched — the pick after the pause is the newest coin then
+            for m in [m for m in self.feeds if m not in self.positions]:
+                self.feeds.pop(m, None)
+            self.providers["stream"].wanted = set(self.feeds)
+            return
         self._pick_feeds(rows)
         self._single_feed()
         self._name_feeds()
@@ -1947,6 +1977,8 @@ class CandleMomo:
         ladder = self.ladder_on()
         if cfg.kill:
             return self.skip(sig, "KILLED")
+        if side == "BUY" and held is None and not sig.get("manual") and self.loss_pause_left() > 0:
+            return self.skip(sig, "LOSS_PAUSE")              # pause after losses in a row: no new trade yet
         if side == "SELL" and held is None:
             return self.skip(sig, "NO_POSITION")
         if side == "SELL" and ladder and n < cfg.sell_on_green_confirm:
@@ -2495,6 +2527,7 @@ class CandleMomo:
         if whole:
             self.traded[mint] = time.time()
             self.reds_since.pop(mint, None)
+            self._note_result(trade["pnl_sol"], str(pos.get("symbol") or ""))
         self.store.audit("close", mint=mint, signalId=trade["exit_signal"], pnlSol=trade["pnl_sol"], pct=trade["pct"],
                          why=why, pausedExit=paused, cfg=self.cfg.digest())
         nlots = len(pos.get("lots") or []) or 1
@@ -3233,6 +3266,7 @@ class CandleMomo:
             self.store.close_position(mint, dict(trade, pnl_sol=0.0, why=why + " — PnL in the Trade Ledger"))
         else:
             self.store.close_position(mint, trade)
+        self._note_result(pnl, str(rec.get("symbol") or ""))
         self.store.audit("close", mint=mint, mode="live", signalId=sig_id, pnlSol=trade["pnl_sol"], why=why)
         if pnl is None:
             self.note("info", f"{rec.get('symbol')} LIVE trade closed elsewhere — {why}.", mint)
@@ -3587,7 +3621,8 @@ class CandleMomo:
             src_now = str(getattr(_gc(), "filter_mode", "") or "")
         except Exception:
             src_now = ""
-        return {"ok": True, "seq": self.seq_status(), "paused": self.paused_view(), "unsold": self.unsold_view(), "support": sup, "supportEnabled": bool(self.cfg.support_enabled), "liveSource": src_now,
+        return {"ok": True, "seq": self.seq_status(), "paused": self.paused_view(), "unsold": self.unsold_view(),
+                "lossPause": {"left": round(self.loss_pause_left(), 1), "streak": self.loss_streak}, "support": sup, "supportEnabled": bool(self.cfg.support_enabled), "liveSource": src_now,
                 "paperOnly": self.cfg.mode != "live", "live": self.cfg.mode == "live",
                 "liveBlock": self.live_block() if self.cfg.mode == "live" else "", "autoTrade": auto,
                 "maxPositionSol": max_pos, "unresolved": bool(self.unresolved), "config": self.cfg.snapshot(), "configErrors": self.cfg_errors,

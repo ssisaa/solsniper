@@ -1275,6 +1275,8 @@ header nav.nav .navbtn[hidden]{display:none}
         <label title="A green candle sells only if the whole trade is in profit (after fees); otherwise keep holding"><input type="checkbox" id="cmProfitOnly"/> Sell only in profit</label>
         <label title="Minimum profit % (after fees) for that sell">Min profit % <input class="cm-in" id="cmMinProfit" type="number" min="-50" max="1000" step="0.5"/></label>
         <label title="Close any trade held this long, even at a loss (0 = off)">Max hold s <input class="cm-in" id="cmMaxHold" type="number" min="0" max="3600" step="5"/></label>
+        <label title="Pause after losses: this many losing trades in a row (any source, feed or rule) stop new trades for the wait time; after it the newest coin is taken. 0 = off">Losses in a row <input class="cm-in" id="cmLossN" type="number" min="0" max="20" step="1"/></label>
+        <label title="How long no new trade is opened after that many losses in a row">then wait s <input class="cm-in" id="cmLossS" type="number" min="0" max="3600" step="5"/></label>
         <label title="Open a trade only if the coin's curve holds at least as much SOL as this many seconds ago — money still flowing in (a dip, not a drain). 0 = off">SOL inflow s <input class="cm-in" id="cmInflow" type="number" min="0" max="60" step="1"/></label>
         <label title="Don't open a trade when the price is this far below the coin's high. 0 = off">Max below peak % <input class="cm-in" id="cmBelowPeak" type="number" min="0" max="99" step="1"/></label>
         <label title="Inverse: never open a trade on a red candle bigger than this % (a crash, not a dip). 0 = off">Max entry red % <input class="cm-in" id="cmMaxRed" type="number" min="0" max="100" step="1"/></label>
@@ -4467,6 +4469,7 @@ function paintCandle(d){
       document.getElementById('cmProfitOnly').checked=!!c.sell_only_in_profit;
       document.getElementById('cmMinProfit').value=c.min_profit_pct;
       document.getElementById('cmMaxHold').value=c.max_hold_s;
+      document.getElementById('cmLossN').value=c.loss_pause_n; document.getElementById('cmLossS').value=c.loss_pause_s;
       document.getElementById('cmMinRes').value=c.min_reserve_sol;
       document.getElementById('cmMaxRed').value=c.max_entry_red_pct;
       document.getElementById('cmInflow').value=c.inflow_window_s;
@@ -4478,7 +4481,9 @@ function paintCandle(d){
   document.getElementById('cmLadderBar').style.opacity=c.rule==='inverse'?'1':'.55';
   cmSet('cmLadHint', c.rule==='inverse'?(c.ladder_enabled?(()=>{const n=Math.max(1,Number(c.reds_per_lot)||3),b=[];for(let i=0;i<Math.min(Number(c.max_ladder_buys)||3,6);i++)b.push(1+i*n);return (c.ladder_count==='in_a_row'?`buys on reds ${b.join(', ')} in a row`:`one more lot every ${n} reds while below the last buy (greens do not reset)`)+` (max ${c.max_ladder_buys} lots / ${c.ladder_max_total_sol} SOL) · green in profit sells all`;})():'ladder off: one buy per trade'):'Ladder works only with the inverse rule');
   const k=document.getElementById('cmKill'); k.className='m2-pill '+(c.kill?'bad':'on'); k.textContent=c.kill?'KILLED':'running';
-  const e=document.getElementById('cmEntries'); e.className='m2-pill '+(c.entries_paused?'off':'on'); e.textContent=c.entries_paused?'entries paused':'entries on';
+  const e=document.getElementById('cmEntries'), lp=(d.lossPause||{}).left||0;
+  e.className='m2-pill '+((c.entries_paused||lp>0)?'off':'on');
+  e.textContent=c.entries_paused?'entries paused':(lp>0?'pause after losses · '+Math.ceil(lp)+'s':'entries on');
   const live=c.mode==='live', blk=d.liveBlock||'';
   const supBox=document.getElementById('cmSupport');
   if(d.supportEnabled){
@@ -4577,6 +4582,7 @@ document.getElementById('cmApply').addEventListener('click',()=>{
           stop_loss_pct:document.getElementById('cmStop').value,
           sell_only_in_profit:document.getElementById('cmProfitOnly').checked, min_profit_pct:document.getElementById('cmMinProfit').value,
           max_hold_s:document.getElementById('cmMaxHold').value,
+          loss_pause_n:document.getElementById('cmLossN').value, loss_pause_s:document.getElementById('cmLossS').value,
           min_reserve_sol:document.getElementById('cmMinRes').value, max_entry_red_pct:document.getElementById('cmMaxRed').value,
           inflow_window_s:document.getElementById('cmInflow').value, max_below_peak_pct:document.getElementById('cmBelowPeak').value, exit_reserve_sol:document.getElementById('cmExitRes').value}, 'Settings');
 });

@@ -150,6 +150,14 @@ opened in the last 30 s (`_callout_page_at`); else it sleeps (log "CALLOUTS read
 with MayhemMode as the source the bot went over pump's ~10 req/s and pump answered HTTP 403 in bursts (Candles' pump_rest
 chart reads: 110 of 357 failed). First step of the "only the loops the source needs" idea.
 
+**Pause after losses in a row (2026-11-16, user's request)**: common to every source, feed and rule on the Candles page.
+`loss_pause_n` (2) losing closed trades in a row (`_note_result`, called at every whole close, paper and live; a win
+resets `loss_streak`) → `loss_pause_until` = now + `loss_pause_s` (30 s; both on the Candles page next to Max hold, 0 =
+off). While it runs: no new trade (`_route` skip `LOSS_PAUSE`, paper lot 1 too; manual Entry excepted) and, when flat,
+`_pick` drops the watched coin and picks nothing — so the first pick afterwards is the source's newest coin. The header
+pill shows "pause after losses · Ns". A source that buys lot 1 itself (Launch / Dayscalp live, OpenCopy live) is not held
+back by it; Candles' own adds and sells are never blocked.
+
 **Live buy limits (2026-11-14)**: Candles' live buys (source `candle`) are not under the Live Controls Max concurrent
 (trader.buy: only a second buy of the same coin is refused; other open trades and leftover wallet coins don't block it; the wallet / second-buy gate is skipped for `candle`). Each lot's `px` is its REAL fill in chart units (paper: signal close × expected / got tokens; live: `_fill_px_chart` = chart close × fill price / curve price right after the fill) — GHOSTY's L1 filled 4× above its signal candle. The fast profit reading is scaled by `pos["impact"]` = real curve value / chart value from the value loop (selling a thin curve gets less than the chart shows). For the other sources a
 coin pump paused (`mayhem_state_of`, or `CandleMomo.is_paused` / `paused_mints`) holds no Max concurrent slot.
