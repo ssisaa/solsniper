@@ -152,6 +152,24 @@ def _callout_rows() -> tuple:
 
 
 _callout_lock = threading.Lock()
+_callout_page_at = 0.0     # last time the CallOuts page asked for its rows
+
+
+def callout_reader_needed() -> bool:
+    """The CallOuts reader costs ~8 pump requests a second. It runs only when something reads it (user 2026-11-16:
+    with MayhemMode as the source it pushed the bot over pump's ~10 req/s and the chart reads got HTTP 403): the
+    Live Controls source is CallOuts or OpenCopy, or the CallOuts page was opened in the last 30 s."""
+    try:
+        from src.config.runtime import get_config
+        mode = str(getattr(get_config(), "filter_mode", "") or "")
+    except Exception:
+        return True
+    if mode in ("callout", "opencopy"):
+        return True
+    import time as _t
+    return _t.time() - float(_callout_page_at or 0) < 30.0
+
+
 CO_SHOW_WINDOW_S = 300.0   # CallOuts page shows calls opened in the last 5 minutes (pins always)
 _CO_EVERY_S = 1.2   # each CallOuts caller is re-read this often (its portfolio is one pump request)
 _callout_thread_started = False
@@ -774,8 +792,16 @@ def _callout_loop() -> None:
             inflight.discard(wallet)
             last_done[wallet] = time.time()
 
+    idle_note = 0.0
     while True:
         started = time.time()
+        if not callout_reader_needed():
+            if time.time() - idle_note > 600:
+                idle_note = time.time()
+                log.info("CALLOUTS reader paused — the source is not CallOuts / OpenCopy and the CallOuts page is closed.")
+            time.sleep(2.0)
+            continue
+        idle_note = 0.0
         try:
             feed = callout_get(feed_url, timeout=4.0, cache_s=2.0)
             people = []
@@ -3622,6 +3648,9 @@ def callout_blocked() -> List[Dict[str, Any]]:
 
 def _callout_page_rows() -> tuple:
     """Live CallOuts, with coins this bot bought kept at the front."""
+    global _callout_page_at
+    import time as _t
+    _callout_page_at = _t.time()          # the page is open: the reader runs (callout_reader_needed)
     _start_pin_live()
     rows, err = _callout_rows()
     by_mint: Dict[str, Dict[str, Any]] = {}

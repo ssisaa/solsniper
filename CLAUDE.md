@@ -144,6 +144,12 @@ booked in Closed trades at its last known value, and listed on the new dashboard
 when the curve read says the coin has no price route (`NO_ROUTE`) — a failed RPC read never drops a real coin; its coins
 stay in the wallet (`_live_closed`).
 
+**CallOuts reader paused when unused (2026-11-16, user's request)**: `dashboard.callout_reader_needed()` — the CallOuts
+loop (~8 pump requests / s) runs only while the Live Controls source is CallOuts or OpenCopy, or the CallOuts page was
+opened in the last 30 s (`_callout_page_at`); else it sleeps (log "CALLOUTS reader paused", cached rows stay). Reason:
+with MayhemMode as the source the bot went over pump's ~10 req/s and pump answered HTTP 403 in bursts (Candles' pump_rest
+chart reads: 110 of 357 failed). First step of the "only the loops the source needs" idea.
+
 **Live buy limits (2026-11-14)**: Candles' live buys (source `candle`) are not under the Live Controls Max concurrent
 (trader.buy: only a second buy of the same coin is refused; other open trades and leftover wallet coins don't block it; the wallet / second-buy gate is skipped for `candle`). Each lot's `px` is its REAL fill in chart units (paper: signal close × expected / got tokens; live: `_fill_px_chart` = chart close × fill price / curve price right after the fill) — GHOSTY's L1 filled 4× above its signal candle. The fast profit reading is scaled by `pos["impact"]` = real curve value / chart value from the value loop (selling a thin curve gets less than the chart shows). For the other sources a
 coin pump paused (`mayhem_state_of`, or `CandleMomo.is_paused` / `paused_mints`) holds no Max concurrent slot.
