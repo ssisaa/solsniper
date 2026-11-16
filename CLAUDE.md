@@ -103,6 +103,14 @@ and it was re-added every 2 s ("Watching ADAWDD (mayhem holds it)" 116 times) �
 step. `_one_feed` and the support `want` now skip positions with `paused_at`. Same night pump answered HTTP 429 on every
 advanced-indexer board for this IP (board errors are only logged at debug: an empty pick with no log line = look there).
 
+**Pump rate limit back-off (2026-11-17)**: every pump page showed "HTTPStatusError" and no coin was scanned for 20+ min —
+pump answered HTTP 429 on all hosts for this connection and `fast_get` did not slow down on a 429 at all (only 403 had a
+cool-down). Now `_rate_limited(url)`: more than 2 × 429 from a host inside 3 min pauses EVERY read of that host 5 s, 10,
+20, 40, then 60 s at a time (`_rate_until`, checked by `_cooling`); each good answer takes one 429 off the count, so a
+short overrun pauses nothing. Log: "PUMP rate limit (HTTP 429) on <host> — every read of it is paused N s".
+`rate_limit_left()` gives the seconds left (not shown on the dashboard yet). Likely trigger that night: the ADAWDD
+feed churn (a new feed every 2 s = chart + state reads) plus five restarts.
+
 **Mixed feed stuck on a finished coin (2026-11-16)**: MONY stayed on the feed 8 min, flat, nothing else traded. Its
 trade closed, the hand-over dropped `_mx_since[m]`, but a re-buy in flight (`busy`) kept the feed; from then on "since"
 was "now" on every pick, so the coin was never done or idle. `_mixed_want` now restores the start time from

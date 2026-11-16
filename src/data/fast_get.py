@@ -114,7 +114,62 @@ def _cool_key(host: str, lane: str) -> str:
 def _cooling(url: str, lane: str = "") -> bool:
     host = _host_of(url)
     with _cool_lock:
-        return time.monotonic() < float(_cool_until.get(_cool_key(host, lane)) or 0)
+        now = time.monotonic()
+        return (now < float(_cool_until.get(_cool_key(host, lane)) or 0)
+                or now < float(_rate_until.get(host) or 0))
+
+
+# HTTP 429 = pump's rate limit for this connection (every lane, every page). Asking on at full speed keeps the
+# limit on (2026-11-17: every board and page answered 429 for 20+ minutes). So 429s that keep coming pause ALL reads
+# of that host: 5 s, 10, 20, 40, then 60 s at a time, until answers come back. A 429 now and then (a short overrun)
+# pauses nothing: every good answer takes one 429 off the count.
+_RATE_WINDOW = 180.0
+_RATE_FREE = 2                   # this many 429s inside the window pause nothing
+_RATE_MAX_S = 60.0
+_rate_hits: dict[str, list[float]] = {}
+_rate_until: dict[str, float] = {}
+_rate_logged: dict[str, float] = {}
+
+
+def _rate_limited(url: str) -> float:
+    """Note one HTTP 429 from this host. Returns the pause (seconds) it started, 0 when none."""
+    host = _host_of(url)
+    if not host:
+        return 0.0
+    now = time.monotonic()
+    with _cool_lock:
+        hits = [t for t in _rate_hits.get(host, []) if now - t < _RATE_WINDOW]
+        hits.append(now)
+        _rate_hits[host] = hits[-40:]
+        over = len(hits) - _RATE_FREE
+        if over <= 0:
+            return 0.0
+        pause = min(_RATE_MAX_S, 5.0 * (2 ** min(over - 1, 6)))
+        _rate_until[host] = max(float(_rate_until.get(host) or 0), now + pause)
+        say = now - float(_rate_logged.get(host) or 0) > 30.0
+        if say:
+            _rate_logged[host] = now
+    if say:
+        log.warning("PUMP rate limit (HTTP 429) on %s — every read of it is paused %.0f s (%d in the last 3 min)",
+                    host, pause, len(hits))
+    return pause
+
+
+def _rate_ok(url: str) -> None:
+    """A good answer: one 429 less on the count (a short overrun never builds up to a pause)."""
+    host = _host_of(url)
+    with _cool_lock:
+        hits = _rate_hits.get(host)
+        if hits:
+            hits.pop(0)
+
+
+def rate_limit_left(host: str = "") -> float:
+    """Seconds the pump hosts stay paused after HTTP 429s (0 = none); for the dashboard."""
+    now = time.monotonic()
+    with _cool_lock:
+        vals = [u - now for h, u in _rate_until.items() if not host or h == host]
+    return max([0.0] + vals)
 
 
 def _restart_clients() -> None:
@@ -142,6 +197,11 @@ def _mark_blocked(url: str, seconds: float = 20.0, lane: str = "") -> None:
 
 def _blocked(url: str) -> httpx.HTTPStatusError:
     request = httpx.Request("GET", url)
+    left = rate_limit_left(_host_of(url))
+    if left > 0:
+        response = httpx.Response(429, request=request)
+        return httpx.HTTPStatusError(f"HTTP 429 (pump rate limit: reads paused {left:.0f} s) for {url}",
+                                     request=request, response=response)
     response = httpx.Response(403, request=request)
     return httpx.HTTPStatusError(
         f"HTTP 403 client={_IMPERSONATE} for {url}",
@@ -230,8 +290,12 @@ def _plain(url: str, timeout: float, lane: str) -> Any:
                 continue
             raise
         if last_status == 200:
+            _rate_ok(url)
             text = raw.decode("utf-8", "replace") if raw else "{}"
             return _body(text)
+        if last_status == 429:
+            _rate_limited(url)
+            break
         _drop(host, lane)
         if last_status == 403 or attempt == 2:
             if last_status == 403:
@@ -278,9 +342,11 @@ def _read(url: str, timeout: float, lane: str = "shared") -> Any:
                 continue
             raise
         if last_status == 200:
+            _rate_ok(url)
             return _body(resp.text or "")
         if last_status == 429:
-            break   # rate limit, not a block: keep the warm session, the caller backs off
+            _rate_limited(url)   # rate limit, not a block: keep the warm session; repeated 429s pause the host
+            break
         text = resp.text or ""
         challenged = last_status == 403 and ("Just a moment" in text or text.lstrip().startswith("<!DOCTYPE"))
         _close_chrome(lane)
@@ -303,6 +369,8 @@ def _read(url: str, timeout: float, lane: str = "shared") -> Any:
 def pump_get_fresh(url: str, timeout: float = 0.8) -> Any:
     """One new request. Chrome when that library is installed, otherwise the plain socket."""
     timeout = max(0.4, float(timeout or 0.8))
+    if _cooling(url, "fresh"):
+        raise _blocked(url)
     headers = _send_headers()
     headers["Cache-Control"] = "no-cache"
     if _chrome_ok is not False:
@@ -319,7 +387,10 @@ def pump_get_fresh(url: str, timeout: float = 0.8) -> Any:
             )
             status = int(resp.status_code or 0)
             if status == 200:
+                _rate_ok(url)
                 return _body(resp.text or "")
+            if status == 429:
+                _rate_limited(url)
             request = httpx.Request("GET", url)
             response = httpx.Response(status or 403, request=request)
             raise httpx.HTTPStatusError(
