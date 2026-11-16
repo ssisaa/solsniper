@@ -720,6 +720,7 @@ header nav.nav .navbtn[hidden]{display:none}
       <button type="button" class="navbtn" data-view="mayhem2" id="navMayhem2">Mayhem2</button>
       <button type="button" class="navbtn" data-view="candle">Candles</button>
       <button type="button" class="navbtn" data-view="paused">Paused Coins <span id="pcCount" class="muted"></span></button>
+      <button type="button" class="navbtn" data-view="unsold">Unsold Coins <span id="usCount" class="muted"></span></button>
       <button type="button" class="navbtn" data-view="settings">Settings</button>
     </nav>
     <div class="head-tools">
@@ -1204,6 +1205,14 @@ header nav.nav .navbtn[hidden]{display:none}
     <table><thead><tr><th>Coin</th><th>Mode</th><th>Lots</th><th>In SOL</th><th>Value now</th><th>P/L</th><th>State</th><th>Paused for</th><th>Last check</th><th></th></tr></thead>
     <tbody id="pcRows"><tr><td colspan="10" class="muted">Loading…</td></tr></tbody></table>
     <div class="muted" id="pcMsg" style="margin-top:8px"></div>
+  </div>
+</div>
+<div id="view-unsold" class="view" data-view="unsold">
+  <div class="card">
+    <div class="row-between"><h2 style="margin:0">Unsold Coins</h2><span class="muted" id="usInfo">newest first</span></div>
+    <p class="muted" style="margin:6px 0 12px">Candles trades that were <b>set aside without a sale</b>: the coin's price could not be read for 90 seconds ("price unreadable — kept, will retry"), so the trade was taken out of Open positions and the next coin could come. It is booked in Closed trades at its last known value. A <b>LIVE</b> coin is only set aside when it really has no price route, and its coins are still in the wallet.</p>
+    <table><thead><tr><th>Set aside</th><th>Coin</th><th>Mode</th><th>Lots</th><th>In SOL</th><th>Last value</th><th>Held</th><th>Reason</th></tr></thead>
+    <tbody id="usRows"><tr><td colspan="8" class="muted">Loading…</td></tr></tbody></table>
   </div>
 </div>
 <div id="view-candle" class="view" data-view="candle">
@@ -5290,6 +5299,22 @@ document.querySelectorAll('.atc-box').forEach(b=>b.addEventListener('change',asy
   }catch(e){ alert('Could not reach the bot.'); }
   atcSync();
 }));
+// ---------- Unsold Coins page: Candles trades set aside without a sale (price unreadable)
+async function loadUnsold(){
+  try{
+    const d=await (await fetch('/api/candle',{cache:'no-store'})).json();
+    const rows=d.unsold||[];
+    const cnt=document.getElementById('usCount'); if(cnt) cnt.textContent=rows.length?'('+rows.length+')':'';
+    const el=document.getElementById('usRows'); if(!el) return;
+    el.innerHTML=rows.length?rows.map(r=>`<tr><td>${m2Clock(r.ts)}</td>
+        <td><a href="https://pump.fun/coin/${encodeURIComponent(r.mint)}" target="_blank" rel="noopener">${escapeHtml(r.symbol||r.mint.slice(0,6))}</a></td>
+        <td>${r.mode==='live'?'<b class="r">LIVE</b>':'paper'}${r.src?' <span class="muted">· '+escapeHtml(r.src)+'</span>':''}</td>
+        <td>${r.lots||1}</td><td>${Number(r.entry_sol||0).toFixed(4)}</td>
+        <td>${r.last_value_sol!=null?Number(r.last_value_sol).toFixed(5):'—'}</td><td>${pcAge(r.held_s)}</td>
+        <td>${escapeHtml(r.reason||'')}</td></tr>`).join(''):'<tr><td colspan="8" class="muted">No coin was set aside.</td></tr>';
+  }catch(e){}
+}
+setInterval(()=>{ if(!document.getElementById('view-unsold').classList.contains('on')) loadUnsold(); }, 15000);
 // ---------- Paused Coins page: Candles trades held while pump has them paused
 function pcAge(s){ s=Math.max(0,Math.round(Number(s)||0)); return s<120?s+'s':(s<7200?Math.floor(s/60)+'m '+(s%60)+'s':Math.floor(s/3600)+'h '+Math.floor(s%3600/60)+'m'); }
 async function loadPaused(){
@@ -5323,7 +5348,7 @@ document.addEventListener('click', async e=>{
   setTimeout(()=>{ b.disabled=false; loadPaused(); }, 1500);
 });
 function showView(name){
-  const views=['dash','ledger','history','exec','coins','mayhem','mayhem2','candle','paused','decoded','callouts','openholds','livetrades','predict','settings'];
+  const views=['dash','ledger','history','exec','coins','mayhem','mayhem2','candle','paused','unsold','decoded','callouts','openholds','livetrades','predict','settings'];
   if(!views.includes(name)) name='dash';
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on', v.dataset.view===name));
   document.querySelectorAll('.navbtn').forEach(b=>b.classList.toggle('on', b.dataset.view===name));
@@ -5336,6 +5361,8 @@ function showView(name){
   if(window._cmTimer){ clearInterval(window._cmTimer); window._cmTimer=null; }
   if(window._pcTimer){ clearInterval(window._pcTimer); window._pcTimer=null; }
   if(name==='paused'){ loadPaused(); window._pcTimer=setInterval(loadPaused, 1000); }
+  if(window._usTimer){ clearInterval(window._usTimer); window._usTimer=null; }
+  if(name==='unsold'){ loadUnsold(); window._usTimer=setInterval(loadUnsold, 3000); }
   if(window._cmChartTimer){ clearInterval(window._cmChartTimer); window._cmChartTimer=null; }
   if(window._atcTimer){ clearInterval(window._atcTimer); window._atcTimer=null; }
   if(name==='openholds'||name==='callouts'||name==='decoded'||name==='mayhem'){ atcSync(); window._atcTimer=setInterval(atcSync, 4000); }

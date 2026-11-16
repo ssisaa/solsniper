@@ -1317,3 +1317,79 @@ def test_ledger_win_needs_sol_profit():
                                                        pnl_usd=None, book_locked=False)
     led.entries = [row(0.0106, 0.0090, 12.0), row(0.005, 0.0059, 5.0)]    # SOL loss with green pump %, real win
     assert led._win_loss(0) == (1, 1)
+
+
+def test_exit_closes_a_coin_with_no_price_route(engine, monkeypatch):
+    """SOB 2026-11-16: graduated, no Jupiter quote — every Exit click answered "price unreadable" and it sat 22 min."""
+    from src.execution import pump_curve as PC
+    e = engine
+    e.cfg.fill_lag_ms = 0
+
+    async def no_tx(*a, **k):
+        return "", None, None
+
+    async def curve(mint):
+        return None, 100, "graduated"
+
+    async def no_quote(jup, mint, part):
+        return None
+    monkeypatch.setattr(PC, "pump_sell_tx", no_tx)
+    monkeypatch.setattr(e, "_curve", curve)
+    monkeypatch.setattr(e, "_jup", lambda: object())
+    monkeypatch.setattr(e, "_jup_quote_sell", no_quote)
+
+    def held():
+        e.positions["MINT"] = {"mint": "MINT", "symbol": "S", "mode": "paper", "tokens": 1000.0, "entry_sol": 0.005,
+                               "entry_ts": time.time() - 60, "entry_signal": "x", "costs_sol": 0.0, "value_sol": 0.0002}
+    held()
+    asyncio.run(e._paper_sell(_sig("SELL", 5000), "green candle"))          # a candle signal: kept, as before
+    assert "MINT" in e.positions
+    man = dict(_sig("SELL", 6000), manual=True)
+    asyncio.run(e._paper_sell(man, "manual Exit all"))                      # manual Exit: closes at its last value
+    assert "MINT" not in e.positions
+    t = e.store.trades(1)[0]
+    assert t["exit_sol"] == pytest.approx(0.0002) and "no price route" in t["why"]
+    held()
+    asyncio.run(e._paper_sell({"id": "forced", "mint": "MINT", "side": "SELL", "seen": time.time()}, "max hold 900s"))
+    assert "MINT" not in e.positions                                        # Max hold closes it too
+
+
+def test_unreadable_price_sets_the_trade_aside_after_90s(engine, monkeypatch, tmp_path):
+    """User 2026-11-16: "price unreadable — kept, will retry" must not hold a coin for long: after 90 s it leaves
+    Open positions, is booked at its last value and is listed on the Unsold Coins page with the reason."""
+    from src.execution import pump_curve as PC
+    from src.signal import candle_momo as M
+    e = engine
+    e.cfg.fill_lag_ms = 0
+    e._unsold_path = str(tmp_path / "unsold.json")
+
+    async def no_tx(*a, **k):
+        return "", None, None
+
+    async def curve(mint):
+        return None, 100, "rpc_error"                       # a read that just fails
+
+    async def no_quote(jup, mint, part):
+        return None
+    monkeypatch.setattr(PC, "pump_sell_tx", no_tx)
+    monkeypatch.setattr(e, "_curve", curve)
+    monkeypatch.setattr(e, "_jup_quote_sell", no_quote)
+    pos = {"mint": "MINT", "symbol": "S", "mode": "paper", "tokens": 1000.0, "entry_sol": 0.005,
+           "entry_ts": time.time() - 200, "entry_signal": "x", "costs_sol": 0.0, "value_sol": 0.003,
+           "unread_since": time.time() - M.UNREAD_SET_ASIDE_S - 1}
+    e.positions["MINT"] = pos
+    assert asyncio.run(e._set_aside("MINT", pos)) is True
+    assert "MINT" not in e.positions                                     # the next coin can come
+    t = e.store.trades(1)[0]
+    assert t["exit_sol"] == pytest.approx(0.003) and "set aside, NOT sold" in t["why"]
+    u = e.unsold_view()
+    assert len(u) == 1 and u[0]["mint"] == "MINT" and "price unreadable" in u[0]["reason"] and u[0]["last_value_sol"] == 0.003
+    e2 = M.CandleMomo()
+    e2._unsold_path = e._unsold_path
+    e2._unsold_load()
+    assert e2.unsold_view()[0]["mint"] == "MINT"                         # kept across a restart
+    # LIVE: a failed read never drops a real coin — only a coin with no price route
+    live = {"mint": "LIVE", "symbol": "L", "mode": "live", "tokens": 1.0, "entry_sol": 0.005, "entry_ts": time.time() - 200,
+            "entry_signal": "x", "unread_since": time.time() - 200}
+    e.positions["LIVE"] = live
+    assert asyncio.run(e._set_aside("LIVE", live)) is False and "LIVE" in e.positions

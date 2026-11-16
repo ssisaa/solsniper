@@ -130,6 +130,20 @@ EVERY trade from the trade socket, not only on the 0.5 s poll: `_on_stream_trade
 A take-profit fired this way says "(instant: on a trade)" in its reason, so its refusals / fills can be compared with the
 polled ones. Same rules, only checked sooner (also gar adds while holding). The sale still takes ~0.45 s to land.
 
+**Paper exit of a coin with no price route (2026-11-16)**: a graduated / off-curve coin Jupiter gives no quote for could
+not be paper-sold ("price unreadable — kept"), so SOB (−96 %) ignored every Exit click and Max hold. `_paper_sell` now
+books it at its last known value (`value_sol`; reason "… no price route …") for a manual Exit (always) and for rule exits
+without a candle signal (Max hold, stops) when the curve read says graduated / not_on_curve / not_sol_quote. A candle
+signal sell and a failed RPC read still keep the position, as before.
+
+**Unsold Coins (2026-11-16, user's request)**: an open Candles trade whose price cannot be read (`_value` gives nothing
+or only an old cached quote; `pos["unread_since"]`, also set by a paper sell's "price unreadable — kept") for
+`UNREAD_SET_ASIDE_S` 90 s is set aside by the value loop (`_set_aside`): out of Open positions (the next coin comes),
+booked in Closed trades at its last known value, and listed on the new dashboard tab **Unsold Coins** (`unsold` in
+`/api/candle`, `unsold_view()`, saved in `logs/candle_unsold.json`, last 200) with the reason. PAPER: always. LIVE: only
+when the curve read says the coin has no price route (`NO_ROUTE`) — a failed RPC read never drops a real coin; its coins
+stay in the wallet (`_live_closed`).
+
 **Live buy limits (2026-11-14)**: Candles' live buys (source `candle`) are not under the Live Controls Max concurrent
 (trader.buy: only a second buy of the same coin is refused; other open trades and leftover wallet coins don't block it; the wallet / second-buy gate is skipped for `candle`). Each lot's `px` is its REAL fill in chart units (paper: signal close × expected / got tokens; live: `_fill_px_chart` = chart close × fill price / curve price right after the fill) — GHOSTY's L1 filled 4× above its signal candle. The fast profit reading is scaled by `pos["impact"]` = real curve value / chart value from the value loop (selling a thin curve gets less than the chart shows). For the other sources a
 coin pump paused (`mayhem_state_of`, or `CandleMomo.is_paused` / `paused_mints`) holds no Max concurrent slot.

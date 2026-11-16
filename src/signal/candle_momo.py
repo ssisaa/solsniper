@@ -55,6 +55,8 @@ FLAT_PCT = 0.05                # "no candles yet": the only reading moved less t
 PRO_FIRST_START_CANDLES = 2    # first-buy "start": the chart counts as just started up to this many candles
 PAUSED_DUST_SOL = 0.0002       # Paused Coins: a held paused coin worth less than this (or 2% of its cost) is left
 PAUSED_DUST_FRAC = 0.02
+UNREAD_SET_ASIDE_S = 90.0      # an open trade whose price cannot be read this long is set aside (Unsold Coins page)
+NO_ROUTE = ("graduated", "not_on_curve", "not_sol_quote")
 PRO_FIRST_MAX_AGE_S = 60.0     # pro_hold first-candle buy: only coins this young (a new coin's first candle)
 SKIP_REASONS = ("KILLED", "NO_POSITION", "ALREADY_LONG", "ENTRIES_PAUSED", "FEED_DEGRADED", "STALE_FEED",
                 "BLACKLIST", "NOT_WHITELISTED", "DAILY_LOSS", "RATE_LIMIT", "COOLDOWN", "MAX_EXPOSURE",
@@ -217,6 +219,7 @@ class CandleMomo:
         self.seq: Dict[str, Any] = {"i": -1, "at": 0.0, "trade_at": 0.0, "state": "off"}
         self.offers: Dict[str, Dict[str, Any]] = {}
         self._trade_ev: Dict[str, asyncio.Event] = {}      # held coin -> a trade just arrived (instant take-profit)
+        self.unsold: List[Dict[str, Any]] = []             # trades set aside unsold (price unreadable) — Unsold Coins page
         self._instant = False
         self.paused_mints: Dict[str, float] = {}
         self._pin_warned: set = set()
@@ -1032,6 +1035,81 @@ class CandleMomo:
         else:
             pos["closing"] = True
             asyncio.ensure_future(self._forced_exit(mint, "coin " + why))     # paper: booked at its dust value
+
+    # ---------- Unsold Coins (user 2026-11-16): a trade whose price stays unreadable is set aside, not held
+    def _unsold_file(self) -> str:
+        return getattr(self, "_unsold_path", None) or (
+            "" if "PYTEST_CURRENT_TEST" in os.environ else os.path.join("logs", "candle_unsold.json"))
+
+    def _unsold_load(self) -> None:
+        try:
+            with open(self._unsold_file(), encoding="utf-8") as fh:
+                rows = json.load(fh)
+            self.unsold = [r for r in rows if isinstance(r, dict)][-200:]
+        except Exception:
+            pass
+
+    def _unsold_add(self, row: Dict[str, Any]) -> None:
+        self.unsold = (self.unsold + [row])[-200:]
+        path = self._unsold_file()
+        if not path:
+            return
+        try:
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(self.unsold, fh)
+            os.replace(tmp, path)
+        except Exception:
+            log.debug("unsold list save failed", exc_info=True)
+
+    def unsold_view(self) -> List[Dict[str, Any]]:
+        return list(reversed(self.unsold))[:100]
+
+    async def _set_aside(self, mint: str, pos: Dict[str, Any]) -> bool:
+        """The trade's price could not be read for UNREAD_SET_ASIDE_S ("price unreadable — kept, will retry"): it is
+        taken out of Open positions so the next coin can come, booked at its last known value, and listed on the
+        Unsold Coins page with the reason. PAPER: always. LIVE: only when the coin really has no price route (off the
+        pump curve and no Jupiter quote) — a failed RPC read must never drop a real coin; its coins stay in the wallet."""
+        why0 = ""
+        try:
+            _c, _bps, why0 = await self._curve(mint)
+        except Exception:
+            why0 = "read failed"
+        live = pos.get("mode") == "live"
+        if live and why0 not in NO_ROUTE:
+            pos["unread_since"] = time.time() - UNREAD_SET_ASIDE_S + 30      # look again in 30 s
+            return False
+        now = time.time()
+        waited = now - float(pos.get("unread_since") or now)
+        cause = {"graduated": "the coin left the pump curve and Jupiter gives no quote",
+                 "not_on_curve": "the coin is not on the pump curve and Jupiter gives no quote",
+                 "not_sol_quote": "the coin is priced in another coin and Jupiter gives no quote"}.get(
+                     why0, "the price could not be read (RPC / pump did not answer)")
+        last = pos.get("value_sol")
+        reason = (f"price unreadable for {waited:.0f}s — {cause}; set aside, NOT sold"
+                  + (" (the coins are still in the wallet)" if live else ""))
+        self._unsold_add({"ts": round(now, 1), "mint": mint, "symbol": pos.get("symbol") or mint[:6],
+                          "mode": pos.get("mode"), "src": pos.get("src"), "lots": len(pos.get("lots") or []) or 1,
+                          "entry_sol": pos.get("entry_sol"), "last_value_sol": last,
+                          "held_s": round(now - float(pos.get("entry_ts") or now)), "reason": reason})
+        self.note("warn", f"{pos.get('symbol') or mint[:6]} — {reason}. Listed on the Unsold Coins page; the next coin can come.", mint)
+        if self.store:
+            self.store.audit("set_aside", mint=mint, why=why0, waited_s=round(waited, 1), value=last)
+        pos["closing"] = True
+        if live:
+            self._live_closed(mint, None, reason)
+        else:
+            await self._paper_sell({"id": f"aside-{mint}-{int(now)}", "mint": mint, "side": "SELL", "seen": now,
+                                    "manual": True, "symbol": pos.get("symbol") or mint[:6]}, reason)
+            if mint in self.positions:                 # the paper booking could not run: drop it all the same
+                self.positions.pop(mint, None)
+                if self.store:
+                    try:
+                        self.store.db.execute("DELETE FROM positions WHERE mint=?", (mint,))
+                        self.store.db.commit()
+                    except Exception:
+                        log.debug("set-aside position delete failed", exc_info=True)
+        return True
 
     def paused_view(self) -> List[Dict[str, Any]]:
         now = time.time()
@@ -2302,10 +2380,25 @@ class CandleMomo:
                 got = PC._sol_for_tokens(part, c1["virtual_token"], c1["virtual_sol"], bps1) / 1e9
             else:
                 got, bps1 = expected, bps          # curve gone during the lag: last known value
+        no_route = why0 in ("graduated", "not_on_curve", "not_sol_quote")
+        if (not c0 and not c1 and not paused and part > 0
+                and ((sig or {}).get("manual")
+                     or (no_route and pos.get("value_sol") is not None and not (sig and "candleTs" in sig)))):
+            # The coin has NO price route (off the pump curve and Jupiter gives no quote) — not a failed read. A manual
+            # Exit, and a rule exit such as Max hold, must still close it (SOB 2026-11-16: -96%, every Exit click
+            # answered "price unreadable" and it sat for 22 min): booked at its last known value.
+            share0 = part / pos["tokens"] if pos["tokens"] else 1.0
+            expected = got = max(0.0, float(pos.get("value_sol") or 0)) * share0
+            bps1 = 0
+            c0 = c1 = {"last_value": True}
+            why = (f"{why} — " + ("no price route for this coin, " if no_route else "")
+                   + f"booked at its last value ({got:.6f} SOL)")
         if not c0 and not c1 and not paused:
             # No price at all (RPC 429 / read failed). Booking 0 SOL out made fake -100% trades
-            # (20:35-20:42): keep the position, the next SELL candle or max hold retries.
+            # (20:35-20:42): keep the position, the next SELL candle or max hold retries. Unreadable for
+            # UNREAD_SET_ASIDE_S -> the value loop sets the trade aside (Unsold Coins page).
             pos.pop("closing", None)
+            pos.setdefault("unread_since", time.time())
             if sig and "candleTs" in sig:
                 return self._failed(sig, "price unreadable — paper position kept, will retry")
             return
@@ -3289,6 +3382,14 @@ class CandleMomo:
                     asyncio.ensure_future(self._forced_exit(mint, f"max hold {self.cfg.max_hold_s:.0f}s"))
                 try:
                     v, real, vsrc = await self._value(mint, pos["tokens"])
+                    if v is None or vsrc == "jupiter (old)":      # no price, or only an old cached quote
+                        first = float(pos.setdefault("unread_since", time.time()))
+                        if (time.time() - first >= UNREAD_SET_ASIDE_S and not pos.get("closing")
+                                and mint not in self.busy):
+                            await self._set_aside(mint, pos)
+                            continue
+                    else:
+                        pos.pop("unread_since", None)
                     if real is not None:
                         pos["real_sol"] = real
                     if (real is not None and self.cfg.exit_reserve_sol > 0 and real < self.cfg.exit_reserve_sol
@@ -3356,6 +3457,7 @@ class CandleMomo:
         try:
             from src.data.caller_stream import get_stream
             get_stream().add_raw_listener(self._on_stream_trade)
+            self._unsold_load()
         except Exception:
             log.debug("candle stream hook failed", exc_info=True)
         for coro in (self._board_loop(), self._poll_loop(), self._value_loop(), self._reserve_loop(), self._seq_loop(),
@@ -3442,7 +3544,7 @@ class CandleMomo:
             src_now = str(getattr(_gc(), "filter_mode", "") or "")
         except Exception:
             src_now = ""
-        return {"ok": True, "seq": self.seq_status(), "paused": self.paused_view(), "support": sup, "supportEnabled": bool(self.cfg.support_enabled), "liveSource": src_now,
+        return {"ok": True, "seq": self.seq_status(), "paused": self.paused_view(), "unsold": self.unsold_view(), "support": sup, "supportEnabled": bool(self.cfg.support_enabled), "liveSource": src_now,
                 "paperOnly": self.cfg.mode != "live", "live": self.cfg.mode == "live",
                 "liveBlock": self.live_block() if self.cfg.mode == "live" else "", "autoTrade": auto,
                 "maxPositionSol": max_pos, "unresolved": bool(self.unresolved), "config": self.cfg.snapshot(), "configErrors": self.cfg_errors,
