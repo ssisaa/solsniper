@@ -57,6 +57,7 @@ PAUSED_DUST_SOL = 0.0002       # Paused Coins: a held paused coin worth less tha
 PAUSED_DUST_FRAC = 0.02
 UNREAD_SET_ASIDE_S = 90.0      # an open trade whose price cannot be read this long is set aside (Unsold Coins page)
 NO_ROUTE = ("graduated", "not_on_curve", "not_sol_quote")
+BP_LOWER_PCT = 25.0            # pro_hold "buy only on ◆ BP BUY": each next lot's candle is at least this far below the last lot's
 PRO_FIRST_MAX_AGE_S = 60.0     # pro_hold first-candle buy: only coins this young (a new coin's first candle)
 SKIP_REASONS = ("KILLED", "NO_POSITION", "ALREADY_LONG", "ENTRIES_PAUSED", "FEED_DEGRADED", "STALE_FEED",
                 "BLACKLIST", "NOT_WHITELISTED", "DAILY_LOSS", "RATE_LIMIT", "COOLDOWN", "MAX_EXPOSURE",
@@ -1621,6 +1622,23 @@ class CandleMomo:
         return (float(up), tgt, tgt_from) if float(up) >= tgt else None
 
     @staticmethod
+    def _lot_close(held: Dict[str, Any], rows: List[Candle], using: str = "") -> Optional[float]:
+        """Close of the candle the last lot was bought on, in the units of the chart now used: the lot's signal
+        candle (`lot_t`) when it was bought on this feed, else this chart's candle at its fill time; else None."""
+        lots = held.get("lots") or []
+        last = lots[-1] if lots else {}
+        same = not using or last.get("src") in (None, using)
+        t = last.get("lot_t") if same else None
+        ts = float(last.get("ts") or held.get("entry_ts") or 0) * 1000.0
+        for x in reversed(rows):
+            if (t is not None and x.t == t) or (t is None and x.t <= ts):
+                if t is None and ts - x.t > 5000:
+                    break
+                return float(x.close) if x.close > 0 else None
+        px = float(last.get("px") or 0)
+        return px if (same and px > 0) else None
+
+    @staticmethod
     def _late_buy(PT: Any, cs: List[Dict[str, Any]], prev_eval: Optional[int]) -> Optional[str]:
         """The chart's ▲ BUY on a candle that arrived in a batch (user 2026-11-16: pump_rest delivered several
         candles at once, only the newest was read, and the ▲ BUY tags at 02:35:10 / 02:35:14 never bought). Every
@@ -1655,7 +1673,11 @@ class CandleMomo:
         # is bought only when the chart shows ▲ BUY (each new ▲ BUY adds one, up to Max lots / Total cap); it sells
         # at the profit target like every pro_hold trade
         sig_only = cfg.rule == "pro_hold" and cfg.pro_hold_first and cfg.pro_hold_first_at == "signal" and not pinned
-        if (cfg.rule == "pro_hold" and cfg.pro_hold_first and live_rows and not pinned and not sig_only
+        # "only on ◆ BP BUY" (user 2026-11-16): the same, on Botpredict's call. The first ◆ BP BUY is lot 1; a later
+        # ◆ BP BUY buys only when its candle closed at least BP_LOWER_PCT below the candle of the lot before — not on
+        # every tag. No first-candle / green-after-red / ▲ BUY buys.
+        bp_only = cfg.rule == "pro_hold" and cfg.pro_hold_first and cfg.pro_hold_first_at == "bp" and not pinned
+        if (cfg.rule == "pro_hold" and cfg.pro_hold_first and live_rows and not pinned and not sig_only and not bp_only
                 and not getattr(f, "first_done", False)
                 and f.mint not in self.positions
                 and not (self._avoid_mayhem_for(f) and self.mayhem_of.get(f.mint) is None and not f.board_state)):
@@ -1790,7 +1812,12 @@ class CandleMomo:
             a = BPm.analyze(cs, None)
             if a.get("call") == "SELL":
                 a["call"] = "HOLD"
-            if a.get("call") != "BUY" and cfg.pro_hold_pro_buy:
+            if a.get("call") != "BUY" and bp_only:
+                import types as _types
+                late = self._late_buy(_types.SimpleNamespace(analyze=lambda c, _h, _x: BPm.analyze(c, None)), cs, prev_eval)
+                if late is not None:
+                    a = {"call": "BUY", "px": cur.close, "why": late}
+            if a.get("call") != "BUY" and cfg.pro_hold_pro_buy and not bp_only:
                 # the chart's green ▲ BUY (Pro Trader) also buys (user's choice 2026-11-14; weaker in tests:
                 # 47% won, -1.9% per trade without the top 10% — switch off on the Candles page if it loses)
                 p = PT.analyze(cs, None, None)
@@ -1800,9 +1827,18 @@ class CandleMomo:
             a = PT.analyze(cs, None, ctx["holding"])
         was_buy = bool(getattr(f, "pro_was_buy", False))
         f.pro_was_buy = a.get("call") == "BUY"
+        bp_add = False
+        if bp_only and held is not None and a.get("call") == "BUY":
+            ref = self._lot_close(held, rows, f.using)
+            if ref and cur.close <= ref * (1 - BP_LOWER_PCT / 100.0):
+                bp_add = True
+                a = dict(a, why=f"◆ BP BUY — {(1 - cur.close / ref) * 100:.0f}% below the last lot's candle "
+                                f"(needs {BP_LOWER_PCT:g}%): {a.get('why') or ''}")
         if a.get("call") == "BUY" and held is None:
             side = "BUY"
-        elif a.get("call") == "BUY" and self.cfg.rule == "pro_hold" and not was_buy:
+            if bp_only:
+                a = dict(a, why=f"◆ BP BUY (lot 1) — {a.get('why') or ''}")
+        elif a.get("call") == "BUY" and self.cfg.rule == "pro_hold" and (bp_add if bp_only else not was_buy):
             side = "BUY"                     # pro_hold: each new BUY signal buys again into the open trade
         elif held is not None and a.get("call") == "SELL" and self.cfg.rule == "pro":
             side = "SELL"
@@ -1816,7 +1852,7 @@ class CandleMomo:
                          f"(red candle; peak {float(held.get('pro_peak') or up):+.1f}%)")}
         else:
             return
-        if side == "BUY" and sig_only:
+        if side == "BUY" and (sig_only or bp_only):
             # "buy only on the ▲ BUY signal" buys ON the signal (user 2026-11-16: Doggles' first two ▲ BUY tags were
             # refused by SOL_OUTFLOW and the lot came 6 s later on a third): the SOL-outflow history, far-below-high,
             # Min reserve and cooldown checks are skipped, like the other pro_hold first buys. Skip Mayhem coins,

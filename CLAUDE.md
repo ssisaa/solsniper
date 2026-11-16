@@ -264,6 +264,16 @@ tags were refused by SOL_OUTFLOW) — Skip Mayhem coins, Max lots and Total cap 
 (pump_rest delivers several at once; only the newest was read — tags at 02:35:10 / 02:35:14 on a pinned coin never
 bought) still buys when it is ≤ 5 s before the newest candle (`_late_buy`, also for pinned coins; reason "… arrived late").
 
+**pro_hold "buy only on ◆ BP BUY – each lot 25% lower" (2026-11-16, user's request)**: first-buy dropdown
+`pro_hold_first_at` = `bp` (`bp_only` in `_pro_evaluate`): no first-candle, green-after-red or ▲ BUY buy (the ▲ BUY
+checkbox is ignored). Lot 1 on the first ◆ BP BUY (Botpredict's call at a closed candle); while holding, a ◆ BP BUY
+buys only when its candle closed ≥ `BP_LOWER_PCT` 25 % below the candle of the lot before (`_lot_close`, same feed-unit
+handling as `_lot_low`) — not once per signal run; up to Max lots / Total cap; sells at `green_target()`. Like `signal`,
+these buys skip SOL_OUTFLOW / FAR_BELOW_PEAK / Min reserve / cooldown and catch a signal on a late candle (`_late_buy`).
+Why the chart shows ◆ BP tags in a row: the tags are a REPLAY of Botpredict's own plan (buy, exit at +40 % / −8 % / 60 s,
+buy again the next candle while the chance is still ≥ 21 %) — on a crashed coin lying at its low the chance stays high
+and each pretend trade is stopped out within a candle or two.
+
 **Candles avoid_mayhem (2026-11-14, user's request)**: Candles page "Skip Mayhem coins" (default on): no new
 Candles trade on a Mayhem coin (`MAYHEM_COIN` in `_entry_filters`; board `ms` or pump's mayhem-state, checked once per
 coin `_check_mayhem`); Mixed skips Mayhem rows. Reason: pump pauses Mayhem coins and a paused coin can't sell —

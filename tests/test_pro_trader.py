@@ -1038,3 +1038,47 @@ def test_signal_on_a_candle_that_arrived_in_a_batch_still_buys(tmp_path, monkeyp
     # a ▲ BUY more than 5 s before the newest candle is too old
     from src.signal import candle_momo as CM
     assert CM.CandleMomo._late_buy(PT, [{"t": 0}, {"t": 1000}, {"t": 9000}], 0) is None
+
+
+def test_bp_only_buys_lot1_on_bp_and_next_lots_only_25pct_lower(tmp_path, monkeypatch):
+    """pro_hold first buy "bp" (user 2026-11-16): only ◆ BP BUY buys; the first is lot 1; a later ◆ BP BUY buys only
+    when its candle closed at least 25% below the candle of the lot before — not on every tag."""
+    from src.signal import botpredict as BPm
+    from src.signal import pro_trader as PT
+    from src.signal import candle_core as C
+    from src.signal import candle_momo as CM
+    e, f, rows, routed = _cm_engine(tmp_path, monkeypatch)
+    e.cfg.rule, e.cfg.pro_hold_first, e.cfg.pro_hold_first_at, e.cfg.pro_hold_pro_buy = "pro_hold", True, "bp", True
+    f.age = 3
+    e.mayhem_of["MINT"] = False
+    monkeypatch.setattr(PT, "analyze", lambda cs, h, held: {"call": "BUY", "px": 1.0, "why": "VWAP dip"})  # ▲ BUY: ignored
+    monkeypatch.setattr(BPm, "analyze", lambda cs, h=None: {"call": "WAIT"})
+    e._evaluate(f, time.time())
+    f.books["pump_rest"].merge(rows[-1:])
+    e._evaluate(f, time.time())
+    assert not [r for r in routed if r["side"] == "BUY"]           # no first-candle buy, no ▲ BUY buy
+    monkeypatch.setattr(BPm, "analyze", lambda cs, h=None: {"call": "BUY", "px": 1.0, "why": "43% chance"})
+    t = [rows[-1].t]
+
+    def candle(px):
+        t[0] += 1000
+        f.books["pump_rest"].merge([C.Candle(t=t[0], open=px, high=px, low=px, close=px, volume=1, final=True)])
+        e._evaluate(f, time.time())
+        return t[0]
+    t1 = candle(1.0)
+    buys = [r for r in routed if r["side"] == "BUY"]
+    assert len(buys) == 1 and "lot 1" in buys[0]["pro_why"] and buys[0]["first"] and buys[0]["gar"]
+    e.positions["MINT"] = {"mint": "MINT", "mode": "paper", "tokens": 1.0, "entry_sol": 0.005, "entry_ts": time.time(),
+                           "lots": [{"n": 1, "lot_t": t1, "src": "pump_rest", "ts": time.time()}]}
+    candle(0.9)                                                     # ◆ BP BUY still on, only 10% lower: no lot
+    candle(0.76)                                                    # 24% lower: no lot
+    assert len([r for r in routed if r["side"] == "BUY"]) == 1
+    t2 = candle(0.74)                                               # 26% lower: lot 2
+    buys = [r for r in routed if r["side"] == "BUY"]
+    assert len(buys) == 2 and "below the last lot's candle" in buys[1]["pro_why"]
+    e.positions["MINT"]["lots"].append({"n": 2, "lot_t": t2, "src": "pump_rest", "ts": time.time()})
+    candle(0.60)                                                    # 19% under lot 2: no lot
+    assert len([r for r in routed if r["side"] == "BUY"]) == 2
+    candle(0.55)                                                    # 26% under lot 2: lot 3
+    assert len([r for r in routed if r["side"] == "BUY"]) == 3
+    assert CM.BP_LOWER_PCT == 25.0
