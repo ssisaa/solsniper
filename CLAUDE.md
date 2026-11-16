@@ -270,7 +270,10 @@ checkbox is ignored). Lot 1 on the first ◆ BP BUY (Botpredict's call at a clos
 buys only when its candle closed ≥ `BP_LOWER_PCT` 25 % below the candle of the lot before (`_lot_close`, same feed-unit
 handling as `_lot_low`) — not once per signal run; up to Max lots / Total cap; sells at `green_target()`. Like `signal`,
 these buys skip SOL_OUTFLOW / FAR_BELOW_PEAK / Min reserve / cooldown and catch a signal on a late candle (`_late_buy`).
-Why the chart shows ◆ BP tags in a row: the tags are a REPLAY of Botpredict's own plan (buy, exit at +40 % / −8 % / 60 s,
+Fixed the same day (WARM / DICE bought twice): for `bp` and `signal`, no lot-1 signal while a buy of the coin is in
+flight (a second ◆ BP BUY 1 s later was queued and bought as lot 2 with no 25 % check) and, with **Reuse same coin off**,
+no new trade on a coin Candles already traded (it was re-bought 1 s after its profit sale; these buys skip the cooldown
+and the feed is only dropped at the next pick). Why the chart shows ◆ BP tags in a row: the tags are a REPLAY of Botpredict's own plan (buy, exit at +40 % / −8 % / 60 s,
 buy again the next candle while the chance is still ≥ 21 %) — on a crashed coin lying at its low the chance stays high
 and each pretend trade is stopped out within a candle or two.
 

@@ -1082,3 +1082,35 @@ def test_bp_only_buys_lot1_on_bp_and_next_lots_only_25pct_lower(tmp_path, monkey
     candle(0.55)                                                    # 26% under lot 2: lot 3
     assert len([r for r in routed if r["side"] == "BUY"]) == 3
     assert CM.BP_LOWER_PCT == 25.0
+
+
+def test_bp_only_no_second_lot1_while_buying_and_no_rebuy_when_reuse_is_off(tmp_path, monkeypatch):
+    """WARM 2026-11-16: a ◆ BP BUY one second after lot 1's signal was queued and bought as lot 2 (no 25% check), and
+    1 s after the profit sale the coin was bought again although Reuse same coin was off."""
+    from src.signal import botpredict as BPm
+    from src.signal import candle_core as C
+    e, f, rows, routed = _cm_engine(tmp_path, monkeypatch)
+    e.cfg.rule, e.cfg.pro_hold_first, e.cfg.pro_hold_first_at = "pro_hold", True, "bp"
+    e.cfg.reuse_coin = False
+    e.mayhem_of["MINT"] = False
+    monkeypatch.setattr(BPm, "analyze", lambda cs, h=None: {"call": "WAIT"})
+    e._evaluate(f, time.time())
+    f.books["pump_rest"].merge(rows[-1:])
+    e._evaluate(f, time.time())
+    monkeypatch.setattr(BPm, "analyze", lambda cs, h=None: {"call": "BUY", "px": 1.0, "why": "60% chance"})
+    t = [rows[-1].t]
+
+    def candle(px=1.0):
+        t[0] += 1000
+        f.books["pump_rest"].merge([C.Candle(t=t[0], open=px, high=px, low=px, close=px, volume=1, final=True)])
+        e._evaluate(f, time.time())
+    e.busy["MINT"] = "sig-lot1"                          # lot 1 is still being sent
+    candle()
+    assert not [r for r in routed if r["side"] == "BUY"]
+    e.busy.pop("MINT")
+    e.traded["MINT"] = time.time()                       # its trade completed; Reuse same coin is off
+    candle()
+    assert not [r for r in routed if r["side"] == "BUY"]
+    e.cfg.reuse_coin = True
+    candle()
+    assert len([r for r in routed if r["side"] == "BUY"]) == 1

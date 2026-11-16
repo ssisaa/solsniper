@@ -1834,6 +1834,13 @@ class CandleMomo:
                 bp_add = True
                 a = dict(a, why=f"◆ BP BUY — {(1 - cur.close / ref) * 100:.0f}% below the last lot's candle "
                                 f"(needs {BP_LOWER_PCT:g}%): {a.get('why') or ''}")
+        if a.get("call") == "BUY" and held is None and (sig_only or bp_only) and (
+                f.mint in self.busy or f.mint in self.pending
+                or (not self.cfg.reuse_coin and f.mint in self.traded)):
+            # the "exactly on the signal" choices (WARM 2026-11-16): a second signal while lot 1 is still being sent
+            # was queued and bought as lot 2 without the lower-candle check, and with Reuse same coin off the coin
+            # was bought again 1 s after its profit sale (that second trade lost 0.0094 SOL)
+            return
         if a.get("call") == "BUY" and held is None:
             side = "BUY"
             if bp_only:
