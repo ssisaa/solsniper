@@ -74,9 +74,11 @@ def _fo(monkeypatch, src="callout", rule="inverse", mode="live"):
 
 
 def test_feeds_only_sources(monkeypatch):
-    for src in ("callout", "opencopy", "mayhem"):
+    for src in ("callout", "mayhem"):
         e = _fo(monkeypatch, src)
         assert e.feeds_only(src) and e.pro_hold_owns_entries(src)
+    e = _fo(monkeypatch, "opencopy", mode="paper")   # OpenCopy: feed-only in PAPER only
+    assert e.feeds_only("opencopy") and e.pro_hold_owns_entries("opencopy") and not e.source_first()
     e = _fo(monkeypatch, "dayscalp")
     assert not e.feeds_only("dayscalp")
     e = _fo(monkeypatch, "callout")
@@ -135,7 +137,7 @@ def test_callout_rows_feed_candles_directly(monkeypatch):
 
 def test_opencopy_new_opens_feed_candles_several_at_once(monkeypatch):
     import src.observability.dashboard as D
-    e = _fo(monkeypatch, "opencopy")
+    e = _fo(monkeypatch, "opencopy", mode="paper")
     e.cfg.rule = "pro_hold"
     now = time.time()
     e.cfg.support_since = now - 60
@@ -161,8 +163,8 @@ def test_other_sources_stay_one_feed(monkeypatch):
 
 def test_live_feed_only_buy_does_not_need_auto_trade(monkeypatch):
     from src.config import runtime as R
-    e = _fo(monkeypatch, "opencopy", mode="live")
-    monkeypatch.setattr(R, "get_config", lambda: SimpleNamespace(trade_enabled=False, filter_mode="opencopy"))
+    e = _fo(monkeypatch, "callout", mode="live")
+    monkeypatch.setattr(R, "get_config", lambda: SimpleNamespace(trade_enabled=False, filter_mode="callout"))
     monkeypatch.setattr(e, "_start", lambda sig: "intent")
     monkeypatch.setattr(e, "live_block", lambda: "")
     m = "LV" + "z" * 40 + "pump"
@@ -180,3 +182,38 @@ def test_set_support_stamps_the_time(monkeypatch):
     t0 = time.time()
     e.set_support(True)
     assert seen["support_enabled"] and seen["support_since"] >= t0
+
+
+def test_opencopy_live_buys_lot1_itself_and_candles_is_the_only_exit(monkeypatch):
+    """User 2026-11-16: OpenCopy + AutoTrade-Candles, LIVE — a coin reaches Candles only after OpenCopy bought, pinned
+    and holds it; Candles adds lots and sells; OpenHolds' own exits (caller sold ...) never sell it."""
+    import asyncio
+    import src.observability.dashboard as D
+    e = _fo(monkeypatch, "opencopy", rule="pro_hold", mode="live")
+    assert e.source_first() and not e.feeds_only("opencopy")
+    assert not e.pro_hold_owns_entries("opencopy")          # OpenHolds buys the caller's open itself (not an offer)
+    now = time.time()
+    monkeypatch.setattr(D, "openhold_recent_coins", lambda window_s=900.0: [
+        {"coinMint": "A1xpump", "symbol": "A1", "openedAt": now - 5}])
+    e._pick([])
+    assert not e.offers and "A1xpump" not in e.feeds        # a caller's open that OpenCopy has not bought: not fed
+    # Candles never opens lot 1 here, on any signal
+    m = "OC" + "z" * 38 + "pump"
+    e.feeds[m] = CM.Feed(m, 10)
+    e.feeds[m].status = "OK"
+    assert e._route({"id": "o1", "mint": m, "side": "BUY", "pro": True, "_counted": True, "deltaPct": 0.0}) == "SUPPORT_NO_ENTRY"
+    # the coin OpenCopy holds is taken over
+    pos = SimpleNamespace(mint=m, status="OPEN", source="opencopy", strategy="opencopy", tokens=1e9, entry_sol=0.005,
+                          entry_time=now, symbol="OC", fees_sol=0.0)
+    monkeypatch.setattr(e, "_support_held", lambda s: [pos])
+    e._support_sync("opencopy")
+    assert pos._candle_support is True and e.positions[m]["support"] == "opencopy" and e.supports(pos)
+
+    async def value(mint, tokens):
+        return 0.02, None, "curve"                           # +300%: even in profit OpenHolds' rule does not sell
+    monkeypatch.setattr(e, "_value", value)
+    assert asyncio.run(e.source_sell_ok(pos, "caller_closed")) is False
+    # AutoTrade-Candles off: OpenCopy's own rules again
+    e.cfg.support_enabled = False
+    monkeypatch.setattr(e, "support_source", lambda: "")
+    assert not e.source_first() and not e.pro_hold_owns_entries("opencopy")

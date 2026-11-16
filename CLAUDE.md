@@ -193,6 +193,17 @@ the Settings page) with AutoTrade-Candles on (`update`, no wipe, Live/Paper unto
 `SEQ_STEP_S` 60 s for a Candles trade; an opened trade is waited for until it closes (sell / Max hold), then next step
 at once. Never switches while a Candles trade is open / in flight. Off: the current source stays.
 
+**OpenCopy + AutoTrade-Candles, LIVE: OpenCopy buys first, Candles is the only exit (2026-11-16, user's request)**:
+`CandleMomo.source_first()` (opencopy + Candles LIVE). A coin reaches Candles only after OpenCopy's own Auto Trade bought,
+pinned and holds it (lot 1; OpenHolds buys instead of offering: `pro_hold_owns_entries("opencopy")` is False, whatever
+the rule; `feeds_only("opencopy")` is False in LIVE, so no offers / `openhold_recent_coins` feed). `_support_sync` takes the
+held coin over; Candles adds lots and sells by its rule and never opens lot 1 itself (`SUPPORT_NO_ENTRY`, manual Entry
+excepted). **Exit: Candles' rule alone** — `source_sell_ok` returns False for these trades in profit or loss, so OpenHolds'
+exits (caller sold, FAST PACE, stops, time stop) never sell; pump-paused, a manual Sell and Candles' sells still go
+through. Several coins together as before (`support_source() == "opencopy"`). AutoTrade-Candles off = normal OpenCopy
+(buy, sell, caller_sold). **In PAPER nothing changed**: OpenCopy stays feed-only (offers, Candles paper-buys), so a paper
+test never starts live OpenCopy buys. This replaces the OpenCopy part of the feed-only paragraph below for LIVE.
+
 **AutoTrade-Candles feed-only sources (2026-11-14, user's request)**: with AutoTrade-Candles on, CallOuts / OpenCopy /
 MayhemMode (`FEED_ONLY_SOURCES`, `feeds_only()`) do not buy, pin or hold: OpenHolds' auto rows (callers' new opens,
 Mayhem_Mode opens) and CallOuts' auto buy call `CandleMomo.offer(src, mint)` instead (main.py); Candles feeds the newest

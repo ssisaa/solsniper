@@ -990,7 +990,7 @@ def test_support_on_adopts_source_coins_and_never_opens(engine, monkeypatch, tmp
     assert list(e.feeds) == ["OCMINT"] and e.positions["OCMINT"]["support"] == "opencopy"
     assert held.source == "opencopy"                                  # its own rules stay
     s = _sig("BUY", 900, mint="OTHER")
-    assert e._route(s) != "SUPPORT_NO_ENTRY"      # OpenCopy only offers tokens (2026-11-14): Candles buys lot 1 by its rule
+    assert e._route(s) == "SUPPORT_NO_ENTRY"      # OpenCopy LIVE buys lot 1 itself (2026-11-16): Candles never opens
     monkeypatch.setattr(e, "feeds_only", lambda src: False)
     assert e._route(_sig("BUY", 901, mint="OTHER")) == "SUPPORT_NO_ENTRY"   # sources that buy lot 1 themselves
     r = e.set_support(False)                                          # Revert

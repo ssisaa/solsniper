@@ -402,8 +402,12 @@ class CandleMomo:
             self.reds_since[p.mint] = 0
             if self.store:
                 self.store.open_position(rec)
-            self.note("info", f"{rec['symbol']} — {src} bought it (lot 1). Candles adds lots and sells it by the {self.cfg.rule} "
-                                         f"rule; {src}'s own rule sells only while the trade is in profit — in a loss Candles' rule takes over.", p.mint)
+            if self.source_first(src):
+                self.note("info", f"{rec['symbol']} — OpenCopy bought and holds it (lot 1). Candles takes over: it adds lots "
+                                  f"and sells it by the {self.cfg.rule} rule; OpenHolds' own exits (caller sold …) are not used.", p.mint)
+            else:
+                self.note("info", f"{rec['symbol']} — {src} bought it (lot 1). Candles adds lots and sells it by the {self.cfg.rule} "
+                                             f"rule; {src}'s own rule sells only while the trade is in profit — in a loss Candles' rule takes over.", p.mint)
 
     def _paper_lot1(self, want: Dict[str, str], src: str) -> None:
         """Paper + AutoTrade-Candles, rules other than pro_hold: the source's lot 1 is played as a paper buy the
@@ -429,7 +433,19 @@ class CandleMomo:
         own rule (Live or Paper as the Candles switch). Off: the source follows its own rules, no relation to Candles."""
         # the Live Controls source itself (not support_source()): on a Source Sequence board step MayhemMode stays
         # the source and must still only offer, not buy
+        # OpenCopy is feed-only in PAPER only (user 2026-11-16): LIVE, OpenCopy buys / pins / holds the coin itself
+        # and Candles takes the held coin over (source_first)
+        if src == "opencopy" and self.cfg.mode == "live":
+            return False
         return src in FEED_ONLY_SOURCES and bool(self.cfg.support_enabled) and self.live_filter() == src
+
+    def source_first(self, src: Optional[str] = None) -> bool:
+        """OpenCopy + AutoTrade-Candles, LIVE (user 2026-11-16): a coin reaches Candles only after OpenCopy's own Auto
+        Trade bought, pinned and holds it (lot 1). From then on Candles' rule adds lots and is the ONLY exit — the
+        OpenHolds exits (caller sold, FAST PACE, stops, time stop) do not sell it. Candles never opens lot 1 here.
+        AutoTrade-Candles off: OpenCopy trades by its own rules again."""
+        src = self.support_source() if src is None else src
+        return src == "opencopy" and self.cfg.mode == "live" and self.support_source() == "opencopy"
 
     def offer(self, src: str, mint: str, symbol: str = "", age: Optional[float] = None) -> bool:
         """A source hands a new token to Candles instead of buying it. True the first time (for logging)."""
@@ -520,6 +536,8 @@ class CandleMomo:
 
     def pro_hold_owns_entries(self, src: str) -> bool:
         """pro_hold with AutoTrade-Candles on this source: Candles buys (on Botpredict's BUY); the source only feeds."""
+        if self.source_first(src):
+            return False                      # OpenCopy LIVE buys lot 1 itself, whatever the Candles rule
         return ((self.cfg.rule == "pro_hold" or self.paper_support()) and self.support_source() == src) or self.feeds_only(src)
 
     def paper_support(self) -> bool:
@@ -900,7 +918,7 @@ class CandleMomo:
     def _resume_off_feed(self) -> bool:
         """A paused coin that moves again does not rejoin the feed / open trades (one trade at a time, newest coin
         only). OpenCopy with AutoTrade-Candles trades several coins together: there it rejoins as before."""
-        return not (self.support_source() == "opencopy" and self.feeds_only("opencopy"))
+        return self.support_source() != "opencopy"
 
     def _moving_exit(self, mint: str, pos: Dict[str, Any]) -> None:
         """A paused coin trades again: it stays on the Paused Coins watch (valued every second) and is sold from
@@ -1068,7 +1086,7 @@ class CandleMomo:
         """One coin at a time, for every source and feed (user 2026-11-14): while a trade is open only the coin(s)
         held are watched; flat, one coin. The next coin comes once the trade completes."""
         active = self.trading()
-        if self.support_source() == "opencopy" and self.feeds_only("opencopy"):
+        if self.support_source() == "opencopy":
             # OpenCopy only (user 2026-11-15): several coins opened by the callers are watched and traded together,
             # up to OPENCOPY_MAX_FEEDS — held coins first
             keep = ([m for m in self.feeds if m in active]
@@ -1812,6 +1830,8 @@ class CandleMomo:
             return self.skip(sig, "NO_POSITION")
         if side == "SELL" and ladder and n < cfg.sell_on_green_confirm:
             return self.skip(sig, "GREEN_CONFIRM")
+        if side == "BUY" and held is None and self.source_first() and not sig.get("manual"):
+            return self.skip(sig, "SUPPORT_NO_ENTRY")            # OpenCopy LIVE buys lot 1; Candles takes the held coin over
         if side == "BUY" and held is None and self.support_source():
             if not ((cfg.rule == "pro_hold" and sig.get("pro")) or sig.get("mirror")
                     or (self.paper_support() and sig.get("pro")) or self.feeds_only(self.support_source())):
@@ -2406,6 +2426,18 @@ class CandleMomo:
         Otherwise Candles keeps the coin and sells it by its rule (green candle in profit)."""
         mint = pos.mint
         rec = self.positions.get(mint) or {}
+        if (rec.get("support") or getattr(pos, "source", "")) == "opencopy" and self.source_first("opencopy"):
+            # OpenCopy + AutoTrade-Candles (user 2026-11-16): the exit is Candles' rule alone — OpenHolds' own exits
+            # never sell it, in profit or not (pump-paused, a manual Sell and Candles' sells still go through)
+            key = f"gate-oc:{mint}"
+            if time.time() - self.alerted.get(key, 0) >= 60:
+                self.alerted[key] = time.time()
+                sym = rec.get("symbol") or getattr(pos, "symbol", "") or mint[:6]
+                self.note("info", f"{sym} — OpenCopy's rule ({_EXIT_LABELS.get(reason, reason.replace('_', ' '))}) wanted "
+                                  f"to sell: not used while AutoTrade-Candles is on. Candles' {self.cfg.rule} rule sells it.", mint)
+                if self.store:
+                    self.store.audit("support_gate", mint=mint, reason=reason, pct=None, allowed=False)
+            return False
         cost = float(rec.get("entry_sol") or getattr(pos, "entry_sol", 0) or 0)
         tokens = float(getattr(pos, "tokens", 0) or rec.get("tokens") or 0)
         pct = None
