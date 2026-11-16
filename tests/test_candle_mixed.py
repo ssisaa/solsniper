@@ -1,4 +1,4 @@
-"""Candles page Mixed feed: New -> Movers -> Graduated, youngest first, pump mints only."""
+"""Candles page Mixed feed: New -> Movers (Graduated removed for now), youngest first, pump mints only."""
 import time
 
 from src.signal import candle_momo as CM
@@ -26,10 +26,10 @@ def _eng():
 def test_candidates_pump_only_youngest_first_per_board():
     e = _eng()
     c = [r["m"] for r in e._mixed_candidates(_rows())]
-    assert c == ["BBBBpump", "AAAApump", "MOV2pump", "MOV1pump", "GRA1pump"]
+    assert c == ["BBBBpump", "AAAApump", "MOV2pump", "MOV1pump"]            # the Graduated board is not used
 
 
-def test_turns_new_movers_graduated():
+def test_turns_new_movers_no_graduated():
     e = _eng()
     rows = _rows()
     order = []
@@ -38,7 +38,7 @@ def test_turns_new_movers_graduated():
         (m,) = list(e.feeds)
         order.append(m)
         e.traded[m] = time.time() + 0.001          # its trade completed: next turn
-    assert order == ["BBBBpump", "MOV2pump", "GRA1pump", "AAAApump"]
+    assert order == ["BBBBpump", "MOV2pump", "AAAApump", "MOV1pump"]
     assert e.feeds and next(iter(e.feeds.values())).origin.startswith("mixed-")
 
 

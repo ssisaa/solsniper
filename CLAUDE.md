@@ -90,6 +90,11 @@ youngest first, pump mints only, New < 3 min; a coin stays while held, else unti
 `mixed_idle_s` (60 s) with no trade, then the next board's youngest (a handed-over coin is skipped 5 min). Max mints
 slots (pro_hold: one). Paper / LIVE follow Candles' Live switch. Graduated coins are valued by Jupiter.
 
+**Candles Mixed = New + Movers only (2026-11-16, user's request, "for now")**: `candle_momo.CANDLE_MIXED_GROUPS` =
+("new", "movers") — Candles' Mixed feed no longer reads or picks the Graduated board (turns New → Movers → New …; page
+label "Mixed (New, Movers)"). Add "graduated" back to that tuple to restore it. Mayhem2's own Mixed feed still uses all
+three boards. This overrides the "Graduated" part of the Candles Mixed feed paragraph above.
+
 **Paused Coins (2026-11-14, user's request)**: a Candles trade whose coin pump pauses is NOT sold
 (`_pause_hold`: `pos["paused_at"]`; board state for Mayhem board / Mixed feeds, pump's mayhem-state every 2 s for every
 other open trade). New dashboard tab **Paused Coins** (`paused` in `/api/candle`, `paused_view()`), refreshed every

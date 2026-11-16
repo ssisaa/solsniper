@@ -57,6 +57,9 @@ PAUSED_DUST_SOL = 0.0002       # Paused Coins: a held paused coin worth less tha
 PAUSED_DUST_FRAC = 0.02
 UNREAD_SET_ASIDE_S = 90.0      # an open trade whose price cannot be read this long is set aside (Unsold Coins page)
 NO_ROUTE = ("graduated", "not_on_curve", "not_sol_quote")
+# Candles' Mixed feed uses only these boards of mayhem2.MIXED_BOARDS (user 2026-11-16: Graduated removed for now;
+# add "graduated" back here to restore it). Mayhem2's own Mixed feed is not changed.
+CANDLE_MIXED_GROUPS = ("new", "movers")
 BP_LOWER_PCT = 25.0            # pro_hold "buy only on ◆ BP BUY": each next lot's candle is at least this far below the last lot's
 PRO_FIRST_MAX_AGE_S = 60.0     # pro_hold first-candle buy: only coins this young (a new coin's first candle)
 SKIP_REASONS = ("KILLED", "NO_POSITION", "ALREADY_LONG", "ENTRIES_PAUSED", "FEED_DEGRADED", "STALE_FEED",
@@ -702,10 +705,11 @@ class CandleMomo:
 
     # ---------- Mixed feed (Candles page checkbox, same boards as Mayhem2's "Mixed")
     async def _mixed_boards(self) -> List[Dict[str, Any]]:
-        """New / Movers / Graduated boards (pump's own lists). Reuses Mayhem2's fresh copy when it reads them,
+        """New / Movers boards (pump's own lists; Graduated is not read, see CANDLE_MIXED_GROUPS). Reuses Mayhem2's fresh copy when it reads them,
         else reads them here (New every 2 s, Movers / Graduated every 4 s). Rows carry _grp and _age."""
         from src.data.fast_get import mayhem2_get
-        from src.signal.mayhem2 import MIXED_BOARDS, MIXED_GROUPS
+        from src.signal.mayhem2 import MIXED_BOARDS
+        MIXED_GROUPS = CANDLE_MIXED_GROUPS
         now = time.time()
         try:
             from src.signal.mayhem2 import get_engine as _m2
@@ -720,7 +724,7 @@ class CandleMomo:
         except Exception:
             pass
         due = [(g, u) for g, u, _e in MIXED_BOARDS
-               if now - float(self._mx_at.get(g) or 0) >= (2.0 if g == "new" else 4.0)]
+               if g in MIXED_GROUPS and now - float(self._mx_at.get(g) or 0) >= (2.0 if g == "new" else 4.0)]
 
         async def one(g: str, u: str):
             try:
@@ -742,7 +746,8 @@ class CandleMomo:
     def _mixed_candidates(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Solana coins whose mint starts or ends with 'pump', New only under max age, a Mayhem coin only while
         active, not blacklisted / unusable / already traded (unless Reuse coin); youngest first in each board."""
-        from src.signal.mayhem2 import MIXED_GROUPS, YOUNG_S
+        from src.signal.mayhem2 import YOUNG_S
+        MIXED_GROUPS = CANDLE_MIXED_GROUPS
         cfg = self.cfg
         out = []
         for g in MIXED_GROUPS:
@@ -767,13 +772,14 @@ class CandleMomo:
         return out
 
     def _mixed_want(self, rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-        """Mixed: takes turns New -> Movers -> Graduated -> New ... A watched coin stays while held, and while
+        """Mixed: takes turns New -> Movers -> New ... (Graduated removed for now). A watched coin stays while held, and while
         flat until a trade on it completes or it sat mixed_idle_s with no trade; then the next board's youngest
         coin is fed. An empty board passes the turn on. Up to Max mints (pro_hold: one)."""
-        from src.signal.mayhem2 import MIXED_GROUPS
+        MIXED_GROUPS = CANDLE_MIXED_GROUPS
         cfg = self.cfg
         now = time.time()
         n = len(MIXED_GROUPS)
+        self._mx_turn %= n
         cands = self._mixed_candidates(rows)
         cmints = {r["m"] for r in cands}
         slots = 1 if cfg.rule == "pro_hold" else max(1, int(cfg.max_mints or 1))
@@ -1391,7 +1397,7 @@ class CandleMomo:
                 what = info["origin"]
                 if what.startswith("mixed-"):
                     what = (f"Mixed: {what[6:].title()} board's youngest, age {float(r0.get('_age') or 0):.0f}s — "
-                            f"next turn {('New', 'Movers', 'Graduated')[self._mx_turn % 3]}")
+                            f"next turn {CANDLE_MIXED_GROUPS[self._mx_turn % len(CANDLE_MIXED_GROUPS)].title()}")
                 self.note("info", f"Watching {r0.get('t') or mint[:6]} ({what}).", mint)
             f = self.feeds[mint]
             r = state.get(mint)

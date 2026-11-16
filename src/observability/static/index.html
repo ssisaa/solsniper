@@ -1250,7 +1250,7 @@ header nav.nav .navbtn[hidden]{display:none}
           <label title="Mayhem_Mode's board: young Mayhem coins"><input type="checkbox" class="cm-feed" data-feed="mayhem_board"/> Mayhem board</label>
           <label title="On: Candles never buys a Mayhem coin from Mixed or an AutoTrade-Candles source. The Mayhem board feed lists only Mayhem coins, so it always trades them. Pump pauses Mayhem coins (most within a minute) and a paused coin cannot be sold — 27 pro_hold trades were frozen that way. Normal coins are never paused."><input type="checkbox" id="cmAvoidMayhem"/> Skip Mayhem coins <span class="muted">(Mixed &amp; AutoTrade sources; Mayhem board always trades them)</span></label>
           <label title="On (default): Candles buys only through PumpPortal Lightning or the bot's own pump build (Local). A coin they cannot buy — e.g. a pump coin priced in USDC or another coin instead of SOL — is skipped and the next coin is taken. Jupiter is still used as the last fallback for SELLS. Off: Jupiter may also buy (slower, ~4.5 s, and a route can open extra accounts at ~0.0015 SOL each)."><input type="checkbox" id="cmNoJupBuy"/> Buy only via Lightning / Local <span class="muted">(Jupiter: sells only)</span></label>
-          <label title="Takes turns New → Movers → Graduated → New …, the youngest coin of each board (pump mints only). The coin stays while a trade is open; after its trade completes, or 60 s with no trade, the next board's youngest is fed."><input type="checkbox" class="cm-feed" data-feed="mixed"/> Mixed (New, Movers, Graduated)</label>
+          <label title="Takes turns New → Movers → New …, the youngest coin of each board (pump mints only). The coin stays while a trade is open; after its trade completes, or 60 s with no trade, the next board's youngest is fed."><input type="checkbox" class="cm-feed" data-feed="mixed"/> Mixed (New, Movers)</label>
         </span>
         <label>Pinned mints <input class="cm-mints" id="cmMints" placeholder="mint mint …"/></label>
         <label title="Pinned coins only: they buy on the chart's ▲ BUY. Once the whole trade is at least this % up after fees, it rides the run of green candles and sells on the first red while still in profit (never at a loss).">Pinned profit % <input class="cm-in" id="cmPinProfit" type="number" step="0.1" min="0.1"/></label>
@@ -1440,7 +1440,7 @@ header nav.nav .navbtn[hidden]{display:none}
       <div class="m2-ctl">
         <label>Strategy <select id="m2Strat"></select></label>
         <label title="Coins: the Mayhem coins Mayhem_Mode holds; signals: Mayhem_Mode's BUY / SELL (unchanged)."><input type="checkbox" class="m2-feed" data-feed="mayhem"/> Mayhem_Mode</label>
-        <label title="Coins: pins take turns — New (under 3 min), then Movers, then Graduated, then New again; each turn takes that board's youngest coin not traded yet. Signals: every wallet's BUY / SELL on the pinned coin. Graduated coins are priced by a Jupiter quote."><input type="checkbox" class="m2-feed" data-feed="mixed"/> Mixed (New, Movers, Graduated)</label>
+        <label title="Coins: pins take turns — New (under 3 min), then Movers, then Graduated, then New again; each turn takes that board's youngest coin not traded yet. Signals: every wallet's BUY / SELL on the pinned coin. Graduated coins are priced by a Jupiter quote."><input type="checkbox" class="m2-feed" data-feed="mixed"/> Mixed (New, Movers)</label>
         <button type="button" class="m2-btn" id="m2DryBtn">Dry run …</button>
         <button type="button" class="m2-btn" id="m2AutoBtn">Auto Trade …</button>
         <span class="muted" id="m2CtlHint">To trade live: pick a strategy, switch Dry run OFF, then Auto Trade ON.</span>
@@ -4568,7 +4568,7 @@ document.addEventListener('change', e=>{
   const f=e.target.dataset.feed;
   if(!e.target.checked){ e.target.checked=true; return; }       // one feed is always on
   document.querySelectorAll('.cm-feed').forEach(b=>{ b.checked=(b.dataset.feed===f); });
-  cmPost({auto_follow:f}, f==='mixed'?'Feed: Mixed — New, then Movers, then Graduated (youngest of each)':'Feed: Mayhem board');
+  cmPost({auto_follow:f}, f==='mixed'?'Feed: Mixed — New, then Movers (youngest of each)':'Feed: Mayhem board');
 });
 document.getElementById('cmApply').addEventListener('click',()=>{
   const mints=document.getElementById('cmMints').value.trim();
