@@ -58,9 +58,12 @@ PAUSED_DUST_SOL = 0.0002       # Paused Coins: a held paused coin worth less tha
 PAUSED_DUST_FRAC = 0.02
 UNREAD_SET_ASIDE_S = 90.0      # an open trade whose price cannot be read this long is set aside (Unsold Coins page)
 NO_ROUTE = ("graduated", "not_on_curve", "not_sol_quote")
-# Candles' Mixed feed uses only these boards of mayhem2.MIXED_BOARDS (user 2026-11-16: Graduated removed for now;
-# add "graduated" back here to restore it). Mayhem2's own Mixed feed is not changed.
-CANDLE_MIXED_GROUPS = ("new", "movers")
+# Candles' Mixed feed boards, in turn order (user 2026-11-16: Graduated removed, Trending added in its place).
+# New / Movers URLs come from mayhem2.MIXED_BOARDS; Trending is Candles' own. Mayhem2's Mixed feed is not changed.
+CANDLE_MIXED_GROUPS = ("new", "movers", "trending")
+TRENDING_URL = ("https://advanced-indexer.pump.fun/boards/trending?tier=web&surface=TRENDING&platform=WEB&limit=150"
+                "&chains=solana&offset=0&ranking=social&window=1h&hot=label&includeFollowedHolders=true"
+                "&followedHoldersLimit=5")
 BP_LOWER_PCT = 25.0            # pro_hold "buy only on ◆ BP BUY": each next lot's candle is at least this far below the last lot's
 PRO_FIRST_MAX_AGE_S = 60.0     # pro_hold first-candle buy: only coins this young (a new coin's first candle)
 SKIP_REASONS = ("KILLED", "NO_POSITION", "ALREADY_LONG", "ENTRIES_PAUSED", "FEED_DEGRADED", "STALE_FEED",
@@ -564,7 +567,7 @@ class CandleMomo:
         except Exception:
             mayhem_state_of = lambda _m: ""
         held = [m for m in sorted(self.positions, key=lambda k: float(self.positions[k].get("entry_ts") or 0))
-                if mayhem_state_of(m) != "paused"]
+                if mayhem_state_of(m) != "paused" and not self.positions[m].get("paused_at")]
         if held:
             return {held[0]: want.get(held[0], "held")}
         for m, origin in want.items():
@@ -706,7 +709,7 @@ class CandleMomo:
 
     # ---------- Mixed feed (Candles page checkbox, same boards as Mayhem2's "Mixed")
     async def _mixed_boards(self) -> List[Dict[str, Any]]:
-        """New / Movers boards (pump's own lists; Graduated is not read, see CANDLE_MIXED_GROUPS). Reuses Mayhem2's fresh copy when it reads them,
+        """New / Movers / Trending boards (pump's own lists, see CANDLE_MIXED_GROUPS). Reuses Mayhem2's fresh copy when it reads them,
         else reads them here (New every 2 s, Movers / Graduated every 4 s). Rows carry _grp and _age."""
         from src.data.fast_get import mayhem2_get
         from src.signal.mayhem2 import MIXED_BOARDS
@@ -724,8 +727,9 @@ class CandleMomo:
                             self._mx_at[g] = at
         except Exception:
             pass
-        due = [(g, u) for g, u, _e in MIXED_BOARDS
-               if g in MIXED_GROUPS and now - float(self._mx_at.get(g) or 0) >= (2.0 if g == "new" else 4.0)]
+        urls = dict({g: u for g, u, _e in MIXED_BOARDS}, trending=TRENDING_URL)
+        due = [(g, urls[g]) for g in MIXED_GROUPS
+               if now - float(self._mx_at.get(g) or 0) >= (2.0 if g == "new" else 4.0)]
 
         async def one(g: str, u: str):
             try:
@@ -773,7 +777,7 @@ class CandleMomo:
         return out
 
     def _mixed_want(self, rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-        """Mixed: takes turns New -> Movers -> New ... (Graduated removed for now). A watched coin stays while held, and while
+        """Mixed: takes turns New -> Movers -> Trending -> New ... A watched coin stays while held, and while
         flat until a trade on it completes or it sat mixed_idle_s with no trade; then the next board's youngest
         coin is fed. An empty board passes the turn on. Up to Max mints (pro_hold: one)."""
         MIXED_GROUPS = CANDLE_MIXED_GROUPS
@@ -1230,7 +1234,10 @@ class CandleMomo:
         if src:
             # Support mode: feeds = the source's held coins (plus anything Candles still holds). No board picks.
             self._support_sync(src)
-            want = {p.mint: "support" for p in self._support_held(src)}
+            # a paused Candles coin is watched on the Paused Coins page, not fed (ADAWDD 2026-11-17: fed here and
+            # dropped by _single_feed on every pick — "Watching ADAWDD" every 2 s)
+            want = {p.mint: "support" for p in self._support_held(src)
+                    if not (self.positions.get(p.mint) or {}).get("paused_at")}
             ages: Dict[str, float] = {}           # coin age where the source knows it (first-candle buy)
             for m in [m for m, p in self.positions.items() if not p.get("paused_at")] + [m for m in self.busy if m in self.feeds]:
                 want.setdefault(m, "held")

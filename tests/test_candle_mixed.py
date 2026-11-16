@@ -1,4 +1,4 @@
-"""Candles page Mixed feed: New -> Movers (Graduated removed for now), youngest first, pump mints only."""
+"""Candles page Mixed feed: New -> Movers -> Trending (Graduated removed), youngest first, pump mints only."""
 import time
 
 from src.signal import candle_momo as CM
@@ -11,6 +11,7 @@ def _rows():
         R("new", "notpumpcoin", 1),
         R("movers", "MOV1pump", 4000), R("movers", "MOV2pump", 600),
         R("graduated", "GRA1pump", 9000), R("graduated", "PAUSpump", 10, ms="paused"),
+        R("trending", "TRE1pump", 20000), R("trending", "pumpTRE2", 15000), R("trending", "TrendNotPumpMint", 5),
     ]
 
 
@@ -26,10 +27,10 @@ def _eng():
 def test_candidates_pump_only_youngest_first_per_board():
     e = _eng()
     c = [r["m"] for r in e._mixed_candidates(_rows())]
-    assert c == ["BBBBpump", "AAAApump", "MOV2pump", "MOV1pump"]            # the Graduated board is not used
+    assert c == ["BBBBpump", "AAAApump", "MOV2pump", "MOV1pump", "pumpTRE2", "TRE1pump"]   # Graduated not used; Trending: pump mints only
 
 
-def test_turns_new_movers_no_graduated():
+def test_turns_new_movers_trending():
     e = _eng()
     rows = _rows()
     order = []
@@ -38,7 +39,7 @@ def test_turns_new_movers_no_graduated():
         (m,) = list(e.feeds)
         order.append(m)
         e.traded[m] = time.time() + 0.001          # its trade completed: next turn
-    assert order == ["BBBBpump", "MOV2pump", "AAAApump", "MOV1pump"]
+    assert order == ["BBBBpump", "MOV2pump", "pumpTRE2", "AAAApump"]
     assert e.feeds and next(iter(e.feeds.values())).origin.startswith("mixed-")
 
 
@@ -659,3 +660,11 @@ def test_coin_rebought_during_handover_is_dropped_after_its_trade():
     e._pick(rows)
     e._pick(rows)
     assert "BBBBpump" not in e.feeds and len(e.feeds) == 1       # the next board coin took its place
+
+
+def test_one_feed_skips_a_paused_candles_coin():
+    """ADAWDD 2026-11-17: a paused coin restored after a restart (dashboard state unknown) took pro_hold's one
+    feed slot in support mode, was dropped by _single_feed and re-added every pick; no other coin was fed."""
+    e = _eng()
+    e.positions["PAUSpump"] = {"mint": "PAUSpump", "paused_at": time.time() - 60, "entry_ts": time.time() - 90}
+    assert e._one_feed({"NEW1pump": "offer"}) == {"NEW1pump": "offer"}

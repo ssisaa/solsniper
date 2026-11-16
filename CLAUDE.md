@@ -90,10 +90,18 @@ youngest first, pump mints only, New < 3 min; a coin stays while held, else unti
 `mixed_idle_s` (60 s) with no trade, then the next board's youngest (a handed-over coin is skipped 5 min). Max mints
 slots (pro_hold: one). Paper / LIVE follow Candles' Live switch. Graduated coins are valued by Jupiter.
 
-**Candles Mixed = New + Movers only (2026-11-16, user's request, "for now")**: `candle_momo.CANDLE_MIXED_GROUPS` =
-("new", "movers") — Candles' Mixed feed no longer reads or picks the Graduated board (turns New → Movers → New …; page
-label "Mixed (New, Movers)"). Add "graduated" back to that tuple to restore it. Mayhem2's own Mixed feed still uses all
-three boards. This overrides the "Graduated" part of the Candles Mixed feed paragraph above.
+**Candles Mixed = New, Movers, Trending (2026-11-16/17, user's request)**: `candle_momo.CANDLE_MIXED_GROUPS` =
+("new", "movers", "trending") — Graduated was removed and pump's Trending board (`TRENDING_URL`, social ranking, 1 h
+window, read every 4 s) takes its place; turns New → Movers → Trending → New …, youngest first, mints that start or end
+with "pump" only; page label "Mixed (New, Movers, Trending)". Trending coins are old (youngest seen ~4 h) and many are
+graduated (Jupiter-priced). Mayhem2's own Mixed feed still uses New / Movers / Graduated. This overrides the
+"Graduated" part of the Candles Mixed feed paragraph above.
+
+**Paused coin took the one-feed slot (2026-11-17)**: after a restart a restored paused coin (ADAWDD; the dashboard's
+`mayhem_state_of` does not know it) was pro_hold's one feed in support mode (`_one_feed`), `_single_feed` dropped it,
+and it was re-added every 2 s ("Watching ADAWDD (mayhem holds it)" 116 times) — no other coin was fed in the MayhemMode
+step. `_one_feed` and the support `want` now skip positions with `paused_at`. Same night pump answered HTTP 429 on every
+advanced-indexer board for this IP (board errors are only logged at debug: an empty pick with no log line = look there).
 
 **Mixed feed stuck on a finished coin (2026-11-16)**: MONY stayed on the feed 8 min, flat, nothing else traded. Its
 trade closed, the hand-over dropped `_mx_since[m]`, but a re-buy in flight (`busy`) kept the feed; from then on "since"
