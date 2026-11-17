@@ -5388,7 +5388,7 @@ function showView(name){
   if(window._cmChartTimer){ clearInterval(window._cmChartTimer); window._cmChartTimer=null; }
   if(window._atcTimer){ clearInterval(window._atcTimer); window._atcTimer=null; }
   if(name==='openholds'||name==='callouts'||name==='decoded'||name==='mayhem'){ atcSync(); window._atcTimer=setInterval(atcSync, 4000); }
-  if(name==='candle'){ loadCandle(); window._cmTimer=setInterval(loadCandle, 500); setTimeout(cmLoadChart, 400); window._cmChartTimer=setInterval(cmLoadChart, 1000); requestAnimationFrame(cmDrawChart); }
+  if(name==='candle'){ loadCandle(); window._cmTimer=setInterval(loadCandle, 500); setTimeout(cmLoadChart, 400); window._cmChartTimer=setInterval(cmLoadChart, 300); requestAnimationFrame(cmDrawChart); }
   if(window._m2ChartTimer){ clearInterval(window._m2ChartTimer); window._m2ChartTimer=null; }
   if(name==='mayhem2'){
     loadMayhem2();

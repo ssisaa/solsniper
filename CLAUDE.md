@@ -103,6 +103,16 @@ and it was re-added every 2 s ("Watching ADAWDD (mayhem holds it)" 116 times) â€
 step. `_one_feed` and the support `want` now skip positions with `paused_at`. Same night pump answered HTTP 429 on every
 advanced-indexer board for this IP (board errors are only logged at debug: an empty pick with no log line = look there).
 
+**Graduated coins get a live chart (2026-11-17, user's request)**: pump's chart ran ahead of the bot's on GEKKO
+(PumpSwap). The RPC logs subscription (public node, `mentions: [coin]`) already received every PumpSwap trade but only
+pump's curve TradeEvent was decoded. `caller_stream.decode_amm_logs(logs, mint)` reads PumpSwap BuyEvent
+(`67f4521f2cf57777`) / SellEvent (`3e2f370aa503dc2a`) from the "Program data:" lines â€” base amount at byte 16, quote
+amount at 64, user pubkey at 152; the event has no mint, so the coin comes from the subscription id (`by_sid`, coin
+subscriptions only). Checked live on GEKKO: 405 trades in 75 s, consistent prices. They feed the stream chart like any
+trade (so the feed switches from pump_rest to stream). A lot priced on the other chart is converted by the two charts'
+close ratio over their last common candles (`_unit_ratio`) in `_chart_value`. The Candles page redraws the chart every
+0.3 s (was 1 s). Graduated coins only get this while they are among the RPC-logs subscriptions (Candles feeds first).
+
 **Open positions follow the chart (2026-11-17, user's request)**: GEKKO (graduated, Jupiter-valued) showed 0.005046
 SOL / +0.48 % for 20+ s while the candles rose ~4 %. Cause: background Jupiter quotes are cached up to 45 s
 (`jupiter.BG_CACHE_S`), and the value loop re-scaled `impact` = old quote / chart price now every second, which pinned

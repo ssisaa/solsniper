@@ -84,6 +84,48 @@ def decode_trade_logs(logs: List[str]) -> List[Dict[str, Any]]:
     return out
 
 
+# PumpSwap (pAMMBay…) BuyEvent / SellEvent, also logged as "Program data:" lines (checked on GEKKO 2026-11-17).
+# Layout after the 8-byte discriminator: i64 timestamp, then u64 base_amount, max/min quote, user base / quote
+# reserves, pool base / quote reserves, quote_amount, ... then pool and user pubkeys. A graduated pump coin's pool
+# has the coin as base (6 decimals) and WSOL as quote (9). The event has no mint: the caller passes the coin its
+# logsSubscribe was for.
+_AMM_BUY = bytes.fromhex("67f4521f2cf57777")
+_AMM_SELL = bytes.fromhex("3e2f370aa503dc2a")
+
+
+def decode_amm_logs(logs: List[str], mint: str) -> List[Dict[str, Any]]:
+    """PumpSwap trades of `mint` from 'Program data:' lines, shaped like a PumpPortal trade (no curve reserves)."""
+    import base64
+    import struct
+
+    out: List[Dict[str, Any]] = []
+    if not mint:
+        return out
+    for line in logs or []:
+        if not isinstance(line, str) or not line.startswith("Program data: "):
+            continue
+        try:
+            raw = base64.b64decode(line[len("Program data: "):])
+        except Exception:
+            continue
+        if len(raw) < 184 or raw[:8] not in (_AMM_BUY, _AMM_SELL):
+            continue
+        base, = struct.unpack_from("<Q", raw, 16)
+        quote, = struct.unpack_from("<Q", raw, 16 + 6 * 8)
+        if base <= 0 or quote <= 0:
+            continue
+        out.append({
+            "mint": mint,
+            "solAmount": quote / 1e9,
+            "tokenAmount": base / 1e6,
+            "txType": "buy" if raw[:8] == _AMM_BUY else "sell",
+            "traderPublicKey": _b58(raw[152:184]),
+            "newTokenBalance": None,
+            "pool": "pump-amm",
+        })
+    return out
+
+
 def _rpc_http() -> str:
     import os
     for url in (os.environ.get("SOLANA_RPC_URLS") or os.environ.get("SOLANA_RPC_URL") or "").split(","):
@@ -471,6 +513,7 @@ class CallerStream:
             self._set_up("rpc-logs", True)
             log.info("CALLER STREAM connected — RPC logs %s", url.split("?")[0])
             by_key: Dict[str, int] = {}        # wallet or mint -> subscription id
+            by_sid: Dict[int, str] = {}        # subscription id -> wallet or mint (PumpSwap events carry no mint)
             pending: Dict[int, str] = {}       # request id -> key
             unsub_ids: Set[int] = set()
             refused: Dict[str, float] = {}     # key -> time it may be asked again
@@ -504,6 +547,7 @@ class CallerStream:
                         }))
                     for key in sorted(set(by_key) - want):
                         sid = by_key.pop(key)
+                        by_sid.pop(sid, None)
                         next_id += 1
                         unsub_ids.add(next_id)
                         await ws.send(json.dumps({"jsonrpc": "2.0", "id": next_id, "method": "logsUnsubscribe", "params": [sid]}))
@@ -523,6 +567,7 @@ class CallerStream:
                     key = pending.pop(rid, None)
                     if key is not None and isinstance(msg.get("result"), int):
                         by_key[key] = msg["result"]
+                        by_sid[msg["result"]] = key
                     elif key is not None:
                         refused[key] = now + 30.0
                         log.debug("logsSubscribe refused for %s: %s", key[:8], msg.get("error"))
@@ -539,7 +584,15 @@ class CallerStream:
                     if len(self._seen_sigs) > 5000:
                         cut = now - 120
                         self._seen_sigs = {k: v for k, v in self._seen_sigs.items() if v >= cut}
-                for trade in decode_trade_logs(value.get("logs") or []):
+                logs = value.get("logs") or []
+                trades = decode_trade_logs(logs)
+                if not trades:
+                    # a graduated coin's PumpSwap trade (2026-11-17): before this its chart had only pump's candle
+                    # API, 1-4 s late. Only for a coin subscription (a wallet's has no coin to name).
+                    key = by_sid.get(int((msg.get("params") or {}).get("subscription") or -1), "")
+                    if key and key not in want_w:
+                        trades = decode_amm_logs(logs, key)
+                for trade in trades:
                     trade["signature"] = sig
                     trade["_src"] = "rl"
                     self._on_trade(trade)

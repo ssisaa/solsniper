@@ -1664,9 +1664,18 @@ class CandleMomo:
         if not isinstance(lots, list):
             return None
         cost = sum(float(l.get("sol") or 0) for l in lots)
-        if price > 0 and cost > 0 and all(float(l.get("px") or 0) > 0 and (l.get("src") in (None, f.using))
-                                         for l in lots):
-            value = sum(float(l["sol"]) * price / float(l["px"]) for l in lots) * float(held.get("impact") or 1.0)
+        # a lot priced on the other chart (bought on pump_rest, the chart now runs on the stream — other units)
+        # is converted by the two charts' ratio at the same recent candles (2026-11-17: graduated coins now get
+        # stream trades, so this switch is common)
+        pxs = []
+        for l in lots:
+            lp, ls = float(l.get("px") or 0), l.get("src")
+            if lp > 0 and ls not in (None, f.using):
+                r = self._unit_ratio(f, f.using, ls)
+                lp = lp * r if r else 0.0
+            pxs.append(lp)
+        if price > 0 and cost > 0 and all(x > 0 for x in pxs):
+            value = sum(float(l.get("sol") or 0) * price / x for l, x in zip(lots, pxs)) * float(held.get("impact") or 1.0)
             net = 2 * self._network_fee_sol() * max(1, len(lots))
             # pump's 1% each way is not charged on a graduated coin valued by Jupiter quotes: its pool fee is already
             # in the quotes (and in `impact`), so no extra 2% (2026-11-14: AUfKbx needed ~+12% instead of +10%)
@@ -1674,6 +1683,20 @@ class CandleMomo:
             upnl = value - cost - net - cost * fee_pct / 100.0
             return value, upnl, upnl / cost * 100.0
         return None
+
+    @staticmethod
+    def _unit_ratio(f: Feed, to: str, frm: str) -> Optional[float]:
+        """Price in chart `to` per price in chart `frm`: median close ratio over their last common final candles."""
+        try:
+            a = {c.t: c.close for c in f.books[to].rows[-60:] if c.final and c.close > 0}
+            b = {c.t: c.close for c in f.books[frm].rows[-60:] if c.final and c.close > 0}
+        except Exception:
+            return None
+        common = sorted(set(a) & set(b))[-5:]
+        if len(common) < 2:
+            return None
+        rs = sorted(a[t] / b[t] for t in common)
+        return rs[len(rs) // 2]
 
     def live_reading(self, mint: str) -> Optional[Tuple[float, float, float]]:
         """Open positions' Value / uPnL / % at the chart's price right now (user 2026-11-17: the table showed a
