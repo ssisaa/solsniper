@@ -1381,7 +1381,7 @@ def test_unreadable_price_sets_the_trade_aside_after_90s(engine, monkeypatch, tm
     assert asyncio.run(e._set_aside("MINT", pos)) is True
     assert "MINT" not in e.positions                                     # the next coin can come
     t = e.store.trades(1)[0]
-    assert t["exit_sol"] == pytest.approx(0.003) and "set aside, NOT sold" in t["why"]
+    assert t["exit_sol"] == pytest.approx(0.003) and "set aside, booked at its last value" in t["why"]
     u = e.unsold_view()
     assert len(u) == 1 and u[0]["mint"] == "MINT" and "price unreadable" in u[0]["reason"] and u[0]["last_value_sol"] == 0.003
     e2 = M.CandleMomo()
@@ -1438,3 +1438,44 @@ def test_no_candle_countdown_and_close():
     e.cfg.idle_exit_s = 0
     e.positions["M"].pop("paused_at")
     assert e.idle_left("M") is None
+
+
+def test_three_unreadable_sells_set_aside_and_retry_corrects(monkeypatch, tmp_path):
+    """NSA 2026-11-18: after 3 sells that could not read the price the trade goes to Unsold Coins; the retry there
+    corrects the booked trade once the price reads."""
+    import asyncio as _a
+    import time as _t
+    from src.signal import candle_momo as CM
+    e = CM.CandleMomo()
+    e.store = None
+    asides = []
+
+    async def aside(mint, pos, why=""):
+        asides.append(why)
+        return True
+    monkeypatch.setattr(e, "_set_aside", aside)
+
+    async def curve(mint):
+        return None, 0, "curve_unread"
+    monkeypatch.setattr(e, "_curve", curve)
+    e.positions["M"] = {"mint": "M", "mode": "paper", "tokens": 1000.0, "entry_sol": 0.005, "entry_ts": _t.time() - 30,
+                        "symbol": "S", "lots": [{"n": 1}]}
+    e.cfg.fill_lag_ms = 0
+
+    async def go():
+        for i in range(3):
+            await e._paper_sell({"id": f"s{i}", "mint": "M", "side": "SELL", "seen": _t.time(), "candleTs": 1,
+                                 "symbol": "S"}, "green")
+        await _a.sleep(0.05)
+    _a.run(go())
+    assert e.positions["M"]["sell_fails"] == 3 and asides and "3 sells" in asides[0]
+    # the Unsold page retry
+    e.unsold = [{"ts": _t.time(), "mint": "M", "symbol": "S", "mode": "paper", "entry_sol": 0.005, "tokens": 1000.0,
+                 "retry": True, "status": "retrying"}]
+    monkeypatch.setattr(e, "_unsold_file", lambda: "")
+
+    async def val(mint, tokens):
+        return 0.0055, None, "curve"
+    monkeypatch.setattr(e, "_value", val)
+    _a.run(e._unsold_retry())
+    assert e.unsold[0]["retry"] is False and e.unsold[0]["sold_sol"] == 0.0055

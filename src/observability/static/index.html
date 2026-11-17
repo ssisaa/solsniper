@@ -1210,9 +1210,9 @@ header nav.nav .navbtn[hidden]{display:none}
 <div id="view-unsold" class="view" data-view="unsold">
   <div class="card">
     <div class="row-between"><h2 style="margin:0">Unsold Coins</h2><span class="muted" id="usInfo">newest first</span></div>
-    <p class="muted" style="margin:6px 0 12px">Candles trades that were <b>set aside without a sale</b>: the coin's price could not be read for 90 seconds ("price unreadable — kept, will retry"), so the trade was taken out of Open positions and the next coin could come. It is booked in Closed trades at its last known value. A <b>LIVE</b> coin is only set aside when it really has no price route, and its coins are still in the wallet.</p>
-    <table><thead><tr><th>Set aside</th><th>Coin</th><th>Mode</th><th>Lots</th><th>In SOL</th><th>Last value</th><th>Held</th><th>Reason</th></tr></thead>
-    <tbody id="usRows"><tr><td colspan="8" class="muted">Loading…</td></tr></tbody></table>
+    <p class="muted" style="margin:6px 0 12px">Candles trades that were <b>set aside without a sale</b>: the coin's price could not be read for 90 seconds, or 3 sells in a row could not read it, so the trade was taken out of Open positions and the next coin could come. It is booked in Closed trades at its last known value. A <b>LIVE</b> coin is only set aside when it really has no price route, and its coins are still in the wallet.</p>
+    <table><thead><tr><th>Set aside</th><th>Coin</th><th>Mode</th><th>Lots</th><th>In SOL</th><th>Last value</th><th>Held</th><th>Reason</th><th>Retry</th></tr></thead>
+    <tbody id="usRows"><tr><td colspan="9" class="muted">Loading…</td></tr></tbody></table>
   </div>
 </div>
 <div id="view-candle" class="view" data-view="candle">
@@ -5339,7 +5339,8 @@ async function loadUnsold(){
         <td>${r.mode==='live'?'<b class="r">LIVE</b>':'paper'}${r.src?' <span class="muted">· '+escapeHtml(r.src)+'</span>':''}</td>
         <td>${r.lots||1}</td><td>${Number(r.entry_sol||0).toFixed(4)}</td>
         <td>${r.last_value_sol!=null?Number(r.last_value_sol).toFixed(5):'—'}</td><td>${pcAge(r.held_s)}</td>
-        <td>${escapeHtml(r.reason||'')}</td></tr>`).join(''):'<tr><td colspan="8" class="muted">No coin was set aside.</td></tr>';
+        <td>${escapeHtml(r.reason||'')}</td>
+        <td>${r.retry?`<span class="w">retrying · ${r.tries||0} tries · ${Math.max(0,Math.ceil(600-((Date.now()/1000)-(r.ts||0))))}s left</span>`:escapeHtml(r.status||'—')}</td></tr>`).join(''):'<tr><td colspan="9" class="muted">No coin was set aside.</td></tr>';
   }catch(e){}
 }
 setInterval(()=>{ if(!document.getElementById('view-unsold').classList.contains('on')) loadUnsold(); }, 15000);

@@ -103,6 +103,16 @@ and it was re-added every 2 s ("Watching ADAWDD (mayhem holds it)" 116 times) �
 step. `_one_feed` and the support `want` now skip positions with `paused_at`. Same night pump answered HTTP 429 on every
 advanced-indexer board for this IP (board errors are only logged at debug: an empty pick with no log line = look there).
 
+**Unsold after 3 failed sells, retried there (2026-11-18, user's request)**: NSA (Movers, graduated) bought at 00:17:57,
+then 7 paper sells failed "price unreadable" over 6 min while the value loop priced it — the paper sell's Jupiter quote
+(non-urgent) was skipped by the background Jupiter limiter. (1) `_paper_sell`: no Jupiter quote → priced from
+`live_reading()` (chart × impact), else a value read ≤ 15 s old (reason "… priced from the chart"). (2) Still no price:
+`pos["sell_fails"]` counts; at `SELL_FAILS_SET_ASIDE` 3 the trade goes to `_set_aside` at once (not after 90 s), booked at
+its last value, next coin comes. (3) Unsold Coins page, paper rows: `retry` — `_unsold_retry` (value loop) re-reads the
+price every 10 s for `UNSOLD_RETRY_S` 10 min; on a read the booked closed trade is corrected (`store.set_trade_cash`,
+row `trade_id`), status shown in the new Retry column. LIVE set-aside is unchanged (only with no price route; coins stay
+in the wallet). `_set_aside` runs once per trade (`pos["aside"]`).
+
 **No candle close (2026-11-18, user's request)**: pumpcity sat in Open positions with no trade for 15 min. Candles page
 "No candle close s" (`idle_exit_s`, default 30, 0 = off, next to Max hold): an open trade whose coin printed no new candle
 on any of its charts for that long (counted from the newest candle, the buy or a resume — `idle_left()`) is closed by the

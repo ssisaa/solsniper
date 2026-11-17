@@ -56,6 +56,8 @@ FLAT_PCT = 0.05                # "no candles yet": the only reading moved less t
 PRO_FIRST_START_CANDLES = 2    # first-buy "start": the chart counts as just started up to this many candles
 PAUSED_DUST_SOL = 0.0002       # Paused Coins: a held paused coin worth less than this (or 2% of its cost) is left
 PAUSED_DUST_FRAC = 0.02
+SELL_FAILS_SET_ASIDE = 3       # paper sells in a row that could not read the price -> Unsold Coins (user 2026-11-18)
+UNSOLD_RETRY_S = 600.0         # the Unsold Coins page re-reads a paper coin's price this long (every 10 s)
 UNREAD_SET_ASIDE_S = 90.0      # an open trade whose price cannot be read this long is set aside (Unsold Coins page)
 NO_ROUTE = ("graduated", "not_on_curve", "not_sol_quote")
 # Candles' Mixed feed boards, in turn order (user 2026-11-16: Graduated removed, Trending added in its place).
@@ -1111,10 +1113,60 @@ class CandleMomo:
         except Exception:
             log.debug("unsold list save failed", exc_info=True)
 
+    def _unsold_add_save(self) -> None:
+        self.unsold = self.unsold[-200:]
+        path = self._unsold_file()
+        if not path:
+            return
+        try:
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(self.unsold, fh)
+            os.replace(tmp, path)
+        except Exception:
+            log.debug("unsold list save failed", exc_info=True)
+
+    async def _unsold_retry(self) -> None:
+        """Unsold Coins page: a paper coin set aside keeps having its price re-read (user 2026-11-18). Once it reads,
+        the booked trade is corrected to that price; after UNSOLD_RETRY_S it stays at its last value."""
+        now = time.time()
+        changed = False
+        for row in self.unsold:
+            if not row.get("retry") or row.get("mode") == "live":
+                continue
+            if now - float(row.get("ts") or now) > UNSOLD_RETRY_S:
+                row.update(retry=False, status="gave up — stays booked at its last value")
+                changed = True
+                continue
+            if now - float(row.get("tried_at") or 0) < 10:
+                continue
+            row["tried_at"] = now
+            try:
+                v, _real, vsrc = await self._value(row["mint"], float(row.get("tokens") or 0))
+            except Exception:
+                v, vsrc = None, ""
+            if v is None or vsrc == "jupiter (old)":
+                row["tries"] = int(row.get("tries") or 0) + 1
+                changed = True
+                continue
+            entry = float(row.get("entry_sol") or 0)
+            pnl = v - entry - 2 * self._network_fee_sol()
+            if self.store and row.get("trade_id") is not None:
+                try:
+                    self.store.set_trade_cash(row["trade_id"], entry, v, pnl)
+                except Exception:
+                    log.debug("unsold trade correction failed", exc_info=True)
+            row.update(retry=False, sold_sol=round(v, 6),
+                       status=f"price read on retry: {v:.6f} SOL ({pnl:+.6f} SOL) — the closed trade was corrected to it")
+            self.note("info", f"{row.get('symbol')} (Unsold Coins): price read on retry, {v:.6f} SOL — closed trade corrected.", row["mint"])
+            changed = True
+        if changed:
+            self._unsold_add_save()
+
     def unsold_view(self) -> List[Dict[str, Any]]:
         return list(reversed(self.unsold))[:100]
 
-    async def _set_aside(self, mint: str, pos: Dict[str, Any]) -> bool:
+    async def _set_aside(self, mint: str, pos: Dict[str, Any], why_now: str = "") -> bool:
         """The trade's price could not be read for UNREAD_SET_ASIDE_S ("price unreadable — kept, will retry"): it is
         taken out of Open positions so the next coin can come, booked at its last known value, and listed on the
         Unsold Coins page with the reason. PAPER: always. LIVE: only when the coin really has no price route (off the
@@ -1125,9 +1177,12 @@ class CandleMomo:
         except Exception:
             why0 = "read failed"
         live = pos.get("mode") == "live"
+        if mint not in self.positions or pos.get("aside"):
+            return False
         if live and why0 not in NO_ROUTE:
             pos["unread_since"] = time.time() - UNREAD_SET_ASIDE_S + 30      # look again in 30 s
             return False
+        pos["aside"] = True
         now = time.time()
         waited = now - float(pos.get("unread_since") or now)
         cause = {"graduated": "the coin left the pump curve and Jupiter gives no quote",
@@ -1135,12 +1190,16 @@ class CandleMomo:
                  "not_sol_quote": "the coin is priced in another coin and Jupiter gives no quote"}.get(
                      why0, "the price could not be read (RPC / pump did not answer)")
         last = pos.get("value_sol")
-        reason = (f"price unreadable for {waited:.0f}s — {cause}; set aside, NOT sold"
-                  + (" (the coins are still in the wallet)" if live else ""))
-        self._unsold_add({"ts": round(now, 1), "mint": mint, "symbol": pos.get("symbol") or mint[:6],
-                          "mode": pos.get("mode"), "src": pos.get("src"), "lots": len(pos.get("lots") or []) or 1,
-                          "entry_sol": pos.get("entry_sol"), "last_value_sol": last,
-                          "held_s": round(now - float(pos.get("entry_ts") or now)), "reason": reason})
+        reason = ((why_now or f"price unreadable for {waited:.0f}s") + f" — {cause}; set aside"
+                  + (", NOT sold (the coins are still in the wallet)" if live else
+                     f", booked at its last value; the price is re-read here every 10 s for {UNSOLD_RETRY_S / 60:.0f} min"))
+        row = {"ts": round(now, 1), "mint": mint, "symbol": pos.get("symbol") or mint[:6],
+               "mode": pos.get("mode"), "src": pos.get("src"), "lots": len(pos.get("lots") or []) or 1,
+               "entry_sol": pos.get("entry_sol"), "last_value_sol": last,
+               "held_s": round(now - float(pos.get("entry_ts") or now)), "reason": reason}
+        if not live:
+            row.update(retry=True, tokens=pos.get("tokens"), status="retrying")
+        self._unsold_add(row)
         self.note("warn", f"{pos.get('symbol') or mint[:6]} — {reason}. Listed on the Unsold Coins page; the next coin can come.", mint)
         if self.store:
             self.store.audit("set_aside", mint=mint, why=why0, waited_s=round(waited, 1), value=last)
@@ -1150,6 +1209,13 @@ class CandleMomo:
         else:
             await self._paper_sell({"id": f"aside-{mint}-{int(now)}", "mint": mint, "side": "SELL", "seen": now,
                                     "manual": True, "symbol": pos.get("symbol") or mint[:6]}, reason)
+            try:
+                t = next((t for t in (self.store.trades(5) if self.store else []) if t.get("mint") == mint), None)
+                if t is not None:
+                    row["trade_id"] = t.get("id")
+                    self._unsold_add_save()
+            except Exception:
+                log.debug("unsold trade id failed", exc_info=True)
             if mint in self.positions:                 # the paper booking could not run: drop it all the same
                 self.positions.pop(mint, None)
                 if self.store:
@@ -2554,6 +2620,17 @@ class CandleMomo:
             q0 = await self._jup_quote_sell(jup, mint, part)
             await asyncio.sleep(max(0.0, cfg.fill_lag_ms / 1000.0 - (time.time() - sent)))
             q1 = await self._jup_quote_sell(jup, mint, part)
+            if not q0 and not q1:
+                # The background Jupiter limiter often skips the quote (NSA 2026-11-18: 7 "price unreadable" while
+                # the value loop priced the coin): use the live chart reading, else a value read ≤ 15 s ago
+                share = part / pos["tokens"] if pos["tokens"] else 1.0
+                lv = self.live_reading(mint)
+                if lv is not None and lv[0] > 0:
+                    q0 = q1 = lv[0] * share
+                elif pos.get("value_sol") and time.time() - float(self._val_at.get(mint) or 0) <= 15:
+                    q0 = q1 = float(pos["value_sol"]) * share
+                if q0:
+                    why = f"{why} — priced from the chart (Jupiter gave no quote just then)"
             expected, got, bps1 = (q0 or q1 or 0.0), (q1 or q0 or 0.0), 0
             c0 = c1 = ({"jupiter": True} if (q0 or q1) else None)
         else:
@@ -2583,9 +2660,16 @@ class CandleMomo:
             # UNREAD_SET_ASIDE_S -> the value loop sets the trade aside (Unsold Coins page).
             pos.pop("closing", None)
             pos.setdefault("unread_since", time.time())
+            pos["sell_fails"] = int(pos.get("sell_fails") or 0) + 1
+            if pos["sell_fails"] >= SELL_FAILS_SET_ASIDE and not (sig or {}).get("manual"):
+                # 3 sells in a row could not price the coin (user 2026-11-18): no more holding here — it goes to the
+                # Unsold Coins page, which keeps retrying the price; Open positions moves on to the next coin
+                asyncio.ensure_future(self._set_aside(mint, pos, f"{pos['sell_fails']} sells in a row could not read the price"))
             if sig and "candleTs" in sig:
-                return self._failed(sig, "price unreadable — paper position kept, will retry")
+                return self._failed(sig, f"price unreadable — try {pos['sell_fails']}/{SELL_FAILS_SET_ASIDE}, "
+                                         "then it moves to Unsold Coins")
             return
+        pos.pop("sell_fails", None)
         slip = (expected - got) / expected * 1e4 if expected else 0.0
         fill_ms = (time.time() - sig["seen"]) * 1000.0 if sig and sig.get("seen") else None
         if fill_ms is not None:
@@ -3524,6 +3608,10 @@ class CandleMomo:
         cash_at = 0.0
         while True:
             await asyncio.sleep(1.0 if self.positions else 2.0)   # 1s while holding: the pause guard reacts fast
+            try:
+                await self._unsold_retry()
+            except Exception:
+                log.debug("unsold retry failed", exc_info=True)
             if time.time() - cash_at >= 20.0:
                 cash_at = time.time()
                 try:
