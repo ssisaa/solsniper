@@ -103,6 +103,13 @@ and it was re-added every 2 s ("Watching ADAWDD (mayhem holds it)" 116 times) �
 step. `_one_feed` and the support `want` now skip positions with `paused_at`. Same night pump answered HTTP 429 on every
 advanced-indexer board for this IP (board errors are only logged at debug: an empty pick with no log line = look there).
 
+**One reading everywhere (2026-11-18, user's request)**: AI showed −8.95 % in Open positions and −34.3 % under the
+chart. The table used the chart price (`live_reading`), while the chart footer, avg / break-even / target lines
+(`chart_marks().open`) and the Exit hint (`_hint`) used the value loop's last Jupiter quote (up to 45 s old).
+`reading(mint)` is now the one figure for all of them (live chart reading, else the last quote; the quote stays in
+`quote_upct`). The `impact` measurement in the value loop now uses `_chart_value` (same unit conversion for a lot
+bought on the other chart).
+
 **Unsold after 3 failed sells, retried there (2026-11-18, user's request)**: NSA (Movers, graduated) bought at 00:17:57,
 then 7 paper sells failed "price unreadable" over 6 min while the value loop priced it — the paper sell's Jupiter quote
 (non-urgent) was skipped by the background Jupiter limiter. (1) `_paper_sell`: no Jupiter quote → priced from

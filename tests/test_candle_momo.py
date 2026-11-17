@@ -1479,3 +1479,25 @@ def test_three_unreadable_sells_set_aside_and_retry_corrects(monkeypatch, tmp_pa
     monkeypatch.setattr(e, "_value", val)
     _a.run(e._unsold_retry())
     assert e.unsold[0]["retry"] is False and e.unsold[0]["sold_sol"] == 0.0055
+
+
+def test_chart_marks_and_hint_use_the_same_reading_as_open_positions():
+    """AI 2026-11-18: Open positions −8.95 % (chart price) vs −34.3 % under the chart (an old Jupiter quote)."""
+    import time as _t
+    from src.signal import candle_momo as CM
+    from src.signal import candle_core as C
+    e = CM.CandleMomo()
+    e.store = None
+    e.cfg.rule = "pro_hold"
+    f = CM.Feed("M", e.cfg.count)
+    f.using = "pump_rest"
+    now_ms = int(_t.time() * 1000) // 1000 * 1000
+    f.books["pump_rest"].merge([C.Candle(t=now_ms, open=1.0, high=1.0, low=0.9, close=0.92, volume=1, final=False)])
+    e.feeds["M"] = f
+    e.positions["M"] = {"mint": "M", "mode": "paper", "entry_sol": 0.005, "upct": -34.3, "value_sol": 0.0033,
+                        "value_src": "jupiter", "impact": 1.0, "entry_ts": _t.time() - 5,
+                        "lots": [{"n": 1, "sol": 0.005, "px": 1.0, "src": "pump_rest"}]}
+    row = [p for p in e.snapshot()["positions"] if p["mint"] == "M"][0]
+    k = e.chart_marks("M")
+    assert abs(k["open"]["upct"] - row["upct"]) < 1e-9 and abs(k["open"]["value_sol"] - row["value_sol"]) < 1e-12
+    assert f"now {row['upct']:+.1f}%" in k["hint"]["exit"] and k["open"]["quote_upct"] == -34.3

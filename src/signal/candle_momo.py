@@ -1789,6 +1789,19 @@ class CandleMomo:
             return None
         return self._chart_value(held, f, book.rows[-1].close)
 
+    def reading(self, mint: str) -> Tuple[Optional[float], Optional[float], Optional[float], str]:
+        """(value SOL, uPnL SOL, %, source) of an open trade — the ONE figure every view shows (Open positions, chart
+        footer / avg / target lines, Exit hint; user 2026-11-18: −8.95 % in the table vs −34.3 % under the chart).
+        The chart price now (live_reading), else the value loop's last real quote."""
+        held = self.positions.get(mint) or {}
+        try:
+            live = self.live_reading(mint)
+        except Exception:
+            live = None
+        if live is not None:
+            return live[0], live[1], live[2], f"chart · {held.get('value_src') or '—'}"
+        return held.get("value_sol"), held.get("upnl_sol"), held.get("upct"), str(held.get("value_src") or "")
+
     def _fast_upct(self, held: Dict[str, Any], f: Feed, price: float) -> Optional[float]:
         """Whole trade % after fees from the chart price (see _chart_value). Falls back to the value loop's fresh read."""
         cv = self._chart_value(held, f, price)
@@ -2960,9 +2973,10 @@ class CandleMomo:
         sigs = [{"ts": (s.get("ts") or 0) / 1000.0, "side": s.get("side"), "action": s.get("action"),
                  "reason": s.get("reason"), "delta": s.get("deltaPct")}
                 for s in list(self.recent) if s.get("mint") == mint and not s.get("manual")][:80]
+        rv, _ru, rp, rsrc = self.reading(mint) if held else (None, None, None, "")
         return {"mint": mint, "open": {"mode": held.get("mode"), "entry_sol": held.get("entry_sol"), "support": held.get("support"),
-                                       "upct": held.get("upct"), "value_sol": held.get("value_sol"),
-                                       "value_src": held.get("value_src"), "fees_sol": 2 * self._network_fee_sol(),
+                                       "upct": rp, "value_sol": rv, "quote_upct": held.get("upct"),
+                                       "value_src": rsrc, "fees_sol": 2 * self._network_fee_sol(),
                                        "lots": lots} if held else None, "closed": closed,
                 "signals": sigs, "hint": self._hint(mint)}
 
@@ -2978,7 +2992,7 @@ class CandleMomo:
         if cfg.rule == "pro_hold":
             out.update({"profitOnly": True, "pro": True})
             if held:
-                up = held.get("upct")
+                up = self.reading(mint)[2]
                 n = len(held.get("lots") or []) or 1
                 room = max(0.0, cfg.ladder_max_total_sol - float(held.get("entry_sol") or 0))
                 lot = self._lot_base(held.get("mode") or cfg.mode)
@@ -3014,7 +3028,7 @@ class CandleMomo:
             from src.signal import pro_trader as PT
             out.update({"minProfit": PT.TARGET_PCT, "minProfitFrom": "Pro Trader target", "profitOnly": False, "pro": True})
             if held:
-                up = held.get("upct")
+                up = self.reading(mint)[2]
                 out["entry"] = "Pro Trader: one entry per trade (no ladder)"
                 out["exit"] = (f"{'now ' + format(up, '+.1f') + '% — ' if up is not None else ''}Pro Trader sells at "
                                f"{PT.TARGET_PCT:+.0f}% / {PT.STOP_PCT:+.0f}% / {PT.TIME_STOP_S:.0f}s")
@@ -3026,7 +3040,7 @@ class CandleMomo:
             return out
         if held:
             lots = len(held.get("lots") or []) or 1
-            up = held.get("upct")
+            up = self.reading(mint)[2]
             reds = self.reds_since.get(mint, 0)
             every = max(1, int(cfg.reds_per_lot))
             if not (inverse and cfg.ladder_enabled):
@@ -3692,11 +3706,11 @@ class CandleMomo:
                                 raise LookupError("old price")
                             fv = self.feeds.get(mint)
                             px = fv.books[fv.using].rows[-1].close if fv and fv.using and fv.books[fv.using].rows else 0.0
-                            lots_ = pos.get("lots") or []
-                            if px > 0 and lots_ and all(float(l.get("px") or 0) > 0 for l in lots_):
-                                chart_v = sum(float(l.get("sol") or 0) * px / float(l["px"]) for l in lots_)
-                                if chart_v > 0:
-                                    pos["impact"] = max(0.2, min(1.2, v / chart_v))
+                            # chart value with the same unit conversion as the live reading (a lot bought on the
+                            # other chart), before scaling
+                            cv = self._chart_value(dict(pos, impact=1.0), fv, px) if fv and px > 0 else None
+                            if cv is not None and cv[0] > 0:
+                                pos["impact"] = max(0.2, min(1.2, v / cv[0]))
                         except Exception:
                             pass
                         if self.cfg.rule == "pro_hold" and not pos.get("closing") and mint not in self.busy:
@@ -3820,13 +3834,9 @@ class CandleMomo:
                 row["idleLeft"] = round(il, 1) if il is not None and il < float(self.cfg.idle_exit_s) - 5 else None
             except Exception:
                 row["idleLeft"] = None
-            try:
-                live = self.live_reading(row["mint"])        # follows the candles, refreshed on every page poll
-            except Exception:
-                live = None
-            if live is not None:
-                row.update(value_sol=live[0], upnl_sol=live[1], upct=live[2], quote_upct=row.get("upct"),
-                           value_src=f"chart · {row.get('value_src') or '—'}")
+            v, u, pc, vsrc = self.reading(row["mint"])          # follows the candles, refreshed on every page poll
+            if vsrc.startswith("chart"):
+                row.update(value_sol=v, upnl_sol=u, upct=pc, quote_upct=row.get("upct"), value_src=vsrc)
         recent = [{k: s.get(k) for k in ("id", "mint", "symbol", "ts", "side", "deltaPct", "candleTs", "provider",
                                          "feedLagMs", "action", "reason")} for s in list(self.recent)[:40]]
         try:
