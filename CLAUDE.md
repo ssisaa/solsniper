@@ -103,6 +103,15 @@ and it was re-added every 2 s ("Watching ADAWDD (mayhem holds it)" 116 times) �
 step. `_one_feed` and the support `want` now skip positions with `paused_at`. Same night pump answered HTTP 429 on every
 advanced-indexer board for this IP (board errors are only logged at debug: an empty pick with no log line = look there).
 
+**Open positions follow the chart (2026-11-17, user's request)**: GEKKO (graduated, Jupiter-valued) showed 0.005046
+SOL / +0.48 % for 20+ s while the candles rose ~4 %. Cause: background Jupiter quotes are cached up to 45 s
+(`jupiter.BG_CACHE_S`), and the value loop re-scaled `impact` = old quote / chart price now every second, which pinned
+the fast chart reading (`_fast_upct`, used by the sell at once) to the old quote as well. Now `_val_at[mint]` = when the
+price behind the value was really read (`_jup_quote_time` from Jupiter's cache entry; curve reads = now) and `impact`
+is only re-measured on a price ≤ 2 s old. `snapshot()` shows Value / uPnL / % from `live_reading()` (chart price now ×
+impact, after fees; `value_src` "chart · …", the value loop's figure in `quote_upct`); a paused coin or a chart with no
+candle for 15 s keeps the value loop's read. pump_rest charts still arrive 1–4 s late.
+
 **Lotlow % / xtimes (2026-11-17, user's request)**: Candles page fields next to the pro_hold first-buy dropdown
 (`lot_low_pct` default 25, `lot_x_times` default 1). Used by "buy green after red – low below" (`gar_low`) and "buy only
 on ◆ BP BUY" (`bp`): lot 2 must be ≥ Lotlow % below lot 1 (gar_low: the red's low AND the green's open under the last

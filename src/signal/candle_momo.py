@@ -241,6 +241,9 @@ class CandleMomo:
         self._mx_left: Dict[str, float] = {}          # mint -> when Mixed handed it over
         self.board_seen: Dict[str, float] = {}       # mint -> last time the board listed it
         self._jup_val: Dict[str, Tuple[float, float, int]] = {}   # mint -> (SOL value, ts, raw tokens)
+        # wall time of the price behind a position's last value: a Jupiter quote can be up to 45 s old (background
+        # cache), so the chart scale (`impact`) is only re-measured on a fresh price (GEKKO 2026-11-17)
+        self._val_at: Dict[str, float] = {}
         self._quote_dec: Dict[str, int] = {}         # quote coin -> decimals
         self._qrate: Dict[str, Tuple[float, float]] = {}   # quote coin -> (SOL per base unit, ts)
         self._grab: Dict[str, Dict[str, Any]] = {}   # MayhemMode support: young coins being bought (mint -> info)
@@ -1654,10 +1657,12 @@ class CandleMomo:
                 return low if low > 0 else None
         return None
 
-    def _fast_upct(self, held: Dict[str, Any], f: Feed, price: float) -> Optional[float]:
-        """Whole trade % after fees from the chart price: each lot's buy price (same feed units) against the price
-        now; fees ~2% (pump 1% each way) + both network fees. Falls back to the value loop's fresh read."""
+    def _chart_value(self, held: Dict[str, Any], f: Feed, price: float) -> Optional[Tuple[float, float, float]]:
+        """(value SOL, uPnL SOL, %) of the whole trade after fees from the chart price: each lot's buy price (same
+        feed units) against the price now, scaled by `impact`; fees ~2% (pump 1% each way) + both network fees."""
         lots = held.get("lots") or []
+        if not isinstance(lots, list):
+            return None
         cost = sum(float(l.get("sol") or 0) for l in lots)
         if price > 0 and cost > 0 and all(float(l.get("px") or 0) > 0 and (l.get("src") in (None, f.using))
                                          for l in lots):
@@ -1666,7 +1671,26 @@ class CandleMomo:
             # pump's 1% each way is not charged on a graduated coin valued by Jupiter quotes: its pool fee is already
             # in the quotes (and in `impact`), so no extra 2% (2026-11-14: AUfKbx needed ~+12% instead of +10%)
             fee_pct = 0.0 if str(held.get("value_src") or "").startswith("jupiter") else 2.0
-            return (value - cost - net) / cost * 100.0 - fee_pct
+            upnl = value - cost - net - cost * fee_pct / 100.0
+            return value, upnl, upnl / cost * 100.0
+        return None
+
+    def live_reading(self, mint: str) -> Optional[Tuple[float, float, float]]:
+        """Open positions' Value / uPnL / % at the chart's price right now (user 2026-11-17: the table showed a
+        Jupiter quote up to 45 s old while the candles moved). None = no usable chart: the value loop's read stays."""
+        held, f = self.positions.get(mint), self.feeds.get(mint)
+        if not held or not f or not f.using or held.get("paused_at"):
+            return None
+        book = f.books.get(f.using)
+        if not book or not book.rows or time.time() - (book.rows[-1].t + 1000) / 1000.0 > 15:
+            return None
+        return self._chart_value(held, f, book.rows[-1].close)
+
+    def _fast_upct(self, held: Dict[str, Any], f: Feed, price: float) -> Optional[float]:
+        """Whole trade % after fees from the chart price (see _chart_value). Falls back to the value loop's fresh read."""
+        cv = self._chart_value(held, f, price)
+        if cv is not None:
+            return cv[2]
         up = held.get("upct")
         if up is not None and time.time() - float(held.get("value_at") or 0) <= 2.0:
             return float(up)
@@ -2243,11 +2267,13 @@ class CandleMomo:
         if c:
             real = c.get("real_sol")
             v = PC._sol_for_tokens(raw, c["virtual_token"], c["virtual_sol"], bps) / 1e9
+            self._val_at[mint] = time.time()
             return v, (real / 1e9 if real is not None else None), "curve"
         if why == "not_sol_quote":
             try:
                 v, real = await self._value_quoted(mint, raw, bps)
                 if v is not None:
+                    self._val_at[mint] = time.time()
                     return v, real, "curve·quote"
             except Exception:
                 log.debug("candle quoted value failed", exc_info=True)
@@ -2260,10 +2286,23 @@ class CandleMomo:
                 q = await asyncio.wait_for(jup.quote_token_to_sol(mint, raw, slippage_bps=1000), timeout=2.0)
                 if q and q.out_amount > 0:
                     self._jup_val[mint] = (q.out_amount / 1e9, time.time(), raw)
+                    self._val_at[mint] = self._jup_quote_time(jup, mint, raw)
                     return q.out_amount / 1e9, None, "jupiter"
             except Exception:
                 pass
         return (hit[0], None, "jupiter (old)") if hit and hit[2] == raw and time.time() - hit[1] < 20 else (None, None, "")
+
+    @staticmethod
+    def _jup_quote_time(jup, mint: str, raw: int) -> float:
+        """When Jupiter actually priced it: background quotes come from a cache up to 45 s old."""
+        try:
+            from src.execution.jupiter import SOL_MINT
+            hit = getattr(jup, "_quote_cache", {}).get(f"{mint}:{SOL_MINT}:{raw}:1000")
+            if hit:
+                return time.time() - max(0.0, time.monotonic() - float(hit[0]))
+        except Exception:
+            pass
+        return time.time()
 
     async def _value_quoted(self, mint: str, raw: int, bps: int) -> Tuple[Optional[float], Optional[float]]:
         """Value on a pump curve quoted in another coin: quote out of the curve x SOL per quote coin."""
@@ -3515,7 +3554,10 @@ class CandleMomo:
                         pos["upct"] = pos["upnl_sol"] / pos["entry_sol"] * 100.0 if pos["entry_sol"] else 0.0
                         try:
                             # selling the whole holding moves a thin curve: real value / chart value at this moment
-                            # scales the fast chart reading (2026-11-14: chart said +10%, the sale was under cost)
+                            # scales the fast chart reading (2026-11-14: chart said +10%, the sale was under cost).
+                            # Only on a FRESH price: re-scaling to an old Jupiter quote froze the reading (GEKKO)
+                            if time.time() - float(self._val_at.get(mint) or 0) > 2.0:
+                                raise LookupError("old price")
                             fv = self.feeds.get(mint)
                             px = fv.books[fv.using].rows[-1].close if fv and fv.using and fv.books[fv.using].rows else 0.0
                             lots_ = pos.get("lots") or []
@@ -3640,6 +3682,14 @@ class CandleMomo:
                                            "upnl_sol", "upct", "support", "value_src", "src", "paused_at", "resumed_at",
                                            "pause_state")}, lots=len(p.get("lots") or []) or 1)
                for p in self.positions.values()]
+        for row in pos:
+            try:
+                live = self.live_reading(row["mint"])        # follows the candles, refreshed on every page poll
+            except Exception:
+                live = None
+            if live is not None:
+                row.update(value_sol=live[0], upnl_sol=live[1], upct=live[2], quote_upct=row.get("upct"),
+                           value_src=f"chart · {row.get('value_src') or '—'}")
         recent = [{k: s.get(k) for k in ("id", "mint", "symbol", "ts", "side", "deltaPct", "candleTs", "provider",
                                          "feedLagMs", "action", "reason")} for s in list(self.recent)[:40]]
         try:

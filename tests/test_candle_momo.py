@@ -1393,3 +1393,25 @@ def test_unreadable_price_sets_the_trade_aside_after_90s(engine, monkeypatch, tm
             "entry_signal": "x", "unread_since": time.time() - 200}
     e.positions["LIVE"] = live
     assert asyncio.run(e._set_aside("LIVE", live)) is False and "LIVE" in e.positions
+
+
+def test_open_positions_follow_the_chart_not_an_old_quote():
+    """GEKKO 2026-11-17: a graduated coin's Jupiter quote is cached up to 45 s; Open positions showed it unchanged
+    while the candles moved. The table now reads the chart price; `impact` is only re-measured on a fresh price."""
+    import time as _t
+    from src.signal import candle_momo as CM
+    from src.signal import candle_core as C
+    e = CM.CandleMomo()
+    f = CM.Feed("M", e.cfg.count)
+    f.using = "pump_rest"
+    now_ms = int(_t.time() * 1000) // 1000 * 1000
+    f.books["pump_rest"].merge([C.Candle(t=now_ms, open=1.0, high=1.1, low=1.0, close=1.1, volume=1, final=False)])
+    e.feeds["M"] = f
+    e.positions["M"] = {"mint": "M", "mode": "paper", "entry_sol": 0.005, "upct": 0.5, "value_sol": 0.00503,
+                        "value_src": "jupiter", "impact": 1.0,
+                        "lots": [{"n": 1, "sol": 0.005, "px": 1.0, "src": "pump_rest"}]}
+    row = [p for p in e.snapshot()["positions"] if p["mint"] == "M"][0]
+    assert 9.0 < row["upct"] < 10.0 and row["quote_upct"] == 0.5 and row["value_src"].startswith("chart")
+    e.positions["M"]["paused_at"] = _t.time()                  # a paused coin keeps the value loop's read
+    row = [p for p in e.snapshot()["positions"] if p["mint"] == "M"][0]
+    assert row["upct"] == 0.5
