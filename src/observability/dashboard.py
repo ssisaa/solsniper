@@ -4404,6 +4404,11 @@ def start_http_static_server(port: int = DEFAULT_HTTP_PORT) -> ThreadingHTTPServ
                     out = _cm().call_threadsafe(_cm().reset)
                     self._json(200 if out.get("ok") else 400, out)
                     return
+                if isinstance(body, dict) and body.get("action") == "unsold_clear":
+                    # Unsold Coins page: Clear one row
+                    out = _cm().call_threadsafe(_cm().unsold_clear, str(body.get("mint") or ""), float(body.get("ts") or 0))
+                    self._json(200 if out.get("ok") else 400, out)
+                    return
                 if isinstance(body, dict) and body.get("action") in ("entry", "exit"):
                     # Chart buttons: manual Entry (open / add a lot) and Exit (sell all) on one coin.
                     out = _cm().call_threadsafe(_cm().manual, str(body.get("action")), str(body.get("mint") or ""))

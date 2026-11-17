@@ -1501,3 +1501,21 @@ def test_chart_marks_and_hint_use_the_same_reading_as_open_positions():
     k = e.chart_marks("M")
     assert abs(k["open"]["upct"] - row["upct"]) < 1e-9 and abs(k["open"]["value_sol"] - row["value_sol"]) < 1e-12
     assert f"now {row['upct']:+.1f}%" in k["hint"]["exit"] and k["open"]["quote_upct"] == -34.3
+
+
+def test_unsold_retry_gives_up_after_one_hour_and_clear_removes_a_row(monkeypatch):
+    import asyncio as _a
+    import time as _t
+    from src.signal import candle_momo as CM
+    e = CM.CandleMomo()
+    e.store = None
+    monkeypatch.setattr(e, "_unsold_file", lambda: "")
+    old = _t.time() - CM.UNSOLD_RETRY_S - 5
+    e.unsold = [{"ts": old, "mint": "M", "symbol": "S", "mode": "paper", "entry_sol": 0.005, "tokens": 1.0,
+                 "retry": True, "tries": 359},
+                {"ts": _t.time(), "mint": "N", "symbol": "T", "mode": "paper"}]
+    _a.run(e._unsold_retry())
+    assert CM.UNSOLD_RETRY_S == 3600.0 and e.unsold[0]["retry"] is False
+    assert "retried for 1 h (359 tries)" in e.unsold[0]["status"] and "retrying stopped" in e.unsold[0]["status"]
+    assert e.unsold_clear("M", old)["ok"] and [r["mint"] for r in e.unsold] == ["N"]
+    assert not e.unsold_clear("M", old)["ok"]

@@ -103,6 +103,11 @@ and it was re-added every 2 s ("Watching ADAWDD (mayhem holds it)" 116 times) �
 step. `_one_feed` and the support `want` now skip positions with `paused_at`. Same night pump answered HTTP 429 on every
 advanced-indexer board for this IP (board errors are only logged at debug: an empty pick with no log line = look there).
 
+**Unsold Coins: 1 h retry, Clear button (2026-11-18, user's request)**: `UNSOLD_RETRY_S` = 3600; after it the row's
+status says it was retried for 1 h (N tries), still no price, not sellable, retrying stopped. The Retry column now sits
+before Reason (it was off-screen at the right, so the user saw no retry although AI / Cyber had been re-priced) and each
+row has a Clear button (`POST /api/candle {action: "unsold_clear", mint, ts}` → `unsold_clear`; the closed trade stays).
+
 **One reading everywhere (2026-11-18, user's request)**: AI showed −8.95 % in Open positions and −34.3 % under the
 chart. The table used the chart price (`live_reading`), while the chart footer, avg / break-even / target lines
 (`chart_marks().open`) and the Exit hint (`_hint`) used the value loop's last Jupiter quote (up to 45 s old).

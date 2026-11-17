@@ -57,7 +57,7 @@ PRO_FIRST_START_CANDLES = 2    # first-buy "start": the chart counts as just sta
 PAUSED_DUST_SOL = 0.0002       # Paused Coins: a held paused coin worth less than this (or 2% of its cost) is left
 PAUSED_DUST_FRAC = 0.02
 SELL_FAILS_SET_ASIDE = 3       # paper sells in a row that could not read the price -> Unsold Coins (user 2026-11-18)
-UNSOLD_RETRY_S = 600.0         # the Unsold Coins page re-reads a paper coin's price this long (every 10 s)
+UNSOLD_RETRY_S = 3600.0        # the Unsold Coins page re-reads a paper coin's price this long (every 10 s; user 2026-11-18: 1 h)
 UNREAD_SET_ASIDE_S = 90.0      # an open trade whose price cannot be read this long is set aside (Unsold Coins page)
 NO_ROUTE = ("graduated", "not_on_curve", "not_sol_quote")
 # Candles' Mixed feed boards, in turn order (user 2026-11-16: Graduated removed, Trending added in its place).
@@ -1135,7 +1135,9 @@ class CandleMomo:
             if not row.get("retry") or row.get("mode") == "live":
                 continue
             if now - float(row.get("ts") or now) > UNSOLD_RETRY_S:
-                row.update(retry=False, status="gave up — stays booked at its last value")
+                row.update(retry=False, status=f"retried for {UNSOLD_RETRY_S / 3600:g} h ({int(row.get('tries') or 0)} tries) "
+                                               "and the price still could not be read — not sellable, retrying stopped; "
+                                               "it stays booked at its last value")
                 changed = True
                 continue
             if now - float(row.get("tried_at") or 0) < 10:
@@ -1162,6 +1164,16 @@ class CandleMomo:
             changed = True
         if changed:
             self._unsold_add_save()
+
+    def unsold_clear(self, mint: str, ts: float) -> Dict[str, Any]:
+        """Unsold Coins page: the Clear button removes one row (its closed trade stays in Closed trades)."""
+        before = len(self.unsold)
+        self.unsold = [r for r in self.unsold
+                       if not (r.get("mint") == mint and abs(float(r.get("ts") or 0) - float(ts or 0)) < 0.5)]
+        if len(self.unsold) == before:
+            return {"ok": False, "error": "That row is not on the Unsold Coins page any more"}
+        self._unsold_add_save()
+        return {"ok": True, "unsold": self.unsold_view()}
 
     def unsold_view(self) -> List[Dict[str, Any]]:
         return list(reversed(self.unsold))[:100]
@@ -1192,7 +1204,7 @@ class CandleMomo:
         last = pos.get("value_sol")
         reason = ((why_now or f"price unreadable for {waited:.0f}s") + f" — {cause}; set aside"
                   + (", NOT sold (the coins are still in the wallet)" if live else
-                     f", booked at its last value; the price is re-read here every 10 s for {UNSOLD_RETRY_S / 60:.0f} min"))
+                     f", booked at its last value; the price is re-read here every 10 s for up to {UNSOLD_RETRY_S / 3600:g} h"))
         row = {"ts": round(now, 1), "mint": mint, "symbol": pos.get("symbol") or mint[:6],
                "mode": pos.get("mode"), "src": pos.get("src"), "lots": len(pos.get("lots") or []) or 1,
                "entry_sol": pos.get("entry_sol"), "last_value_sol": last,
