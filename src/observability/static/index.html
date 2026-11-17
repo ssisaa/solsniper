@@ -1240,6 +1240,8 @@ header nav.nav .navbtn[hidden]{display:none}
         <span class="cm-feeds" title="Extra entries for rule pro_hold (it always buys on ◆ BP). Exits stay: sell on the first red candle once the trade is in profit, else Max hold.">pro_hold also buys:
           <label title="A new coin (60 s old or younger) is bought on its first candle. Test on 74 unseen coins: 58% won, median +7.6%."><input type="checkbox" id="cmPhFirst"/> first candle</label>
           <select id="cmPhFirstAt" title="When the first-candle buy fires. Buy green after red: every time a green starts right after a red candle — when flat and the coin is under its high, or (holding) while the trade is in a loss, buying again up to Total cap; in profit it only sells. No candles yet (0.00%): only while the chart shows just the price line (one flat reading, no candle body). At once (0.00%): every coin Candles is given is bought the moment its chart is first read, before any move (any age). At the start: as soon as the new coin's chart begins (one or two candles, no move up or down yet). First green: when the price first starts going up (after any red). Buy green after red – low below: lot 1 at the start; each next lot on a green after a red only when that red's low and the green's open are not higher than the previous lot's low (lot 2 below lot 1, lot 3 below lot 2 …). Buy only on the ▲ BUY signal: no buy at the start — a lot is bought only when the chart shows the green ▲ BUY tag; every new ▲ BUY adds a lot up to Max lots / Total cap; sells at the profit target. Buy only on ◆ BP BUY: no buy at the start — lot 1 on the first gold ◆ BP BUY; a later ◆ BP BUY buys only when its candle closed at least 25% below the candle of the lot before (not on every tag), up to Max lots / Total cap; sells at the profit target."><option value="now">at once (0.00%) — always buys</option><option value="flat">no candles yet (0.00%)</option><option value="start">at the start</option><option value="green">first green</option><option value="gar">buy green after red</option><option value="gar_low">buy green after red – low below</option><option value="signal">buy only on the ▲ BUY signal</option><option value="bp">buy only on ◆ BP BUY – each lot 25% lower</option></select>
+          <label title="Buy green after red – low below, and Buy only on ◆ BP BUY: lot 2 must be at least this % below lot 1 (its low / its candle's close).">Lotlow % <input class="cm-in" id="cmLotLow" type="number" min="0" max="1000" step="1"/></label>
+          <label title="From lot 3 on, each lot must be this many times further below the lot before than the last step (Lotlow 33, xtimes 2: L2 33 %, L3 66 %, L4 132 % …). 1 = every lot Lotlow % lower. A step of 100 % or more can never happen, so no further lot is bought. Max lots and Total cap still limit the lots.">xtimes <input class="cm-in" id="cmLotX" type="number" min="1" max="10" step="0.1"/></label>
           <label title="The chart's green ▲ BUY (Pro Trader). Weaker in tests: 47% won, about −1.9% per trade without the top 10%."><input type="checkbox" id="cmPhPro"/> ▲ BUY</label>
         </span>
         <label>Min Δ % <input class="cm-in" id="cmDelta" type="number" step="0.1" min="0"/></label>
@@ -4455,6 +4457,8 @@ function paintCandle(d){
       document.getElementById('cmPhFirst').checked=c.pro_hold_first!==false;
       document.getElementById('cmPhFirstAt').value=c.pro_hold_first_at||'start';
       document.getElementById('cmPhPro').checked=c.pro_hold_pro_buy!==false;
+      document.getElementById('cmLotLow').value=c.lot_low_pct!=null?c.lot_low_pct:25;
+      document.getElementById('cmLotX').value=c.lot_x_times!=null?c.lot_x_times:1;
       document.querySelectorAll('.cm-feed').forEach(b=>{ b.checked=(b.dataset.feed===(c.auto_follow||'mayhem_board')); });
       document.getElementById('cmMints').value=(c.mints||[]).join(' ');
       document.getElementById('cmPinProfit').value=c.pinned_min_profit_pct!=null?c.pinned_min_profit_pct:1.5;
@@ -4583,6 +4587,7 @@ document.getElementById('cmApply').addEventListener('click',()=>{
           sell_only_in_profit:document.getElementById('cmProfitOnly').checked, min_profit_pct:document.getElementById('cmMinProfit').value,
           max_hold_s:document.getElementById('cmMaxHold').value,
           loss_pause_n:document.getElementById('cmLossN').value, loss_pause_s:document.getElementById('cmLossS').value,
+          lot_low_pct:document.getElementById('cmLotLow').value, lot_x_times:document.getElementById('cmLotX').value,
           min_reserve_sol:document.getElementById('cmMinRes').value, max_entry_red_pct:document.getElementById('cmMaxRed').value,
           inflow_window_s:document.getElementById('cmInflow').value, max_below_peak_pct:document.getElementById('cmBelowPeak').value, exit_reserve_sol:document.getElementById('cmExitRes').value}, 'Settings');
 });

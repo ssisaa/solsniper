@@ -894,6 +894,7 @@ def _garl(tmp_path, monkeypatch, candles, lots):
     from src.signal import candle_core as C
     e, f, routed = _ph_first_engine(tmp_path, monkeypatch, 30)
     e.cfg.pro_hold_first_at = "gar_low"
+    e.cfg.lot_low_pct, e.cfg.lot_x_times = 0.0, 1.0      # Lotlow 0 % = the original rule: any lower low
     f.first_done = True
     book = f.books["pump_rest"]
     t = book.rows[-1].t
@@ -1114,3 +1115,31 @@ def test_bp_only_no_second_lot1_while_buying_and_no_rebuy_when_reuse_is_off(tmp_
     e.cfg.reuse_coin = True
     candle()
     assert len([r for r in routed if r["side"] == "BUY"]) == 1
+
+
+def test_lot_need_pct_lotlow_and_xtimes():
+    """Candles page Lotlow % / xtimes (user 2026-11-17): L2 33 %, L3 66 %, L4 132 % (never reached) with 33 / 2."""
+    from src.signal import candle_momo as CM
+    e = CM.CandleMomo()
+    e.cfg.lot_low_pct, e.cfg.lot_x_times = 33.0, 2.0
+    assert e.lot_need_pct({"lots": [{"n": 1}]}) == 33.0
+    assert e.lot_need_pct({"lots": [{"n": 1}, {"n": 2}]}) == 66.0
+    assert e.lot_need_pct({"lots": [{"n": 1}, {"n": 2}, {"n": 3}]}) == 132.0
+    e.cfg.lot_low_pct, e.cfg.lot_x_times = 25.0, 1.0                 # the defaults: every lot 25 % lower
+    assert e.lot_need_pct({"lots": [{"n": 1}, {"n": 2}]}) == 25.0
+
+
+def test_gar_low_lot2_needs_lotlow_pct(tmp_path, monkeypatch):
+    """Lotlow 25 %: L1's candle low 1.9; red low / green open 1.5 is only 21 % lower -> no lot 2; 1.4 (26 %) -> lot 2."""
+    e, f, routed = _garl(tmp_path, monkeypatch, [(2.0, 2.1, 1.9, 2.0), (2.0, 2.0, 1.5, 1.5), (1.5, 1.6, 1.5, 1.6)],
+                         [{"n": 1, "k": 0}])
+    e.cfg.lot_low_pct = 25.0
+    n = len(routed)
+    e._evaluate(f, time.time())
+    assert len(routed) == n
+    e2, f2, routed2 = _garl(tmp_path, monkeypatch, [(2.0, 2.1, 1.9, 2.0), (2.0, 2.0, 1.4, 1.4), (1.4, 1.5, 1.4, 1.5)],
+                            [{"n": 1, "k": 0}])
+    e2.cfg.lot_low_pct = 25.0
+    n2 = len(routed2)
+    e2._evaluate(f2, time.time())
+    assert len(routed2) == n2 + 1 and "needs 25%" in routed2[-1]["pro_why"]

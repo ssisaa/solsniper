@@ -103,6 +103,13 @@ and it was re-added every 2 s ("Watching ADAWDD (mayhem holds it)" 116 times) �
 step. `_one_feed` and the support `want` now skip positions with `paused_at`. Same night pump answered HTTP 429 on every
 advanced-indexer board for this IP (board errors are only logged at debug: an empty pick with no log line = look there).
 
+**Lotlow % / xtimes (2026-11-17, user's request)**: Candles page fields next to the pro_hold first-buy dropdown
+(`lot_low_pct` default 25, `lot_x_times` default 1). Used by "buy green after red – low below" (`gar_low`) and "buy only
+on ◆ BP BUY" (`bp`): lot 2 must be ≥ Lotlow % below lot 1 (gar_low: the red's low AND the green's open under the last
+lot's low by that much; bp: the candle close under the last lot's candle), and each later lot xtimes the step before
+(`lot_need_pct`: 33 / 2 → L2 33 %, L3 66 %, L4 132 %). A step ≥ 100 % can never happen → no further lot. Max lots /
+Total cap still apply. gar_low was "any lower" before; Lotlow 0 restores that. Replaces the fixed `BP_LOWER_PCT`.
+
 **Pump rate limit back-off (2026-11-17)**: every pump page showed "HTTPStatusError" and no coin was scanned for 20+ min —
 pump answered HTTP 429 on all hosts for this connection and `fast_get` did not slow down on a 429 at all (only 403 had a
 cool-down). Now `_rate_limited(url)`: more than 2 × 429 from a host inside 3 min pauses EVERY read of that host 5 s, 10,

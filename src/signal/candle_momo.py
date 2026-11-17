@@ -64,7 +64,7 @@ CANDLE_MIXED_GROUPS = ("new", "movers", "trending")
 TRENDING_URL = ("https://advanced-indexer.pump.fun/boards/trending?tier=web&surface=TRENDING&platform=WEB&limit=150"
                 "&chains=solana&offset=0&ranking=social&window=1h&hot=label&includeFollowedHolders=true"
                 "&followedHoldersLimit=5")
-BP_LOWER_PCT = 25.0            # pro_hold "buy only on ◆ BP BUY": each next lot's candle is at least this far below the last lot's
+BP_LOWER_PCT = 25.0            # default of Config.lot_low_pct (Candles page "Lotlow %"; lot_need_pct() is what is used)
 PRO_FIRST_MAX_AGE_S = 60.0     # pro_hold first-candle buy: only coins this young (a new coin's first candle)
 SKIP_REASONS = ("KILLED", "NO_POSITION", "ALREADY_LONG", "ENTRIES_PAUSED", "FEED_DEGRADED", "STALE_FEED",
                 "BLACKLIST", "NOT_WHITELISTED", "DAILY_LOSS", "RATE_LIMIT", "COOLDOWN", "MAX_EXPOSURE",
@@ -1577,6 +1577,14 @@ class CandleMomo:
             px = float(self._px_at(f, ts) or 0)
         return {"flow": None, "holding": {"entry": px, "held": time.time() - ts} if px > 0 else None}
 
+    def lot_need_pct(self, held: Optional[Dict[str, Any]]) -> float:
+        """How far (%) the next lot must sit below the lot before, for "green after red – low below" and "only on
+        ◆ BP BUY" (user 2026-11-17): L2 = Lotlow %, then each lot xtimes the one before (33 / 2: L2 33 %, L3 66 %,
+        L4 132 % ...). 100 % or more cannot happen, so no further lot is bought."""
+        lots = (held or {}).get("lots")
+        nxt = (len(lots) if isinstance(lots, list) else int(lots or 1)) + 1
+        return float(self.cfg.lot_low_pct) * float(self.cfg.lot_x_times) ** max(0, nxt - 2)
+
     def _gar(self, f: Feed, live_rows: List[Candle], held: Optional[Dict[str, Any]], seen: float) -> bool:
         """pro_hold "buy green after red" (user 2026-11-14): the candle now forming trades above its open right after
         a red candle = a green after a red. Buys then when flat and the coin is down from its high, or adds a lot
@@ -1590,12 +1598,18 @@ class CandleMomo:
             # "buy green after red – low below" (user 2026-11-15): a new lot only when the red candle's low AND this
             # green's open are not higher than the previous lot's low (L1: the low of the candle it was bought in;
             # later lots: their own red's low / green's open). Each lot sits lower than the one before.
+            # Lotlow % / xtimes (user 2026-11-17): both must also be at least lot_need_pct() below that low.
             ref = self._lot_low(held, live_rows, f.using)
             low_ref = min(prev.low, c.open)
-            if ref is None or held.get("closing") or not (prev.low < ref and c.open < ref):
+            need = self.lot_need_pct(held)
+            if ref is None or held.get("closing") or need >= 100:
                 return False
-            why = (f"green after red, low below — red low {prev.low:.4g} and green open {c.open:.4g} are under the "
-                   f"last lot's low {ref:.4g}: buys again lower (sells on profit)")
+            thr = ref * (1 - need / 100.0)
+            if not (prev.low < thr and c.open < thr):
+                return False
+            why = (f"green after red, low below — red low {prev.low:.4g} and green open {c.open:.4g} are "
+                   f"{(1 - max(prev.low, c.open) / ref) * 100:.0f}% under the last lot's low {ref:.4g} "
+                   f"(needs {need:g}%): buys again lower (sells on profit)")
         elif held is None:
             peak = max(x.high for x in live_rows)
             if not (peak > 0 and c.close < peak):
@@ -1878,10 +1892,11 @@ class CandleMomo:
         bp_add = False
         if bp_only and held is not None and a.get("call") == "BUY":
             ref = self._lot_close(held, rows, f.using)
-            if ref and cur.close <= ref * (1 - BP_LOWER_PCT / 100.0):
+            need = self.lot_need_pct(held)               # Lotlow % / xtimes on the Candles page (user 2026-11-17)
+            if ref and need < 100 and cur.close <= ref * (1 - need / 100.0):
                 bp_add = True
                 a = dict(a, why=f"◆ BP BUY — {(1 - cur.close / ref) * 100:.0f}% below the last lot's candle "
-                                f"(needs {BP_LOWER_PCT:g}%): {a.get('why') or ''}")
+                                f"(needs {need:g}%): {a.get('why') or ''}")
         if a.get("call") == "BUY" and held is None and (sig_only or bp_only) and (
                 f.mint in self.busy or f.mint in self.pending
                 or (not self.cfg.reuse_coin and f.mint in self.traded)):
