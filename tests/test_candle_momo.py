@@ -1463,12 +1463,13 @@ def test_three_unreadable_sells_set_aside_and_retry_corrects(monkeypatch, tmp_pa
     e.cfg.fill_lag_ms = 0
 
     async def go():
-        for i in range(3):
+        for i in range(CM.SELL_FAILS_SET_ASIDE):
             await e._paper_sell({"id": f"s{i}", "mint": "M", "side": "SELL", "seen": _t.time(), "candleTs": 1,
                                  "symbol": "S"}, "green")
         await _a.sleep(0.05)
     _a.run(go())
-    assert e.positions["M"]["sell_fails"] == 3 and asides and "3 sells" in asides[0]
+    assert CM.SELL_FAILS_SET_ASIDE == 7
+    assert e.positions["M"]["sell_fails"] == 7 and len(asides) == 1 and "7 sells" in asides[0]
     # the Unsold page retry
     e.unsold = [{"ts": _t.time(), "mint": "M", "symbol": "S", "mode": "paper", "entry_sol": 0.005, "tokens": 1000.0,
                  "retry": True, "status": "retrying"}]

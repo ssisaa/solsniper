@@ -135,7 +135,7 @@ bought on the other chart).
 then 7 paper sells failed "price unreadable" over 6 min while the value loop priced it — the paper sell's Jupiter quote
 (non-urgent) was skipped by the background Jupiter limiter. (1) `_paper_sell`: no Jupiter quote → priced from
 `live_reading()` (chart × impact), else a value read ≤ 15 s old (reason "… priced from the chart"). (2) Still no price:
-`pos["sell_fails"]` counts; at `SELL_FAILS_SET_ASIDE` 3 the trade goes to `_set_aside` at once (not after 90 s), booked at
+`pos["sell_fails"]` counts; at `SELL_FAILS_SET_ASIDE` 7 (was 3; user 2026-11-18) the trade goes to `_set_aside` at once (not after 90 s), booked at
 its last value, next coin comes. (3) Unsold Coins page, paper rows: `retry` — `_unsold_retry` (value loop) re-reads the
 price every 10 s for `UNSOLD_RETRY_S` 10 min; on a read the booked closed trade is corrected (`store.set_trade_cash`,
 row `trade_id`), status shown in the new Retry column. LIVE set-aside is unchanged (only with no price route; coins stay
