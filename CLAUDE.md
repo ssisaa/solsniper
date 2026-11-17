@@ -103,6 +103,14 @@ and it was re-added every 2 s ("Watching ADAWDD (mayhem holds it)" 116 times) �
 step. `_one_feed` and the support `want` now skip positions with `paused_at`. Same night pump answered HTTP 429 on every
 advanced-indexer board for this IP (board errors are only logged at debug: an empty pick with no log line = look there).
 
+**gar_low decides every buy (2026-11-18, user's request)**: Cyber (Lotlow 33 %, xtimes 2) got L2 from ▲ BUY 15.1 %
+below L1 and L3 from ◆ BP 3.1 % below L2. With `pro_hold_first_at` = `gar_low`, `_pro_evaluate` now turns every ◆ BP /
+▲ BUY call into WAIT (flat or holding): only "green after red – low below" buys, so every add obeys Lotlow / xtimes.
+Plain "gar" and the other choices still buy on ◆ BP / ▲ BUY. The "+5115 %" / "+7,528,904 %" take-profit readings on Cyber
+(refused by the break-even floor) came from PumpSwap events of OTHER pools in routed swaps (a 0.15 "price" vs
+4.1e-7): `amm_own_pool` keeps only the coin's pool (the one seen most often; ≥ 3 events when several are seen), and
+`StreamProvider.on_trade` drops a trade 5x off the last close unless 3 in a row agree on the new level.
+
 **Unsold Coins: 1 h retry, Clear button (2026-11-18, user's request)**: `UNSOLD_RETRY_S` = 3600; after it the row's
 status says it was retried for 1 h (N tries), still no price, not sellable, retrying stopped. The Retry column now sits
 before Reason (it was off-screen at the right, so the user saw no retry although AI / Cyber had been re-priced) and each

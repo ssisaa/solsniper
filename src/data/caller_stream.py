@@ -122,8 +122,23 @@ def decode_amm_logs(logs: List[str], mint: str) -> List[Dict[str, Any]]:
             "traderPublicKey": _b58(raw[152:184]),
             "newTokenBalance": None,
             "pool": "pump-amm",
+            "pool_key": raw[120:152].hex(),
         })
     return out
+
+
+def amm_own_pool(counts: Dict[str, int], trades: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Only the coin's own PumpSwap pool. A routed swap logs one event per pool it passes (Cyber 2026-11-18: a
+    0.15 SOL "price" from another pool made a +7,528,904 % take-profit reading). Every transaction found by the
+    coin's subscription touches its pool, so the pool seen most often is the coin's; others are dropped."""
+    for t in trades:
+        counts[t["pool_key"]] = counts.get(t["pool_key"], 0) + 1
+    if not counts:
+        return []
+    top, n = max(counts.items(), key=lambda kv: kv[1])
+    if len(counts) > 1 and n < 3:
+        return []                  # not sure yet which pool is the coin's
+    return [t for t in trades if t["pool_key"] == top]
 
 
 def _rpc_http() -> str:
@@ -514,6 +529,7 @@ class CallerStream:
             log.info("CALLER STREAM connected — RPC logs %s", url.split("?")[0])
             by_key: Dict[str, int] = {}        # wallet or mint -> subscription id
             by_sid: Dict[int, str] = {}        # subscription id -> wallet or mint (PumpSwap events carry no mint)
+            amm_pools: Dict[str, Dict[str, int]] = {}   # coin -> PumpSwap pool -> events seen (its own pool wins)
             pending: Dict[int, str] = {}       # request id -> key
             unsub_ids: Set[int] = set()
             refused: Dict[str, float] = {}     # key -> time it may be asked again
@@ -591,7 +607,9 @@ class CallerStream:
                     # API, 1-4 s late. Only for a coin subscription (a wallet's has no coin to name).
                     key = by_sid.get(int((msg.get("params") or {}).get("subscription") or -1), "")
                     if key and key not in want_w:
-                        trades = decode_amm_logs(logs, key)
+                        trades = amm_own_pool(amm_pools.setdefault(key, {}), decode_amm_logs(logs, key))
+                        if len(amm_pools) > 200:
+                            amm_pools.pop(next(iter(amm_pools)))
                 for trade in trades:
                     trade["signature"] = sig
                     trade["_src"] = "rl"

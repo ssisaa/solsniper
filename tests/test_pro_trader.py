@@ -1143,3 +1143,24 @@ def test_gar_low_lot2_needs_lotlow_pct(tmp_path, monkeypatch):
     n2 = len(routed2)
     e2._evaluate(f2, time.time())
     assert len(routed2) == n2 + 1 and "needs 25%" in routed2[-1]["pro_why"]
+
+
+def test_gar_low_ignores_bp_and_pro_buy_signals(tmp_path, monkeypatch):
+    """Cyber 2026-11-18: with "green after red – low below" chosen, ◆ BP and ▲ BUY added lots 15 % / 3 % lower,
+    ignoring Lotlow 33 % / xtimes 2. Under gar_low only its own rule buys."""
+    from src.signal import botpredict as BPm
+    from src.signal import pro_trader as PT
+    # all greens: no green-after-red, so only a ◆ BP / ▲ BUY signal could buy
+    e, f, routed = _garl(tmp_path, monkeypatch, [(1.0, 1.1, 1.0, 1.05), (1.05, 1.1, 1.05, 1.08), (1.08, 1.1, 1.08, 1.09)],
+                         [{"n": 1, "k": 0}])
+    e.cfg.pro_hold_pro_buy = True
+    monkeypatch.setattr(BPm, "analyze", lambda cs, h=None: {"call": "BUY", "px": 1.0, "why": "BP"})
+    monkeypatch.setattr(PT, "analyze", lambda cs, a=None, b=None: {"call": "BUY", "px": 1.0, "why": "PT"})
+    f.last_eval_t = None
+    e._evaluate(f, time.time())
+    e._evaluate(f, time.time())
+    assert not [r for r in routed if r["side"] == "BUY"]
+    e.cfg.pro_hold_first_at = "gar"                      # plain "gar" keeps the ◆ BP / ▲ BUY buys
+    f.last_eval_t = 0
+    e._evaluate(f, time.time())
+    assert [r for r in routed if r["side"] == "BUY"]

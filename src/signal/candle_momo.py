@@ -105,6 +105,7 @@ class StreamProvider(CandleProvider):
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.bars: Dict[str, Dict[int, List[float]]] = {}    # mint -> t -> [open, high, low, close, vol]
+        self.odd: Dict[str, List[float]] = {}                # mint -> recent trade prices 5x off the last close
         self.wanted: set = set()
 
     def on_trade(self, ev: Dict[str, Any]) -> None:
@@ -121,6 +122,16 @@ class StreamProvider(CandleProvider):
         t = int(float(ev.get("ts") or time.time())) * 1000
         with self.lock:
             bars = self.bars.setdefault(mint, {})
+            if bars:
+                last = bars[max(bars)][3]
+                if last > 0 and not (last / 5.0 <= px <= last * 5.0):
+                    # a trade 5x off the last price is another pool / a bad read, not this coin's price — unless 3
+                    # trades in a row agree on the new level (a real crash or pump moves there and stays)
+                    odd = [x for x in self.odd.get(mint, []) if px / 1.5 <= x <= px * 1.5] + [px]
+                    self.odd[mint] = odd[-3:]
+                    if len(odd) < 3:
+                        return
+                self.odd.pop(mint, None)
             b = bars.get(t)
             if b is None:
                 bars[t] = [px, px, px, px, float(ev.get("sol") or 0)]
@@ -2041,6 +2052,11 @@ class CandleMomo:
             a = PT.analyze(cs, None, ctx["holding"])
         was_buy = bool(getattr(f, "pro_was_buy", False))
         f.pro_was_buy = a.get("call") == "BUY"
+        if (a.get("call") == "BUY" and cfg.rule == "pro_hold" and cfg.pro_hold_first
+                and cfg.pro_hold_first_at == "gar_low" and not pinned):
+            # "buy green after red – low below" decides every buy (user 2026-11-18: Cyber's L2 came from ▲ BUY 15 %
+            # below L1 and L3 from ◆ BP 3 % below L2, with Lotlow 33 % / xtimes 2): no ◆ BP / ▲ BUY buy at all
+            a = {"call": "WAIT"}
         bp_add = False
         if bp_only and held is not None and a.get("call") == "BUY":
             ref = self._lot_close(held, rows, f.using)

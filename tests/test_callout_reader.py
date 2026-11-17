@@ -51,3 +51,34 @@ def test_lot_on_the_other_chart_is_converted():
                         "lots": [{"n": 1, "sol": 0.005, "px": 100.0, "src": "pump_rest"}]}
     v, _u, pct = e.live_reading("M")
     assert 9.0 < pct < 10.0
+
+
+def test_amm_keeps_only_the_coins_own_pool():
+    from src.data import caller_stream as S
+    counts = {}
+    mine = {"pool_key": "aa", "solAmount": 1.0, "tokenAmount": 1e6}
+    other = {"pool_key": "bb", "solAmount": 100.0, "tokenAmount": 1.0}
+    assert S.amm_own_pool(counts, [mine]) == [mine]                     # one pool seen: it is the coin's
+    assert S.amm_own_pool(counts, [mine, other]) == []                  # two pools, not sure yet
+    assert S.amm_own_pool(counts, [mine]) == [mine]                     # 3 events on "aa": it wins
+    assert S.amm_own_pool(counts, [other, mine]) == [mine]
+
+
+def test_stream_drops_a_price_5x_off():
+    from src.signal.candle_momo import StreamProvider
+    sp = StreamProvider()
+    sp.wanted = {"M"}
+    sp.on_trade({"mint": "M", "trade_px": 4e-7, "ts": 100.0, "sol": 1})
+    sp.on_trade({"mint": "M", "trade_px": 0.15, "ts": 100.5, "sol": 1})
+    sp.on_trade({"mint": "M", "trade_px": 4.2e-7, "ts": 101.0, "sol": 1})
+    assert max(b[1] for b in sp.bars["M"].values()) < 1e-6
+
+
+def test_stream_follows_a_real_crash_after_three_trades():
+    from src.signal.candle_momo import StreamProvider
+    sp = StreamProvider()
+    sp.wanted = {"M"}
+    sp.on_trade({"mint": "M", "trade_px": 1e-6, "ts": 100.0, "sol": 1})
+    for i, px in enumerate((1e-7, 1.05e-7, 0.98e-7)):
+        sp.on_trade({"mint": "M", "trade_px": px, "ts": 101.0 + i, "sol": 1})
+    assert sp.bars["M"][max(sp.bars["M"])][3] == 0.98e-7
