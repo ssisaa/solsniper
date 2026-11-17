@@ -1319,6 +1319,7 @@ header nav.nav .navbtn[hidden]{display:none}
           <div class="cm-cread" id="cmChartRead">—</div>
           <div class="m2-desk" id="cmDesk" title="Pro Trader: reads this 1s chart every second like a day trader. With Rule = pro the Candles page trades this call."><div class="dk-call WAIT"><span class="dk-tag">WAIT</span><span class="dk-sub">reading the chart…</span></div><div class="dk-row muted">Pro Trader desk</div></div>
           <div class="cm-chartwrap"><canvas id="cmChart"></canvas><div class="cm-chartmsg" id="cmChartMsg">Waiting for a coin…</div></div>
+          <div id="cmLotRows" class="cm-cfoot" style="gap:6px 16px"></div>
           <div class="cm-cfoot"><span><i class="k up"></i>entry / lot</span><span><i class="k dn"></i>exit</span><span><i class="k avg"></i>avg entry</span><span><i class="k tgt"></i>sell target</span><span><i class="k nxt"></i>next lot only below</span><span><i class="k sig"></i>signal (filled / skipped)</span><span id="cmChartPos" class="cm-cpos"></span></div>
         </div>
       </div>
@@ -5057,6 +5058,21 @@ async function cmLoadChart(){
   }catch(e){}finally{ _cmChart.busy=false; }
 }
 function cmCandleAt(cs, tsSec){ const t=Math.floor(tsSec)*1000; let best=null; for(const x of cs){ if(x.t<=t) best=x; else break; } return best||cs[0]; }
+// Lots line under the chart (user 2026-11-18): when / at what price each lot was bought, how far below the lot before,
+// and where the next lot may buy under "green after red – low below" / "only on ◆ BP BUY"
+function cmPaintLots(open){
+  const el=document.getElementById('cmLotRows'); if(!el) return;
+  const lr=open&&open.lotRows; if(!lr||!(lr.lots||[]).length){ el.innerHTML=''; return; }
+  const pc=v=>v==null?'—':((v>=0?'+':'')+Number(v).toFixed(1)+'%');
+  let h=lr.lots.map(l=>`<span><b>L${l.n||'?'}</b> ${l.ts?m2Clock(l.ts):'—'} · ${l.px?m2Px(l.px):'—'}`
+    +(l.vsPrev!=null?` · <span class="${l.vsPrev<0?'g':'r'}">${pc(l.vsPrev)} vs L${(l.n||1)-1}</span>`:'')
+    +` · now <span class="${m2Cls(l.toNow)}">${pc(l.toNow)}</span></span>`).join('');
+  if(lr.nextN){
+    h+=lr.needPct>=100?`<span class="muted">L${lr.nextN}: needs ${Number(lr.needPct).toFixed(0)}% lower — can never happen, no more lots</span>`
+      :`<span class="muted">L${lr.nextN} only at or below ${lr.nextBelow?m2Px(lr.nextBelow):'—'} (${Number(lr.needPct).toFixed(0)}% under the ${escapeHtml(lr.refWhat||'')} ${lr.refPx?m2Px(lr.refPx):'—'})</span>`;
+  }
+  el.innerHTML=h;
+}
 function cmDrawChart(){
   const cv=document.getElementById('cmChart'); if(!cv) return;
   const wrap=cv.parentElement, W=wrap.clientWidth, H=wrap.clientHeight; if(!W||!H) return;
@@ -5066,6 +5082,7 @@ function cmDrawChart(){
   const cs=_cmChart.candles, rd=document.getElementById('cmChartRead'), posEl=document.getElementById('cmChartPos');
   const mk=_cmChart.marks||{}, open=mk.open, hint=mk.hint||{};
   if(posEl) posEl.innerHTML=open?`${open.mode==='live'?'<b class="r">LIVE</b> ':''}${open.support?escapeHtml(open.support)+' · ':''}${(open.lots||[]).length||1} lot${((open.lots||[]).length||1)>1?'s':''} · ${Number(open.entry_sol||0).toFixed(4)} SOL${open.value_sol!=null?' → '+Number(open.value_sol).toFixed(4):''} · <span class="${m2Cls(open.upct)}">${m2Pct(open.upct)}</span>`:'flat';
+  cmPaintLots(open);
   if(!cs.length){ if(rd) rd.textContent='—'; return; }
   const expanded=document.getElementById('cmChartBox').classList.contains('expanded');
   const pro=_cmChart.pro&&_cmChart.pro.ok?_cmChart.pro:null, PL=pro&&pro.lines?pro.lines:null;

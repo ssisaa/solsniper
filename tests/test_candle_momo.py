@@ -1519,3 +1519,47 @@ def test_unsold_retry_gives_up_after_one_hour_and_clear_removes_a_row(monkeypatc
     assert "retried for 1 h (359 tries)" in e.unsold[0]["status"] and "retrying stopped" in e.unsold[0]["status"]
     assert e.unsold_clear("M", old)["ok"] and [r["mint"] for r in e.unsold] == ["N"]
     assert not e.unsold_clear("M", old)["ok"]
+
+
+def test_lot_rows_for_the_chart():
+    """Lots line under the chart: time, price, % vs the lot before, % to now, next lot level (gar_low 33 / 2)."""
+    import time as _t
+    from src.signal import candle_momo as CM
+    from src.signal import candle_core as C
+    e = CM.CandleMomo()
+    e.store = None
+    e.cfg.rule, e.cfg.pro_hold_first, e.cfg.pro_hold_first_at = "pro_hold", True, "gar_low"
+    e.cfg.lot_low_pct, e.cfg.lot_x_times = 33.0, 2.0
+    f = CM.Feed("M", e.cfg.count)
+    f.using = "stream"
+    t0 = (int(_t.time()) - 5) * 1000
+    f.books["stream"].merge([C.Candle(t=t0, open=1.0, high=1.0, low=0.9, close=1.0, volume=1, final=True),
+                             C.Candle(t=t0 + 1000, open=1.0, high=1.0, low=0.6, close=0.6, volume=1, final=False)])
+    e.feeds["M"] = f
+    e.positions["M"] = {"mint": "M", "mode": "paper", "entry_sol": 0.01, "entry_ts": _t.time() - 5,
+                        "lots": [{"n": 1, "sol": 0.005, "px": 1.0, "src": "stream", "lot_t": t0},
+                                 {"n": 2, "sol": 0.005, "px": 0.6, "src": "stream", "lot_t": t0 + 1000, "low_ref": 0.6}]}
+    lr = e.chart_marks("M")["open"]["lotRows"]
+    l1, l2 = lr["lots"]
+    assert l1["px"] == 1.0 and l1["vsPrev"] is None and abs(l1["toNow"] + 40) < 1e-9
+    assert abs(l2["vsPrev"] + 40) < 1e-9
+    assert lr["nextN"] == 3 and lr["needPct"] == 66.0 and abs(lr["nextBelow"] - 0.6 * 0.34) < 1e-9
+
+
+def test_lot_low_from_the_chart_the_lot_was_bought_on():
+    """GEKKO 2026-11-18: lot 1 on pump_rest, the stream chart only has candles since a restart -> the low comes from
+    pump_rest's candle at lot_t, converted by the two charts' ratio."""
+    import time as _t
+    from src.signal import candle_momo as CM
+    from src.signal import candle_core as C
+    f = CM.Feed("M", 30)
+    f.using = "stream"
+    t0 = (int(_t.time()) - 60) * 1000
+    f.books["pump_rest"].merge([C.Candle(t=t0, open=100.0, high=100.0, low=90.0, close=100.0, volume=1, final=True)]
+                               + [C.Candle(t=t0 + 50000 + i * 1000, open=80.0, high=80.0, low=80.0, close=80.0, volume=1, final=True) for i in range(4)])
+    f.books["stream"].merge([C.Candle(t=t0 + 50000 + i * 1000, open=0.8, high=0.8, low=0.8, close=0.8, volume=1, final=True) for i in range(4)])
+    held = {"entry_ts": _t.time() - 60, "lots": [{"n": 1, "px": 100.0, "src": "pump_rest", "lot_t": t0, "ts": t0 / 1000 + 0.5}]}
+    rows = f.books["stream"].rows
+    assert abs(CM.CandleMomo._lot_low(held, rows, "stream", f) - 0.9) < 1e-9
+    assert abs(CM.CandleMomo._lot_close(held, rows, "stream", f) - 1.0) < 1e-9
+    assert CM.CandleMomo._lot_low(held, rows, "stream") is None          # without the feed: no level, as before

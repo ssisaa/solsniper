@@ -103,6 +103,14 @@ and it was re-added every 2 s ("Watching ADAWDD (mayhem holds it)" 116 times) �
 step. `_one_feed` and the support `want` now skip positions with `paused_at`. Same night pump answered HTTP 429 on every
 advanced-indexer board for this IP (board errors are only logged at debug: an empty pick with no log line = look there).
 
+**Lots line under the chart (2026-11-18, user's request)**: `chart_marks().open.lotRows` (`lot_rows()`): each lot's
+time (`_mark_ts`), buy price in this chart's units (`_unit_ratio` for a lot from the other chart), % vs the lot before,
+% to now; for gar_low / bp also the next lot's level (`nextBelow` = ref × (1 − lot_need_pct), ref = last lot's low /
+candle close). Drawn by `cmPaintLots` in `#cmLotRows` above the chart legend. Same day: GEKKO's lot 1 was bought on pump_rest
+and after a restart the stream chart held only recent candles, so `_lot_low` / `_lot_close` found no level (gar_low
+could never buy lot 2). Both now fall back to `_other_chart_level`: the lot's candle on the chart it was bought on ×
+`_unit_ratio`.
+
 **gar_low decides every buy (2026-11-18, user's request)**: Cyber (Lotlow 33 %, xtimes 2) got L2 from ▲ BUY 15.1 %
 below L1 and L3 from ◆ BP 3.1 % below L2. With `pro_hold_first_at` = `gar_low`, `_pro_evaluate` now turns every ◆ BP /
 ▲ BUY call into WAIT (flat or holding): only "green after red – low below" buys, so every add obeys Lotlow / xtimes.

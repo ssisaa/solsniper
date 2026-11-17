@@ -1691,7 +1691,7 @@ class CandleMomo:
             # green's open are not higher than the previous lot's low (L1: the low of the candle it was bought in;
             # later lots: their own red's low / green's open). Each lot sits lower than the one before.
             # Lotlow % / xtimes (user 2026-11-17): both must also be at least lot_need_pct() below that low.
-            ref = self._lot_low(held, live_rows, f.using)
+            ref = self._lot_low(held, live_rows, f.using, f)
             low_ref = min(prev.low, c.open)
             need = self.lot_need_pct(held)
             if ref is None or held.get("closing") or need >= 100:
@@ -1721,7 +1721,7 @@ class CandleMomo:
         return True
 
     @staticmethod
-    def _lot_low(held: Dict[str, Any], rows: List[Candle], using: str = "") -> Optional[float]:
+    def _lot_low(held: Dict[str, Any], rows: List[Candle], using: str = "", f: Optional[Feed] = None) -> Optional[float]:
         """The last lot's low for "low below", in the units of the chart now used (`rows`).
         Same feed as the lot: its stored red low / green open (lots 2+), else the low of the candle it was bought in.
         Other feed (the lot was bought on pump_rest, the chart is now the stream — their prices are in different
@@ -1744,7 +1744,27 @@ class CandleMomo:
                 if len(lots) > 1 and k > 0:
                     low = min(low, float(rows[k - 1].low))
                 return low if low > 0 else None
-        return None
+        return CandleMomo._other_chart_level(held, f, using, "low")
+
+    @staticmethod
+    def _other_chart_level(held: Dict[str, Any], f: Optional[Feed], using: str, what: str) -> Optional[float]:
+        """The last lot's low / close read on the chart it was bought on, converted to this chart's units (GEKKO
+        2026-11-18: lot 1 on pump_rest, the stream chart had only the candles since a restart, so "low below"
+        had no level and could never buy lot 2)."""
+        lots = held.get("lots") or []
+        last = lots[-1] if lots else {}
+        src = last.get("src")
+        if f is None or not src or src == using or src not in f.books:
+            return None
+        r = CandleMomo._unit_ratio(f, using, src)
+        if not r:
+            return None
+        ref = float(last.get("low_ref") or 0) if what == "low" else 0.0
+        if ref <= 0:
+            t = last.get("lot_t")
+            x = next((c for c in reversed(f.books[src].rows) if t is not None and c.t == t), None)
+            ref = float((x.low if what == "low" else x.close) if x else 0) or (float(last.get("px") or 0) if what == "close" else 0.0)
+        return ref * r if ref > 0 else None
 
     def _chart_value(self, held: Dict[str, Any], f: Feed, price: float) -> Optional[Tuple[float, float, float]]:
         """(value SOL, uPnL SOL, %) of the whole trade after fees from the chart price: each lot's buy price (same
@@ -1847,7 +1867,7 @@ class CandleMomo:
         return (float(up), tgt, tgt_from) if float(up) >= tgt else None
 
     @staticmethod
-    def _lot_close(held: Dict[str, Any], rows: List[Candle], using: str = "") -> Optional[float]:
+    def _lot_close(held: Dict[str, Any], rows: List[Candle], using: str = "", f: Optional[Feed] = None) -> Optional[float]:
         """Close of the candle the last lot was bought on, in the units of the chart now used: the lot's signal
         candle (`lot_t`) when it was bought on this feed, else this chart's candle at its fill time; else None."""
         lots = held.get("lots") or []
@@ -1861,7 +1881,7 @@ class CandleMomo:
                     break
                 return float(x.close) if x.close > 0 else None
         px = float(last.get("px") or 0)
-        return px if (same and px > 0) else None
+        return px if (same and px > 0) else CandleMomo._other_chart_level(held, f, using, "close")
 
     @staticmethod
     def _late_buy(PT: Any, cs: List[Dict[str, Any]], prev_eval: Optional[int]) -> Optional[str]:
@@ -2059,7 +2079,7 @@ class CandleMomo:
             a = {"call": "WAIT"}
         bp_add = False
         if bp_only and held is not None and a.get("call") == "BUY":
-            ref = self._lot_close(held, rows, f.using)
+            ref = self._lot_close(held, rows, f.using, f)
             need = self.lot_need_pct(held)               # Lotlow % / xtimes on the Candles page (user 2026-11-17)
             if ref and need < 100 and cur.close <= ref * (1 - need / 100.0):
                 bp_add = True
@@ -3002,11 +3022,44 @@ class CandleMomo:
                  "reason": s.get("reason"), "delta": s.get("deltaPct")}
                 for s in list(self.recent) if s.get("mint") == mint and not s.get("manual")][:80]
         rv, _ru, rp, rsrc = self.reading(mint) if held else (None, None, None, "")
+        try:
+            lot_rows = self.lot_rows(mint) if held else {"lots": []}
+        except Exception:
+            log.debug("lot rows failed", exc_info=True)
+            lot_rows = {"lots": []}
         return {"mint": mint, "open": {"mode": held.get("mode"), "entry_sol": held.get("entry_sol"), "support": held.get("support"),
                                        "upct": rp, "value_sol": rv, "quote_upct": held.get("upct"),
                                        "value_src": rsrc, "fees_sol": 2 * self._network_fee_sol(),
+                                       "lotRows": lot_rows,
                                        "lots": lots} if held else None, "closed": closed,
                 "signals": sigs, "hint": self._hint(mint)}
+
+    def lot_rows(self, mint: str) -> Dict[str, Any]:
+        """Each lot of the open trade for the chart's lots line (user 2026-11-18): time, buy price in this chart's
+        units, % below the lot before, % from it to now; and the next lot's level for the "lower" first-buy choices."""
+        held = self.positions.get(mint) or {}
+        f = self.feeds.get(mint)
+        rows = f.books[f.using].rows if f and f.using and f.books.get(f.using) else []
+        now_px = rows[-1].close if rows else 0.0
+        out, prev = [], None
+        for l in held.get("lots") or []:
+            px, src = float(l.get("px") or 0), l.get("src")
+            if px > 0 and f and src not in (None, f.using):
+                r = self._unit_ratio(f, f.using, src)
+                px = px * r if r else 0.0
+            out.append({"n": l.get("n"), "ts": self._mark_ts(l), "sol": l.get("sol"), "px": px or None,
+                        "vsPrev": ((px / prev - 1) * 100.0) if px and prev else None,
+                        "toNow": ((now_px / px - 1) * 100.0) if px and now_px else None})
+            prev = px or prev
+        res: Dict[str, Any] = {"lots": out}
+        mode = self.cfg.pro_hold_first_at if self.cfg.rule == "pro_hold" and self.cfg.pro_hold_first else ""
+        if held and mode in ("gar_low", "bp") and rows:
+            need = self.lot_need_pct(held)
+            ref = self._lot_low(held, rows, f.using, f) if mode == "gar_low" else self._lot_close(held, rows, f.using, f)
+            res.update(nextN=len(out) + 1, needPct=need, refPx=ref,
+                       refWhat="last lot's low" if mode == "gar_low" else "last lot's candle close",
+                       nextBelow=(ref * (1 - need / 100.0)) if ref and need < 100 else None)
+        return res
 
     def _hint(self, mint: str) -> Dict[str, Any]:
         """What the rule will do next on this coin: text for the Entry / Exit buttons + chart levels."""
