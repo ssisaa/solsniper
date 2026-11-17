@@ -1277,6 +1277,7 @@ header nav.nav .navbtn[hidden]{display:none}
         <label title="A green candle sells only if the whole trade is in profit (after fees); otherwise keep holding"><input type="checkbox" id="cmProfitOnly"/> Sell only in profit</label>
         <label title="Minimum profit % (after fees) for that sell">Min profit % <input class="cm-in" id="cmMinProfit" type="number" min="-50" max="1000" step="0.5"/></label>
         <label title="Close any trade held this long, even at a loss (0 = off)">Max hold s <input class="cm-in" id="cmMaxHold" type="number" min="0" max="3600" step="5"/></label>
+        <label title="Close an open trade when its coin prints no new candle (nobody trades it) for this long; a countdown shows in Open positions after 5 s without a candle. 0 = off">No candle close s <input class="cm-in" id="cmIdleExit" type="number" min="0" max="3600" step="5"/></label>
         <label title="Pause after losses: this many losing trades in a row (any source, feed or rule) stop new trades for the wait time; after it the newest coin is taken. 0 = off">Losses in a row <input class="cm-in" id="cmLossN" type="number" min="0" max="20" step="1"/></label>
         <label title="How long no new trade is opened after that many losses in a row">then wait s <input class="cm-in" id="cmLossS" type="number" min="0" max="3600" step="5"/></label>
         <label title="Open a trade only if the coin's curve holds at least as much SOL as this many seconds ago — money still flowing in (a dip, not a drain). 0 = off">SOL inflow s <input class="cm-in" id="cmInflow" type="number" min="0" max="60" step="1"/></label>
@@ -4474,6 +4475,7 @@ function paintCandle(d){
       document.getElementById('cmProfitOnly').checked=!!c.sell_only_in_profit;
       document.getElementById('cmMinProfit').value=c.min_profit_pct;
       document.getElementById('cmMaxHold').value=c.max_hold_s;
+      document.getElementById('cmIdleExit').value=c.idle_exit_s!=null?c.idle_exit_s:30;
       document.getElementById('cmLossN').value=c.loss_pause_n; document.getElementById('cmLossS').value=c.loss_pause_s;
       document.getElementById('cmMinRes').value=c.min_reserve_sol;
       document.getElementById('cmMaxRed').value=c.max_entry_red_pct;
@@ -4596,7 +4598,7 @@ document.getElementById('cmApply').addEventListener('click',()=>{
           ladder_max_total_sol:document.getElementById('cmLadCap').value, sell_on_green_confirm:document.getElementById('cmLadGreen').value,
           stop_loss_pct:document.getElementById('cmStop').value,
           sell_only_in_profit:document.getElementById('cmProfitOnly').checked, min_profit_pct:document.getElementById('cmMinProfit').value,
-          max_hold_s:document.getElementById('cmMaxHold').value,
+          max_hold_s:document.getElementById('cmMaxHold').value, idle_exit_s:document.getElementById('cmIdleExit').value,
           loss_pause_n:document.getElementById('cmLossN').value, loss_pause_s:document.getElementById('cmLossS').value,
           lot_low_pct:document.getElementById('cmLotLow').value, lot_x_times:document.getElementById('cmLotX').value,
           min_reserve_sol:document.getElementById('cmMinRes').value, max_entry_red_pct:document.getElementById('cmMaxRed').value,
@@ -5226,6 +5228,10 @@ function cmMaxHold(p, maxS){
     // pump paused it: held, not sold — Max hold waits; watched every second on the Paused Coins page
     const ps=Math.max(0,(Date.now()/1000)-p.paused_at);
     return `<a href="#paused" class="w" title="pump paused this coin: held, not sold. Max hold restarts when it moves again." onclick="showView('paused');return false;">paused · watching ${cmHeld(ps)}</a>`;
+  }
+  if(p.idleLeft!=null){
+    // no candle for a while: the trade closes when the countdown ends (No candle close s)
+    return `<span class="r" title="No new candle on this coin — nobody is trading it. The trade is closed when this reaches 0.">no candle · closes in ${Math.max(0,Math.ceil(p.idleLeft))}s</span>`;
   }
   if(maxS<=0) return '<span class="muted">off</span>';
   const held=Math.max(0,(Date.now()/1000)-(p.resumed_at||p.entry_ts||0)), left=maxS-held, frac=Math.max(0,Math.min(1,held/maxS));

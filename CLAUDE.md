@@ -103,6 +103,13 @@ and it was re-added every 2 s ("Watching ADAWDD (mayhem holds it)" 116 times) �
 step. `_one_feed` and the support `want` now skip positions with `paused_at`. Same night pump answered HTTP 429 on every
 advanced-indexer board for this IP (board errors are only logged at debug: an empty pick with no log line = look there).
 
+**No candle close (2026-11-18, user's request)**: pumpcity sat in Open positions with no trade for 15 min. Candles page
+"No candle close s" (`idle_exit_s`, default 30, 0 = off, next to Max hold): an open trade whose coin printed no new candle
+on any of its charts for that long (counted from the newest candle, the buy or a resume — `idle_left()`) is closed by the
+value loop (`_forced_exit`, reason "no candle for Ns (coin stopped trading)", paper and live). Open positions' Max hold
+cell shows "no candle · closes in Ns" once 5 s pass without a candle (`idleLeft` in `/api/candle`). Paused coins are
+not affected (their own watch).
+
 **Graduated coins get a live chart (2026-11-17, user's request)**: pump's chart ran ahead of the bot's on GEKKO
 (PumpSwap). The RPC logs subscription (public node, `mentions: [coin]`) already received every PumpSwap trade but only
 pump's curve TradeEvent was decoded. `caller_stream.decode_amm_logs(logs, mint)` reads PumpSwap BuyEvent

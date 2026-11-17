@@ -1698,6 +1698,20 @@ class CandleMomo:
         rs = sorted(a[t] / b[t] for t in common)
         return rs[len(rs) // 2]
 
+    def idle_left(self, mint: str, pos: Optional[Dict[str, Any]] = None) -> Optional[float]:
+        """Seconds until an open trade with no new candle is closed (user 2026-11-18: pumpcity sat with no trade for
+        15 min). Counts from the newest candle on any of the coin's charts, the buy, or a resume. None = off / n/a."""
+        pos = pos if pos is not None else self.positions.get(mint)
+        lim = float(self.cfg.idle_exit_s or 0)
+        if not pos or lim <= 0 or pos.get("paused_at"):
+            return None
+        ref = max(float(pos.get("entry_ts") or 0), float(pos.get("resumed_at") or 0))
+        f = self.feeds.get(mint)
+        for book in (f.books.values() if f else []):
+            if book.rows:
+                ref = max(ref, (book.rows[-1].t + 1000) / 1000.0)
+        return lim - (time.time() - ref)
+
     def live_reading(self, mint: str) -> Optional[Tuple[float, float, float]]:
         """Open positions' Value / uPnL / % at the chart's price right now (user 2026-11-17: the table showed a
         Jupiter quote up to 45 s old while the candles moved). None = no usable chart: the value loop's read stays."""
@@ -3552,6 +3566,13 @@ class CandleMomo:
                         > self.cfg.max_hold_s):
                     pos["closing"] = True
                     asyncio.ensure_future(self._forced_exit(mint, f"max hold {self.cfg.max_hold_s:.0f}s"))
+                left = self.idle_left(mint, pos)
+                if left is not None and left <= 0 and not pos.get("closing") and mint not in self.busy:
+                    # no candle = nobody trades the coin: close it and let the next coin come (user 2026-11-18)
+                    pos["closing"] = True
+                    self.note("warn", f"{pos.get('symbol') or mint[:6]}: no candle for {self.cfg.idle_exit_s:.0f}s — "
+                                      "the coin stopped trading; closing the trade.", mint)
+                    asyncio.ensure_future(self._forced_exit(mint, f"no candle for {self.cfg.idle_exit_s:.0f}s (coin stopped trading)"))
                 try:
                     v, real, vsrc = await self._value(mint, pos["tokens"])
                     if v is None or vsrc == "jupiter (old)":      # no price, or only an old cached quote
@@ -3706,6 +3727,11 @@ class CandleMomo:
                                            "pause_state")}, lots=len(p.get("lots") or []) or 1)
                for p in self.positions.values()]
         for row in pos:
+            try:
+                il = self.idle_left(row["mint"])
+                row["idleLeft"] = round(il, 1) if il is not None and il < float(self.cfg.idle_exit_s) - 5 else None
+            except Exception:
+                row["idleLeft"] = None
             try:
                 live = self.live_reading(row["mint"])        # follows the candles, refreshed on every page poll
             except Exception:

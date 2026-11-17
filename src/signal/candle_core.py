@@ -228,6 +228,7 @@ class Config:
     # L4 132 % ... with 33 / 2). 100 % or more can never happen: no more lots then. Max lots / Total cap still apply.
     lot_low_pct: float = 25.0
     lot_x_times: float = 1.0
+    idle_exit_s: float = 30.0                # an open trade whose coin printed no candle this long is closed (0 = off)
     loss_pause_n: int = 2                    # this many losing trades in a row -> no new trade for loss_pause_s (0 = off)
     loss_pause_s: float = 30.0               # ... then the newest coin of the source / feed is taken
     max_hold_s: float = 60.0                 # close any trade held this long (0 = off): sparse candles
@@ -250,7 +251,7 @@ _LIMITS: Dict[str, Tuple[float, float]] = {
     "max_slippage_bps": (1, 10000), "priority_fee_micro_lamports": (0, 10_000_000),
     "compute_units": (10_000, 1_400_000), "fill_lag_ms": (0, 10000), "max_trade_sol": (0.0001, 5),
     "max_open_sol_per_mint": (0.0001, 5), "max_daily_loss_sol": (0.0001, 100), "max_mints": (0, 10),
-    "min_age_s": (0, 86400), "max_age_s": (1, 864000), "max_hold_s": (0, 3600), "loss_pause_n": (0, 20), "lot_low_pct": (0, 1000), "lot_x_times": (1, 10), "loss_pause_s": (0, 3600), "max_ladder_buys": (1, 20), "min_red_count_to_ladder": (1, 20), "reds_per_lot": (1, 20),
+    "min_age_s": (0, 86400), "max_age_s": (1, 864000), "max_hold_s": (0, 3600), "loss_pause_n": (0, 20), "idle_exit_s": (0, 3600), "lot_low_pct": (0, 1000), "lot_x_times": (1, 10), "loss_pause_s": (0, 3600), "max_ladder_buys": (1, 20), "min_red_count_to_ladder": (1, 20), "reds_per_lot": (1, 20),
     "ladder_max_total_sol": (0.0001, 5), "sell_on_green_confirm": (1, 10), "stop_loss_pct": (0, 100), "min_profit_pct": (-50, 1000), "min_reserve_sol": (0, 100), "max_entry_red_pct": (0, 100), "inflow_window_s": (0, 60),
     "max_below_peak_pct": (0, 99.9), "pinned_min_profit_pct": (0.1, 100), "exit_reserve_sol": (0, 100), "mixed_idle_s": (5, 3600),
 }
