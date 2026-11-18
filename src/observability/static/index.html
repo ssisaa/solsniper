@@ -5060,12 +5060,23 @@ async function cmLoadChart(){
 function cmCandleAt(cs, tsSec){ const t=Math.floor(tsSec)*1000; let best=null; for(const x of cs){ if(x.t<=t) best=x; else break; } return best||cs[0]; }
 // Lots line under the chart (user 2026-11-18): when / at what price each lot was bought, how far below the lot before,
 // and where the next lot may buy under "green after red – low below" / "only on ◆ BP BUY"
+// "L2 … 61.6% below L1": the step down from the lot before (the "lower" rules want it). With "green after red – low
+// below" / "only on ◆ BP BUY" it is checked against the needed % (Lotlow % × xtimes); green = deep enough.
+function cmLotStep(l){
+  const c=_cmCfg||{}, n=Number(l.n)||1, d=-Number(l.vsPrev);
+  const rule=c.rule==='pro_hold'&&c.pro_hold_first&&(c.pro_hold_first_at==='gar_low'||c.pro_hold_first_at==='bp');
+  const need=rule?Number(c.lot_low_pct||0)*Math.pow(Number(c.lot_x_times||1),Math.max(0,n-2)):null;
+  const txt=d>=0?`${d.toFixed(1)}% below L${n-1}`:`${(-d).toFixed(1)}% above L${n-1}`;
+  if(need==null) return ` · <span class="muted" title="price step from the lot before">${txt}</span>`;
+  const ok=d>=need;
+  return ` · <span class="${ok?'g':'r'}" title="${ok?'deep enough':'not as deep as needed'}: L${n} needed at least ${need.toFixed(0)}% below L${n-1} (Lotlow % × xtimes)">${txt} ${ok?'✓':'✗'} (needed ${need.toFixed(0)}%)</span>`;
+}
 function cmPaintLots(open){
   const el=document.getElementById('cmLotRows'); if(!el) return;
   const lr=open&&open.lotRows; if(!lr||!(lr.lots||[]).length){ el.innerHTML=''; return; }
   const pc=v=>v==null?'—':((v>=0?'+':'')+Number(v).toFixed(1)+'%');
   let h=lr.lots.map(l=>`<span><b>L${l.n||'?'}</b> ${l.ts?m2Clock(l.ts):'—'} · ${l.px?m2Px(l.px):'—'}`
-    +(l.vsPrev!=null?` · <span class="${l.vsPrev<0?'g':'r'}">${pc(l.vsPrev)} vs L${(l.n||1)-1}</span>`:'')
+    +(l.vsPrev!=null?cmLotStep(l):'')
     +` · now <span class="${m2Cls(l.toNow)}">${pc(l.toNow)}</span></span>`).join('');
   if(lr.nextN){
     h+=lr.needPct>=100?`<span class="muted">L${lr.nextN}: needs ${Number(lr.needPct).toFixed(0)}% lower — can never happen, no more lots</span>`
