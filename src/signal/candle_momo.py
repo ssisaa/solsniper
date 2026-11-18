@@ -2795,6 +2795,22 @@ class CandleMomo:
                 got = PC._sol_for_tokens(part, c1["virtual_token"], c1["virtual_sol"], bps1) / 1e9
             else:
                 got, bps1 = expected, bps          # curve gone during the lag: last known value
+            if not c0 and not c1 and part > 0 and not paused and why0 not in NO_ROUTE:
+                # Both curve reads failed (RPC 429: 7,853 in the 2026-11-18 run; EVIL / OTTER failed 7 sells in a row
+                # while the chart and the value loop priced them — 26 of 36 Unsold Coins were above cost). A live sell
+                # needs no price read (Lightning sells the tokens): price it from the chart, else a value ≤ 15 s old.
+                share = part / pos["tokens"] if pos["tokens"] else 1.0
+                lv = self.live_reading(mint)
+                fb = 0.0
+                if lv is not None and lv[0] > 0:
+                    fb = lv[0] * share
+                elif pos.get("value_sol") and time.time() - float(self._val_at.get(mint) or 0) <= 15:
+                    fb = float(pos["value_sol"]) * share
+                if fb > 0:
+                    expected = got = fb
+                    bps1 = 0
+                    c0 = c1 = {"chart": True}
+                    why = f"{why} — priced from the chart (the curve read failed: RPC busy)"
         no_route = why0 in ("graduated", "not_on_curve", "not_sol_quote")
         if (not c0 and not c1 and not paused and part > 0
                 and ((sig or {}).get("manual")

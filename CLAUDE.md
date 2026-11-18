@@ -130,6 +130,13 @@ unchanged (watched, never booked). `_paused_loop` checked only the first 8 posit
 coins in turns of `PAUSED_WATCH_N` 8. Results: "Paused now (cannot sell)". Re-test started on the Mixed feed with Skip
 Mayhem coins (config only).
 
+**Paper sell priced from the chart when the curve read fails (2026-11-18, user's request)**: the Mayhem board run had
+7,853 RPC 429s; EVIL (+137 %) / OTTER failed 7 paper sells "price unreadable" and 26 of 36 Unsold Coins were above
+cost, while the chart priced them. `_paper_sell`: both curve reads failed (not a NO_ROUTE coin) → `live_reading()`,
+else a value ≤ 15 s old (reason "… priced from the chart (the curve read failed: RPC busy)"). A live Lightning sell
+needs no price read. Re-test on Mixed: GTAVI (Trending, old coin) sat at −39 % for 9 h with Max hold 0 — only 5 trades
+in 9 h; Max hold set to 300 s (config, user's choice).
+
 **Unsold Coins: 1 h retry, Clear button (2026-11-18, user's request)**: `UNSOLD_RETRY_S` = 3600; after it the row's
 status says it was retried for 1 h (N tries), still no price, not sellable, retrying stopped. The Retry column now sits
 before Reason (it was off-screen at the right, so the user saw no retry although AI / Cyber had been re-priced) and each

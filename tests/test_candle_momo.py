@@ -1626,3 +1626,24 @@ def test_paused_loss_corrected_when_coin_comes_back(engine, monkeypatch):
     t = e.store.trades(1)[0]
     assert abs(t["exit_sol"] - 0.004) < 1e-9 and -0.0061 < t["pnl_sol"] < -0.0059
     assert "came back later (completed)" in t["why"]
+
+
+def test_paper_sell_priced_from_chart_when_curve_read_fails(engine, monkeypatch):
+    """RPC 429: both curve reads fail. The chart still prices the coin (EVIL 2026-11-18 failed 7 sells and went to
+    Unsold Coins at +137 %): the paper sell is booked at the chart reading instead of failing."""
+    import asyncio, time as _t
+    e = engine
+
+    async def curve(mint):
+        return None, 0, "curve_unread"
+    monkeypatch.setattr(e, "_curve", curve)
+    monkeypatch.setattr(e, "live_reading", lambda m: (0.008, 0.003, 60.0))
+    e.cfg.fill_lag_ms = 0
+    e.positions["M"] = {"mint": "M", "mode": "paper", "tokens": 1000.0, "entry_sol": 0.005, "entry_ts": _t.time() - 30,
+                        "entry_signal": "x", "costs_sol": 0.0, "symbol": "S", "lots": [{"n": 1}]}
+    e.store.open_position(e.positions["M"])
+    asyncio.run(e._paper_sell({"id": "s1", "mint": "M", "side": "SELL", "seen": _t.time(), "ts": _t.time(), "candleTs": 1, "open": 1.0, "prevClose": 1.0, "deltaPct": 0.0,
+                               "symbol": "S"}, "take profit"))
+    assert "M" not in e.positions
+    t = e.store.trades(1)[0]
+    assert abs(t["exit_sol"] - 0.008) < 1e-9 and "priced from the chart" in t["why"]
