@@ -1164,3 +1164,41 @@ def test_gar_low_ignores_bp_and_pro_buy_signals(tmp_path, monkeypatch):
     f.last_eval_t = 0
     e._evaluate(f, time.time())
     assert [r for r in routed if r["side"] == "BUY"]
+
+
+def test_signal_only_next_lots_obey_lotlow_and_xtimes(tmp_path, monkeypatch):
+    """User 2026-11-19: "buy only on the ▲ BUY signal" also uses Lotlow % / xtimes — lot 1 on the first ▲ BUY, lot 2
+    only ≥ Lotlow % below lot 1's candle, lot 3 ≥ Lotlow × xtimes below lot 2's."""
+    from src.signal import pro_trader as PT
+    from src.signal import candle_core as C
+    e, f, rows, routed = _cm_engine(tmp_path, monkeypatch)
+    e.cfg.rule, e.cfg.pro_hold_first, e.cfg.pro_hold_first_at = "pro_hold", True, "signal"
+    e.cfg.lot_low_pct, e.cfg.lot_x_times = 20.0, 2.0
+    f.age = 3
+    e.mayhem_of["MINT"] = False
+    monkeypatch.setattr(PT, "analyze", lambda cs, h, held: {"call": "WAIT"})
+    e._evaluate(f, time.time())
+    f.books["pump_rest"].merge(rows[-1:])
+    e._evaluate(f, time.time())
+    monkeypatch.setattr(PT, "analyze", lambda cs, h, held: {"call": "BUY", "px": 1.0, "why": "VWAP dip"})
+    t = [rows[-1].t]
+
+    def candle(px):
+        t[0] += 1000
+        f.books["pump_rest"].merge([C.Candle(t=t[0], open=px, high=px, low=px, close=px, volume=1, final=True)])
+        e._evaluate(f, time.time())
+        return t[0]
+    t1 = candle(1.0)
+    buys = lambda: [r for r in routed if r["side"] == "BUY"]
+    assert len(buys()) == 1
+    e.positions["MINT"] = {"mint": "MINT", "mode": "paper", "tokens": 1.0, "entry_sol": 0.005, "entry_ts": time.time(),
+                           "lots": [{"n": 1, "lot_t": t1, "src": "pump_rest", "ts": time.time()}]}
+    candle(0.85)                                                    # ▲ BUY on, 15 % lower: needs 20 %, no lot
+    assert len(buys()) == 1
+    t2 = candle(0.79)                                               # 21 % lower: lot 2
+    assert len(buys()) == 2 and "▲ BUY signal — 21% below the last lot's candle (needs 20%)" in buys()[1]["pro_why"]
+    e.positions["MINT"]["lots"].append({"n": 2, "lot_t": t2, "src": "pump_rest", "ts": time.time()})
+    candle(0.55)                                                    # 30 % under lot 2: needs 40 %, no lot
+    assert len(buys()) == 2
+    candle(0.47)                                                    # 41 % under lot 2: lot 3
+    assert len(buys()) == 3

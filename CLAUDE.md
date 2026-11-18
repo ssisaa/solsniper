@@ -148,6 +148,16 @@ session that resolves again. `fast_get.resolved_ip()` caches each host's address
 background thread every 5 min, last good address kept on failure) and `_resolve_opt()` pins it via CURLOPT_RESOLVE
 (session `curl_options` in `_read`, per call in `pump_get_fresh`). 0 DNS errors in 5 min after the change.
 
+**▲ BUY signal uses Lotlow / xtimes (2026-11-19, user's request)**: `pro_hold_first_at` = `signal` adds lots like `bp`:
+lot 1 on the first ▲ BUY, a later ▲ BUY buys only when its candle closed ≥ `lot_need_pct()` below the last lot's candle
+(`_lot_close`; `lower_only` in `_pro_evaluate`); dropdown label, lots line ✓/✗ and next level follow it.
+
+**Pump 429 penalty + readable errors (2026-11-19)**: from 01:34 pump answered 429 on all three hosts for this connection;
+a single read from another process got 429 too, while the bot sent ~0.1 reads/s (cool-down on pump's side). Pages now
+show `fast_get.short_err()` ("pump rate limit (HTTP 429) — reads paused Ns, retrying") instead of "HTTPStatusError"
+(dashboard `_short_err`), and `fast_get._count` logs "PUMP reads per second, last minute: host N/s (lane …)" once a
+minute to find the loop that overruns pump. The user stopped the bot at 02:01.
+
 **Unsold Coins: 1 h retry, Clear button (2026-11-18, user's request)**: `UNSOLD_RETRY_S` = 3600; after it the row's
 status says it was retried for 1 h (N tries), still no price, not sellable, retrying stopped. The Retry column now sits
 before Reason (it was off-screen at the right, so the user saw no retry although AI / Cyber had been re-priced) and each

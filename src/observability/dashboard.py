@@ -155,6 +155,16 @@ _callout_lock = threading.Lock()
 _callout_page_at = 0.0     # last time the CallOuts page asked for its rows
 
 
+def _short_err(exc: BaseException) -> str:
+    """A failed pump read as the page shows it: "pump rate limit (HTTP 429) — reads paused 40s" instead of
+    "HTTPStatusError" (user 2026-11-19)."""
+    try:
+        from src.data.fast_get import short_err
+        return short_err(exc)
+    except Exception:
+        return type(exc).__name__
+
+
 def callout_reader_needed() -> bool:
     """The CallOuts reader costs ~8 pump requests a second. It runs only when something reads it (user 2026-11-16:
     with MayhemMode as the source it pushed the bot over pump's ~10 req/s and the chart reads got HTTP 403): the
@@ -849,7 +859,7 @@ def _callout_loop() -> None:
                     _callout_cache["ts"] = time.time()
         except Exception as exc:
             with _callout_lock:
-                _callout_cache["error"] = type(exc).__name__
+                _callout_cache["error"] = _short_err(exc)
                 _callout_cache["ts"] = time.time()
             blocked = "403" in str(exc)
             if not blocked or time.time() - last_warn > 30:
@@ -1013,7 +1023,7 @@ def _fill_predict_feed() -> None:
             )
             coins = [c for c in (feed.get("coins") or []) if isinstance(c, dict) and c.get("coinMint")][:10]
         except Exception as exc:
-            _predict_cache["error"] = type(exc).__name__
+            _predict_cache["error"] = _short_err(exc)
             _predict_cache["ts"] = time.time()
             return
 
@@ -1063,7 +1073,7 @@ def _fill_predict_feed() -> None:
                     except Exception:
                         continue
         except Exception as exc:
-            err = type(exc).__name__
+            err = _short_err(exc)
         order = {"OPEN": 0, "CLOSE": 1, "FADE": 2, "WAIT": 3}
         rows.sort(key=lambda row: (order.get(row.get("call"), 9), -(row.get("confidence") or 0)))
         if rows:
@@ -1505,7 +1515,7 @@ def _caller_book(wallet: str) -> Dict[str, Any]:
         else:
             port = _pump_json(url, timeout=2.5)
     except Exception as exc:
-        book["error"] = type(exc).__name__
+        book["error"] = _short_err(exc)
     else:
         positions = port.get("positions") if isinstance(port, dict) else None
         if isinstance(positions, list):

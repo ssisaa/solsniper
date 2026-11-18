@@ -1752,8 +1752,8 @@ class CandleMomo:
         return {"flow": None, "holding": {"entry": px, "held": time.time() - ts} if px > 0 else None}
 
     def lot_need_pct(self, held: Optional[Dict[str, Any]]) -> float:
-        """How far (%) the next lot must sit below the lot before, for "green after red – low below" and "only on
-        ◆ BP BUY" (user 2026-11-17): L2 = Lotlow %, then each lot xtimes the one before (33 / 2: L2 33 %, L3 66 %,
+        """How far (%) the next lot must sit below the lot before, for "green after red – low below", "only on
+        ◆ BP BUY" (user 2026-11-17) and "only on the ▲ BUY signal" (user 2026-11-19): L2 = Lotlow %, then each lot xtimes the one before (33 / 2: L2 33 %, L3 66 %,
         L4 132 % ...). 100 % or more cannot happen, so no further lot is bought."""
         lots = (held or {}).get("lots")
         nxt = (len(lots) if isinstance(lots, list) else int(lots or 1)) + 1
@@ -2162,12 +2162,14 @@ class CandleMomo:
             # below L1 and L3 from ◆ BP 3 % below L2, with Lotlow 33 % / xtimes 2): no ◆ BP / ▲ BUY buy at all
             a = {"call": "WAIT"}
         bp_add = False
-        if bp_only and held is not None and a.get("call") == "BUY":
+        lower_only = bp_only or sig_only     # ▲ BUY signal adds obey Lotlow % / xtimes too (user 2026-11-19)
+        if lower_only and held is not None and a.get("call") == "BUY":
             ref = self._lot_close(held, rows, f.using, f)
             need = self.lot_need_pct(held)               # Lotlow % / xtimes on the Candles page (user 2026-11-17)
             if ref and need < 100 and cur.close <= ref * (1 - need / 100.0):
                 bp_add = True
-                a = dict(a, why=f"◆ BP BUY — {(1 - cur.close / ref) * 100:.0f}% below the last lot's candle "
+                tag = "◆ BP BUY" if bp_only else "▲ BUY signal"
+                a = dict(a, why=f"{tag} — {(1 - cur.close / ref) * 100:.0f}% below the last lot's candle "
                                 f"(needs {need:g}%): {a.get('why') or ''}")
         if a.get("call") == "BUY" and held is None and (sig_only or bp_only) and (
                 f.mint in self.busy or f.mint in self.pending
@@ -2180,7 +2182,7 @@ class CandleMomo:
             side = "BUY"
             if bp_only:
                 a = dict(a, why=f"◆ BP BUY (lot 1) — {a.get('why') or ''}")
-        elif a.get("call") == "BUY" and self.cfg.rule == "pro_hold" and (bp_add if bp_only else not was_buy):
+        elif a.get("call") == "BUY" and self.cfg.rule == "pro_hold" and (bp_add if lower_only else not was_buy):
             side = "BUY"                     # pro_hold: each new BUY signal buys again into the open trade
         elif held is not None and a.get("call") == "SELL" and self.cfg.rule == "pro":
             side = "SELL"
@@ -3164,7 +3166,7 @@ class CandleMomo:
             prev = px or prev
         res: Dict[str, Any] = {"lots": out}
         mode = self.cfg.pro_hold_first_at if self.cfg.rule == "pro_hold" and self.cfg.pro_hold_first else ""
-        if held and mode in ("gar_low", "bp") and rows:
+        if held and mode in ("gar_low", "bp", "signal") and rows:
             need = self.lot_need_pct(held)
             ref = self._lot_low(held, rows, f.using, f) if mode == "gar_low" else self._lot_close(held, rows, f.using, f)
             res.update(nextN=len(out) + 1, needPct=need, refPx=ref,

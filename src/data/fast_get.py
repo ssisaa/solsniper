@@ -60,6 +60,52 @@ def resolved_ip(host: str) -> str:
     return ent[0] if ent else ""
 
 
+# ---------- read counter (2026-11-19): pump answered 429 on every host for this connection; one log line a minute shows
+# which hosts / lanes make the requests, so the loop that overruns pump's ~10 req/s can be found.
+_reads: dict[tuple[str, str], int] = {}
+_reads_at = time.monotonic()
+_reads_lock = threading.Lock()
+
+
+def _count(url: str, lane: str) -> None:
+    global _reads_at
+    host = (urllib.parse.urlsplit(url).hostname or "").replace(".pump.fun", "")
+    now = time.monotonic()
+    line = ""
+    with _reads_lock:
+        _reads[(host, lane)] = _reads.get((host, lane), 0) + 1
+        span = now - _reads_at
+        if span >= 60.0:
+            by_host: dict[str, list] = {}
+            for (h, ln), n in _reads.items():
+                by_host.setdefault(h, []).append((n, ln))
+            parts = []
+            for h, rows in sorted(by_host.items(), key=lambda kv: -sum(n for n, _ in kv[1])):
+                tot = sum(n for n, _ in rows)
+                lanes = ", ".join(f"{ln} {n / span:.1f}" for n, ln in sorted(rows, reverse=True)[:6])
+                parts.append(f"{h} {tot / span:.1f}/s ({lanes})")
+            line = "PUMP reads per second, last minute: " + "; ".join(parts)
+            _reads.clear()
+            _reads_at = now
+    if line:
+        log.info(line)
+
+
+def short_err(exc: BaseException) -> str:
+    """What a page shows for a failed pump read: the status and, on a rate limit, that reads are paused —
+    not just 'HTTPStatusError'."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = getattr(getattr(exc, "response", None), "status_code", 0) or 0
+        if code == 429:
+            host = urllib.parse.urlsplit(str(getattr(getattr(exc, "request", None), "url", "") or "")).hostname or ""
+            left = int(rate_limit_left(host) or 0) if host else 0
+            return "pump rate limit (HTTP 429)" + (f" — reads paused {left}s, retrying" if left else " — retrying")
+        if code == 403:
+            return "pump blocked this read (HTTP 403) — retrying shortly"
+        return f"pump HTTP {code}"
+    return type(exc).__name__
+
+
 def _resolve_opt(url: str) -> dict:
     """curl_options pinning url's host to its cached address ({} when not known yet)."""
     try:
@@ -368,6 +414,7 @@ def _read(url: str, timeout: float, lane: str = "shared") -> Any:
     timeout = max(0.4, float(timeout or 1.0))
     if _cooling(url, lane):
         raise _blocked(url)
+    _count(url, lane)
     sess = _chrome(lane)
     if sess is None:
         return _plain(url, timeout, lane)
@@ -428,6 +475,7 @@ def pump_get_fresh(url: str, timeout: float = 0.8) -> Any:
     timeout = max(0.4, float(timeout or 0.8))
     if _cooling(url, "fresh"):
         raise _blocked(url)
+    _count(url, "fresh")
     headers = _send_headers()
     headers["Cache-Control"] = "no-cache"
     if _chrome_ok is not False:
