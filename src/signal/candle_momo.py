@@ -56,6 +56,11 @@ FLAT_PCT = 0.05                # "no candles yet": the only reading moved less t
 PRO_FIRST_START_CANDLES = 2    # first-buy "start": the chart counts as just started up to this many candles
 PAUSED_DUST_SOL = 0.0002       # Paused Coins: a held paused coin worth less than this (or 2% of its cost) is left
 PAUSED_DUST_FRAC = 0.02
+# PAPER: a paused coin that has not traded again for this long is booked as a total loss (it cannot be sold while
+# paused). 2026-11-18 paper run: 321 coins paused, none moved again in 7 h; left open they hid 2.26 SOL from Net PnL.
+PAUSED_GIVE_UP_S = 600.0
+PAUSED_RECOVER_S = 86400.0     # ...and is re-checked this long: one that comes back has its trade corrected
+PAUSED_WATCH_N = 8             # paused coins re-read per second (rotating); open trades are always checked
 SELL_FAILS_SET_ASIDE = 7       # paper sells in a row that could not read the price -> Unsold Coins (user 2026-11-18: 3, then 7)
 UNSOLD_RETRY_S = 3600.0        # the Unsold Coins page re-reads a paper coin's price this long (every 10 s; user 2026-11-18: 1 h)
 UNREAD_SET_ASIDE_S = 90.0      # an open trade whose price cannot be read this long is set aside (Unsold Coins page)
@@ -919,7 +924,17 @@ class CandleMomo:
             self._paused_tick = tick
             for m in [m for m in self.paused_mints if m not in self.positions]:
                 self.paused_mints.pop(m, None)          # sold / closed: no longer a paused coin
-            for mint, pos in list(self.positions.items())[:8]:
+            for mint, pos in list(self.positions.items()):
+                if self._pause_give_up_due(pos) and mint not in self.busy:
+                    self._pause_give_up(mint, pos)
+            # every open trade is checked; paused coins take turns (the first 8 positions only were read before:
+            # with 300 paused coins open, a new trade was never checked for a pause)
+            opened = [(m, p) for m, p in self.positions.items() if not p.get("paused_at")]
+            paused = [(m, p) for m, p in self.positions.items() if p.get("paused_at")]
+            if len(paused) > PAUSED_WATCH_N:
+                k = (tick * PAUSED_WATCH_N) % len(paused)
+                paused = (paused[k:] + paused[:k])[:PAUSED_WATCH_N]
+            for mint, pos in opened + paused:
                 if mint in self.busy:
                     continue
                 if not pos.get("paused_at"):
@@ -1086,6 +1101,73 @@ class CandleMomo:
         if self.store:
             self.store.audit("completed_sell", mint=mint)
         asyncio.ensure_future(self._forced_exit(mint, "Mayhem completed (not paused) — sold off"))
+
+    @staticmethod
+    def _pause_give_up_due(pos: Dict[str, Any]) -> bool:
+        """PAPER only: paused and not moving again for PAUSED_GIVE_UP_S. LIVE paused coins stay on the watch."""
+        return (pos.get("mode") != "live" and bool(pos.get("paused_at")) and not pos.get("moving_at")
+                and not pos.get("closing") and time.time() - float(pos["paused_at"]) >= PAUSED_GIVE_UP_S)
+
+    def _pause_give_up(self, mint: str, pos: Dict[str, Any]) -> None:
+        """Paper: the coin stayed paused PAUSED_GIVE_UP_S — book it at 0 SOL (it could not have been sold), so Net
+        PnL shows the real result and the Paused Coins list does not grow forever."""
+        mins = (time.time() - float(pos.get("paused_at") or time.time())) / 60.0
+        why = (f"paused by pump for {mins:.0f} min and never traded again — booked at 0 SOL for now (a paused coin "
+               f"cannot be sold); corrected if it comes back within 24 h")
+        pos.pop("paused_at", None)
+        self.paused_mints.pop(mint, None)
+        pos["closing"] = True
+        asyncio.ensure_future(self._paper_sell(
+            {"id": f"pausedloss-{mint}-{int(time.time())}", "mint": mint, "side": "SELL", "seen": time.time(),
+             "symbol": pos.get("symbol") or mint[:6]}, why, paused=True, book_at=0.0))
+
+    async def _paused_recover(self) -> None:
+        """A paused coin booked at 0 is not always lost (user 2026-11-18): pump later marks some "completed" (sellable)
+        or active again — 13 of 309 came back, worth ~20 % of their cost. One booked coin is re-checked every 2 s (in
+        turn, for PAUSED_RECOVER_S); once it is no longer paused and reads a price, its closed trade is corrected to
+        what selling it then would give."""
+        now = time.time()
+        if not self.store or now < float(getattr(self, "_prec_at", 0) or 0):
+            return
+        self._prec_at = now + 2.0
+        q = getattr(self, "_prec_q", None)
+        if not q:
+            with self.store.lock:
+                rows = self.store.db.execute(
+                    "SELECT id, mint, symbol, entry_sol, why FROM trades WHERE mode='paper' AND why LIKE "
+                    "'%never traded again%' AND why NOT LIKE '%came back%' AND exit_ts > ?",
+                    (now - PAUSED_RECOVER_S,)).fetchall()
+            self._prec_q = q = list(rows)
+            if not q:
+                self._prec_at = now + 60.0
+                return
+        tid, mint, sym, entry, why = q.pop()
+        from src.data.fast_get import mayhem2_get
+        from src.signal.mayhem2 import STATE_URL
+        body = await asyncio.to_thread(mayhem2_get, STATE_URL.format(mint=mint), "candlepaused", 2.0)
+        if not isinstance(body, dict):
+            return
+        st = str(body.get("state") or "active").lower()
+        if st == "paused":
+            return
+        with self.store.lock:
+            r = self.store.db.execute("SELECT tokens FROM fills WHERE signal_id LIKE ? ORDER BY ts DESC LIMIT 1",
+                                      (f"pausedloss-{mint}-%",)).fetchone()
+        tokens = float(r[0] or 0) if r else 0.0
+        if tokens <= 0:
+            return
+        v, _real, vsrc = await self._value(mint, tokens)
+        if v is None or vsrc == "jupiter (old)":
+            return
+        entry = float(entry or 0)
+        pnl = v - entry - 2 * self._network_fee_sol()
+        self.store.set_trade_cash(tid, entry, v, pnl)
+        with self.store.lock:
+            self.store.db.execute("UPDATE trades SET why=? WHERE id=?",
+                                  (f"{why} — came back later ({st}): worth {v:.6f} SOL then, trade corrected", tid))
+            self.store.db.commit()
+        self.note("info", f"{sym or mint[:6]}: paused coin came back ({st}) — worth {v:.6f} SOL, its closed trade "
+                          f"was corrected ({pnl:+.5f} SOL).", mint)
 
     def _pause_leave(self, mint: str, pos: Dict[str, Any], v: float) -> None:
         """Gone to dust while paused: stop watching. Booked at its value; the coins are left in the wallet."""
@@ -2658,7 +2740,9 @@ class CandleMomo:
         self.note("buy", f"{sig.get('symbol')} {what} {size:.4f} SOL (Δ{sig['deltaPct']:+.2f}%, signed in {lat:.0f} ms, "
                          f"filled {fill_ms:.0f} ms, slip {slip:+.0f} bps, feed lag {sig['feedLagMs']} ms).", mint)
 
-    async def _paper_sell(self, sig: Optional[Dict[str, Any]], why: str, paused: bool = False) -> None:
+    async def _paper_sell(self, sig: Optional[Dict[str, Any]], why: str, paused: bool = False,
+                          book_at: Optional[float] = None) -> None:
+        """book_at: book the whole trade at exactly this SOL out, with no price read (a paused coin given up = 0)."""
         from src.execution import pump_curve as PC
         cfg = self.cfg
         mint = sig["mint"] if sig else ""
@@ -2667,16 +2751,25 @@ class CandleMomo:
             return
         ratio = cfg.sell_ratio if sig and not paused else 1.0
         part = int(pos["tokens"] * ratio)
-        signed = ""
-        if part > 0:
+        signed = "" if book_at is None else "booked"
+        if part > 0 and book_at is None:          # a booked loss reads nothing (300 at once after a restart)
             signed, _m, _e = await PC.pump_sell_tx(mint, part, slippage_bps=cfg.max_slippage_bps, quiet=True)
         sent = time.time()
         lat = (sent - sig["seen"]) * 1000.0 if sig and sig.get("seen") and "candleTs" in sig else None
         if lat is not None:
             self.lat_ms.append(lat)
-        c0, bps, why0 = await self._curve(mint)
-        jup = self._jup() if (not c0 and why0 in ("graduated", "not_on_curve", "not_sol_quote")) else None
-        if jup is not None and part > 0:
+        if book_at is not None:
+            c0 = c1 = {"booked": True}
+            bps = bps1 = 0
+            why0 = ""
+            jup = None
+            expected = got = max(0.0, float(book_at))
+        else:
+            c0, bps, why0 = await self._curve(mint)
+            jup = self._jup() if (not c0 and why0 in ("graduated", "not_on_curve", "not_sol_quote")) else None
+        if book_at is not None:
+            pass
+        elif jup is not None and part > 0:
             # graduated coin: Jupiter quotes (pool fee inside), at send and fill_lag_ms later
             q0 = await self._jup_quote_sell(jup, mint, part)
             await asyncio.sleep(max(0.0, cfg.fill_lag_ms / 1000.0 - (time.time() - sent)))
@@ -3707,6 +3800,10 @@ class CandleMomo:
                 await self._unsold_retry()
             except Exception:
                 log.debug("unsold retry failed", exc_info=True)
+            try:
+                await self._paused_recover()
+            except Exception:
+                log.debug("paused recover failed", exc_info=True)
             if time.time() - cash_at >= 20.0:
                 cash_at = time.time()
                 try:

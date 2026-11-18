@@ -119,6 +119,17 @@ Plain "gar" and the other choices still buy on ◆ BP / ▲ BUY. The "+5115 %" /
 4.1e-7): `amm_own_pool` keeps only the coin's pool (the one seen most often; ≥ 3 events when several are seen), and
 `StreamProvider.on_trade` drops a trade 5x off the last close unless 3 in a row agree on the new level.
 
+**Paused paper trades are booked, then corrected if they come back (2026-11-18, user's request)**: a 7 h paper run on
+the Mayhem board feed (gar_low) showed +1.01 SOL on 601 closed trades, but 310 paused trades (2.26 SOL in) sat open,
+never counted — 321 paused, none traded again; the true result was about −1.24 SOL (not fit for Live). Now a PAPER
+paused coin still paused after `PAUSED_GIVE_UP_S` 600 s is booked at 0 SOL (`_pause_give_up`, `_paper_sell(book_at=0)`,
+no price read) and `_paused_recover` re-checks one booked coin every 2 s for `PAUSED_RECOVER_S` 24 h: once pump says
+completed / active and a price reads, the trade is corrected (`set_trade_cash`, reason "… came back later"). Of the
+309 booked, 12 were completed and 1 active a few hours later, worth ~20 % of their cost. LIVE paused coins are
+unchanged (watched, never booked). `_paused_loop` checked only the first 8 positions — now every open trade, paused
+coins in turns of `PAUSED_WATCH_N` 8. Results: "Paused now (cannot sell)". Re-test started on the Mixed feed with Skip
+Mayhem coins (config only).
+
 **Unsold Coins: 1 h retry, Clear button (2026-11-18, user's request)**: `UNSOLD_RETRY_S` = 3600; after it the row's
 status says it was retried for 1 h (N tries), still no price, not sellable, retrying stopped. The Retry column now sits
 before Reason (it was off-screen at the right, so the user saw no retry although AI / Cyber had been re-priced) and each

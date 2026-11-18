@@ -1564,3 +1564,65 @@ def test_lot_low_from_the_chart_the_lot_was_bought_on():
     assert abs(CM.CandleMomo._lot_low(held, rows, "stream", f) - 0.9) < 1e-9
     assert abs(CM.CandleMomo._lot_close(held, rows, "stream", f) - 1.0) < 1e-9
     assert CM.CandleMomo._lot_low(held, rows, "stream") is None          # without the feed: no level, as before
+
+
+def test_paper_paused_coin_given_up_is_booked_at_zero(engine):
+    """2026-11-18: 310 paused paper trades sat open for hours and Net PnL left out 2.26 SOL. After PAUSED_GIVE_UP_S
+    a paper paused coin is booked at 0 SOL with no price read; a live one stays on the watch."""
+    import asyncio, time as _t
+    from src.signal import candle_momo as M
+    e = engine
+    now = _t.time()
+    e.positions["P"] = {"mint": "P", "symbol": "PZ", "mode": "paper", "tokens": 1000.0, "entry_sol": 0.01,
+                        "entry_ts": now - 900, "entry_signal": "s", "costs_sol": 0.0002,
+                        "paused_at": now - M.PAUSED_GIVE_UP_S - 1}
+    e.store.open_position(e.positions["P"])
+    e.paused_mints["P"] = now
+    assert e._pause_give_up_due(e.positions["P"])
+    assert not e._pause_give_up_due({**e.positions["P"], "mode": "live"})
+    assert not e._pause_give_up_due({**e.positions["P"], "paused_at": now - 60})
+    assert not e._pause_give_up_due({**e.positions["P"], "moving_at": now})
+
+    async def run():
+        async def no_read(*a, **k):
+            raise AssertionError("a booked loss must not read the price")
+        e._curve = no_read
+        e._pause_give_up("P", e.positions["P"])
+        await asyncio.sleep(0.05)
+    asyncio.run(run())
+    assert "P" not in e.positions and "P" not in e.paused_mints
+    t = e.store.trades(5)[0]
+    assert t["mint"] == "P" and t["exit_sol"] == 0 and t["pnl_sol"] < -0.0099
+    assert "never traded again" in t["why"]
+
+
+def test_paused_loss_corrected_when_coin_comes_back(engine, monkeypatch):
+    """A paused coin booked at 0 that pump later marks completed is re-valued and its trade corrected (user
+    2026-11-18: paused is not always a total loss — 13 of 309 came back)."""
+    import asyncio, time as _t
+    import src.data.fast_get as FG
+    e = engine
+    now = _t.time()
+    e.positions["P"] = {"mint": "P", "symbol": "PZ", "mode": "paper", "tokens": 1000.0, "entry_sol": 0.01,
+                        "entry_ts": now - 900, "entry_signal": "s", "costs_sol": 0.0, "paused_at": now - 700}
+    e.store.open_position(e.positions["P"])
+    states = {"P": "paused"}
+    monkeypatch.setattr(FG, "mayhem2_get", lambda url, *a, **k: {"state": states["P"]})
+
+    async def val(mint, tokens):
+        assert tokens == 1000.0
+        return 0.004, True, "curve"
+    e._value = val
+
+    async def run():
+        e._pause_give_up("P", e.positions["P"])
+        await asyncio.sleep(0.05)
+        await e._paused_recover()                 # still paused: nothing changes
+        assert e.store.trades(1)[0]["exit_sol"] == 0
+        states["P"] = "completed"
+        e._prec_at = 0
+        await e._paused_recover()
+    asyncio.run(run())
+    t = e.store.trades(1)[0]
+    assert abs(t["exit_sol"] - 0.004) < 1e-9 and -0.0061 < t["pnl_sol"] < -0.0059
+    assert "came back later (completed)" in t["why"]

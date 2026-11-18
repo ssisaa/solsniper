@@ -4529,6 +4529,7 @@ function paintCandle(d){
     kv('Net PnL (closed)', cmSol(a.netPnlSol), m2Cls(a.netPnlSol)),
     kv('Open trades now', cmSol(cmOpenPnl), m2Cls(cmOpenPnl)),
     kv('Net incl. open', cmSol((a.netPnlSol||0)+cmOpenPnl), m2Cls((a.netPnlSol||0)+cmOpenPnl)),
+    kv('Paused now (cannot sell)', `${(d.paused||[]).length} · ${(d.paused||[]).reduce((s,p)=>s+Number(p.entry_sol||0),0).toFixed(4)} SOL in`, (d.paused||[]).length?'r':''),
     kv('Worst case (paused = 0)', cmSol(a.worstCasePnlSol), m2Cls(a.worstCasePnlSol)),
     kv('Signal→signed p50/p95', `${m2Num(st.latencyMs?.p50,0)} / ${m2Num(st.latencyMs?.p95,0)} ms`),
     kv('Signal→fill p50', `${m2Num(st.fillMs?.p50,0)} ms`),
