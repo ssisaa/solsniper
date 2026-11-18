@@ -137,6 +137,11 @@ else a value ≤ 15 s old (reason "… priced from the chart (the curve read fai
 needs no price read. Re-test on Mixed: GTAVI (Trending, old coin) sat at −39 % for 9 h with Max hold 0 — only 5 trades
 in 9 h; Max hold set to 300 s (config, user's choice).
 
+**No candle close = new coins only (2026-11-18, user's request)**: `idle_left()` applies only while the coin's charts have
+no candle at all (counts from the buy / resume; reason "no candle Ns after the buy (trading never began)"). Once any
+chart has a candle — moving or stale — it never applies (`pos["had_candle"]`, survives an emptied chart); Max hold
+handles those. This replaces the "newest candle" counting in the No candle close paragraph below.
+
 **Unsold Coins: 1 h retry, Clear button (2026-11-18, user's request)**: `UNSOLD_RETRY_S` = 3600; after it the row's
 status says it was retried for 1 h (N tries), still no price, not sellable, retrying stopped. The Retry column now sits
 before Reason (it was off-screen at the right, so the user saw no retry although AI / Cyber had been re-priced) and each

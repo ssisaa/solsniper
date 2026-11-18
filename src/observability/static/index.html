@@ -1277,7 +1277,7 @@ header nav.nav .navbtn[hidden]{display:none}
         <label title="A green candle sells only if the whole trade is in profit (after fees); otherwise keep holding"><input type="checkbox" id="cmProfitOnly"/> Sell only in profit</label>
         <label title="Minimum profit % (after fees) for that sell">Min profit % <input class="cm-in" id="cmMinProfit" type="number" min="-50" max="1000" step="0.5"/></label>
         <label title="Close any trade held this long, even at a loss (0 = off)">Max hold s <input class="cm-in" id="cmMaxHold" type="number" min="0" max="3600" step="5"/></label>
-        <label title="Close an open trade when its coin prints no new candle (nobody trades it) for this long; a countdown shows in Open positions after 5 s without a candle. 0 = off">No candle close s <input class="cm-in" id="cmIdleExit" type="number" min="0" max="3600" step="5"/></label>
+        <label title="Only for a NEW coin whose chart has no candle yet: closes the trade when trading has not begun after this long (countdown in Open positions). A coin that has candles, moving or stale, is never closed by it — Max hold handles those. 0 = off">No candle close s <input class="cm-in" id="cmIdleExit" type="number" min="0" max="3600" step="5"/></label>
         <label title="Pause after losses: this many losing trades in a row (any source, feed or rule) stop new trades for the wait time; after it the newest coin is taken. 0 = off">Losses in a row <input class="cm-in" id="cmLossN" type="number" min="0" max="20" step="1"/></label>
         <label title="How long no new trade is opened after that many losses in a row">then wait s <input class="cm-in" id="cmLossS" type="number" min="0" max="3600" step="5"/></label>
         <label title="Open a trade only if the coin's curve holds at least as much SOL as this many seconds ago — money still flowing in (a dip, not a drain). 0 = off">SOL inflow s <input class="cm-in" id="cmInflow" type="number" min="0" max="60" step="1"/></label>
@@ -5260,7 +5260,7 @@ function cmMaxHold(p, maxS){
   }
   if(p.idleLeft!=null){
     // no candle for a while: the trade closes when the countdown ends (No candle close s)
-    return `<span class="r" title="No new candle on this coin — nobody is trading it. The trade is closed when this reaches 0.">no candle · closes in ${Math.max(0,Math.ceil(p.idleLeft))}s</span>`;
+    return `<span class="r" title="This new coin has no candle yet — trading has not begun. The trade is closed when this reaches 0.">no candle yet · closes in ${Math.max(0,Math.ceil(p.idleLeft))}s</span>`;
   }
   if(maxS<=0) return '<span class="muted">off</span>';
   const held=Math.max(0,(Date.now()/1000)-(p.resumed_at||p.entry_ts||0)), left=maxS-held, frac=Math.max(0,Math.min(1,held/maxS));

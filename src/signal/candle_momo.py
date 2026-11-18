@@ -1891,16 +1891,18 @@ class CandleMomo:
 
     def idle_left(self, mint: str, pos: Optional[Dict[str, Any]] = None) -> Optional[float]:
         """Seconds until an open trade with no new candle is closed (user 2026-11-18: pumpcity sat with no trade for
-        15 min). Counts from the newest candle on any of the coin's charts, the buy, or a resume. None = off / n/a."""
+        15 min). Only for a NEW coin whose chart has no candle yet (user 2026-11-18): counts from the buy or a resume,
+        waiting for trading to begin. Once any chart of the coin has a candle — moving or stale — it never applies
+        (Max hold handles those). None = off / n/a."""
         pos = pos if pos is not None else self.positions.get(mint)
         lim = float(self.cfg.idle_exit_s or 0)
         if not pos or lim <= 0 or pos.get("paused_at"):
             return None
-        ref = max(float(pos.get("entry_ts") or 0), float(pos.get("resumed_at") or 0))
         f = self.feeds.get(mint)
-        for book in (f.books.values() if f else []):
-            if book.rows:
-                ref = max(ref, (book.rows[-1].t + 1000) / 1000.0)
+        if pos.get("had_candle") or any(book.rows for book in (f.books.values() if f else [])):
+            pos["had_candle"] = True          # a restart / feed switch that empties the chart does not re-arm it
+            return None
+        ref = max(float(pos.get("entry_ts") or 0), float(pos.get("resumed_at") or 0))
         return lim - (time.time() - ref)
 
     def live_reading(self, mint: str) -> Optional[Tuple[float, float, float]]:
@@ -3866,9 +3868,9 @@ class CandleMomo:
                 if left is not None and left <= 0 and not pos.get("closing") and mint not in self.busy:
                     # no candle = nobody trades the coin: close it and let the next coin come (user 2026-11-18)
                     pos["closing"] = True
-                    self.note("warn", f"{pos.get('symbol') or mint[:6]}: no candle for {self.cfg.idle_exit_s:.0f}s — "
-                                      "the coin stopped trading; closing the trade.", mint)
-                    asyncio.ensure_future(self._forced_exit(mint, f"no candle for {self.cfg.idle_exit_s:.0f}s (coin stopped trading)"))
+                    self.note("warn", f"{pos.get('symbol') or mint[:6]}: no candle {self.cfg.idle_exit_s:.0f}s after the buy — "
+                                      "trading never began; closing the trade.", mint)
+                    asyncio.ensure_future(self._forced_exit(mint, f"no candle {self.cfg.idle_exit_s:.0f}s after the buy (trading never began)"))
                 try:
                     v, real, vsrc = await self._value(mint, pos["tokens"])
                     if v is None or vsrc == "jupiter (old)":      # no price, or only an old cached quote

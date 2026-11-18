@@ -1418,25 +1418,31 @@ def test_open_positions_follow_the_chart_not_an_old_quote():
 
 
 def test_no_candle_countdown_and_close():
-    """pumpcity 2026-11-18: an open trade on a coin with no new candle is closed after idle_exit_s (default 30)."""
+    """No-candle close (idle_exit_s): only a NEW coin whose chart has no candle yet is closed when none comes; a coin
+    with candles — moving or stale — is never closed by it (user 2026-11-18)."""
     import time as _t
     from src.signal import candle_momo as CM
     from src.signal import candle_core as C
     e = CM.CandleMomo()
     f = CM.Feed("M", e.cfg.count)
-    old = (int(_t.time()) - 40) * 1000
-    f.books["pump_rest"].merge([C.Candle(t=old, open=1.0, high=1.0, low=1.0, close=1.0, volume=1, final=True)])
     e.feeds["M"] = f
     e.positions["M"] = {"mint": "M", "mode": "paper", "entry_ts": _t.time() - 60, "lots": [{"n": 1}]}
-    assert e.cfg.idle_exit_s == 30.0 and e.idle_left("M") < 0
+    assert e.cfg.idle_exit_s == 30.0 and e.idle_left("M") < 0       # no candle at all for 60 s: closes
     row = [p for p in e.snapshot()["positions"] if p["mint"] == "M"][0]
     assert row["idleLeft"] is not None and row["idleLeft"] < 0
     e.positions["M"]["entry_ts"] = _t.time() - 2                    # just bought: the countdown starts at the buy
     assert 27 < e.idle_left("M") <= 30 and [p for p in e.snapshot()["positions"]][0]["idleLeft"] is None
     e.positions["M"]["paused_at"] = _t.time()                      # paused coins have their own watch
     assert e.idle_left("M") is None
-    e.cfg.idle_exit_s = 0
     e.positions["M"].pop("paused_at")
+    e.positions["M"]["entry_ts"] = _t.time() - 600
+    old = (int(_t.time()) - 400) * 1000                            # a stale candle (400 s old): the rule is off
+    f.books["pump_rest"].merge([C.Candle(t=old, open=1.0, high=1.0, low=1.0, close=1.0, volume=1, final=True)])
+    assert e.idle_left("M") is None and e.positions["M"]["had_candle"]
+    f.books["pump_rest"].rows.clear()                              # chart emptied (restart / feed switch): stays off
+    assert e.idle_left("M") is None
+    e.positions["M"].pop("had_candle")
+    e.cfg.idle_exit_s = 0
     assert e.idle_left("M") is None
 
 
