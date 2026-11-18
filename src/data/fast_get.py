@@ -20,6 +20,60 @@ import httpx
 
 log = logging.getLogger("sol-sniper.fastget")
 
+# ---------- own DNS cache (2026-11-18): the WSL DNS relay sometimes takes > 1.5 s, and every failed read builds a new
+# curl session that looks the host up again — the Candles chart showed "curl: (28) Resolving timed out after 1500 ms".
+# Hosts are resolved here (system resolver, in a background thread after the first time), the last good address is
+# kept when a lookup fails, and curl is handed the address (CURLOPT_RESOLVE) so a request never waits on DNS.
+_DNS_FRESH_S = 300.0
+_dns: dict[str, tuple[str, float]] = {}       # host -> (ip, resolved at)
+_dns_busy: set[str] = set()
+_dns_lock = threading.Lock()
+
+
+def _dns_lookup(host: str) -> str:
+    import socket
+    try:
+        infos = socket.getaddrinfo(host, 443, socket.AF_INET, socket.SOCK_STREAM)
+        ip = infos[0][4][0] if infos else ""
+    except Exception:
+        ip = ""
+    with _dns_lock:
+        if ip:
+            _dns[host] = (ip, time.monotonic())
+        _dns_busy.discard(host)
+    return ip
+
+
+def resolved_ip(host: str) -> str:
+    """The cached address of host ('' = unknown yet: curl resolves it itself this once). A stale entry is refreshed
+    in the background and still used meanwhile."""
+    if not host:
+        return ""
+    with _dns_lock:
+        ent = _dns.get(host)
+        stale = ent is None or time.monotonic() - ent[1] >= _DNS_FRESH_S
+        start = stale and host not in _dns_busy
+        if start:
+            _dns_busy.add(host)
+    if start:
+        threading.Thread(target=_dns_lookup, args=(host,), daemon=True, name="dns-cache").start()
+    return ent[0] if ent else ""
+
+
+def _resolve_opt(url: str) -> dict:
+    """curl_options pinning url's host to its cached address ({} when not known yet)."""
+    try:
+        from curl_cffi import CurlOpt
+    except Exception:
+        return {}
+    parsed = urllib.parse.urlsplit(url)
+    host = parsed.hostname or ""
+    ip = resolved_ip(host)
+    if not ip:
+        return {}
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    return {CurlOpt.RESOLVE: [f"{host}:{port}:{ip}"]}
+
 _HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -324,6 +378,9 @@ def _read(url: str, timeout: float, lane: str = "shared") -> Any:
         if sess is None:
             return _plain(url, timeout, lane)
         try:
+            pin = _resolve_opt(url)
+            if pin:
+                sess.curl_options.update(pin)       # this session reuses the cached address (no DNS wait)
             resp = sess.get(
                 url,
                 headers=_send_headers(),
@@ -384,6 +441,7 @@ def pump_get_fresh(url: str, timeout: float = 0.8) -> Any:
                 impersonate=_IMPERSONATE,
                 default_headers=False,
                 allow_redirects=True,
+                curl_options=_resolve_opt(url),
             )
             status = int(resp.status_code or 0)
             if status == 200:

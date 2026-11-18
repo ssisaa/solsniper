@@ -142,6 +142,12 @@ no candle at all (counts from the buy / resume; reason "no candle Ns after the b
 chart has a candle — moving or stale — it never applies (`pos["had_candle"]`, survives an emptied chart); Max hold
 handles those. This replaces the "newest candle" counting in the No candle close paragraph below.
 
+**Own DNS cache for pump reads (2026-11-18, user's request)**: the Candles feed showed "curl: (28) Resolving timed out
+after 1500 ms" — the WSL DNS relay (172.30.192.1) sometimes answers late and every failed read builds a new curl
+session that resolves again. `fast_get.resolved_ip()` caches each host's address (system resolver, refreshed in a
+background thread every 5 min, last good address kept on failure) and `_resolve_opt()` pins it via CURLOPT_RESOLVE
+(session `curl_options` in `_read`, per call in `pump_get_fresh`). 0 DNS errors in 5 min after the change.
+
 **Unsold Coins: 1 h retry, Clear button (2026-11-18, user's request)**: `UNSOLD_RETRY_S` = 3600; after it the row's
 status says it was retried for 1 h (N tries), still no price, not sellable, retrying stopped. The Retry column now sits
 before Reason (it was off-screen at the right, so the user saw no retry although AI / Cyber had been re-priced) and each
