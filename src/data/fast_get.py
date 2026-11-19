@@ -12,6 +12,8 @@ import http.client
 import json
 import logging
 import threading
+import re
+import sys
 import time
 import urllib.parse
 from typing import Any
@@ -65,6 +67,30 @@ def resolved_ip(host: str) -> str:
 _reads: dict[tuple[str, str], int] = {}
 _reads_at = time.monotonic()
 _reads_lock = threading.Lock()
+_paths: dict[str, int] = {}
+_SEG_ID = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$|^\d+$")
+
+
+def _path_key(url: str) -> str:
+    """URL path with coin mints / numbers masked: 'coins-v2/*', 'candlesticks/*' …"""
+    segs = [s for s in urllib.parse.urlsplit(url).path.split("/") if s]
+    return "/".join("*" if _SEG_ID.match(s) else s for s in segs[:3]) or "/"
+
+
+def _caller() -> str:
+    """'module.function' of the first frame outside this file (which loop made a shared-lane read)."""
+    try:
+        f = sys._getframe(2)
+        while f is not None and f.f_code.co_filename == __file__:
+            f = f.f_back
+        if f is None:
+            return "shared"
+        mod = f.f_globals.get("__name__", "?").rsplit(".", 1)[-1]
+        here = f"{mod}.{f.f_code.co_name}:{f.f_lineno}"
+        up = f.f_back       # one level up too: thin wrappers (_pump_json, _entry_px …) hide the loop
+        return f"{up.f_code.co_name}>{here}" if up is not None else here
+    except Exception:
+        return "shared"
 
 
 def _count(url: str, lane: str) -> None:
@@ -74,6 +100,8 @@ def _count(url: str, lane: str) -> None:
     line = ""
     with _reads_lock:
         _reads[(host, lane)] = _reads.get((host, lane), 0) + 1
+        pk = f"{host}/{_path_key(url)} [{lane if lane != 'shared' else _caller()}]"
+        _paths[pk] = _paths.get(pk, 0) + 1
         span = now - _reads_at
         if span >= 60.0:
             by_host: dict[str, list] = {}
@@ -84,8 +112,10 @@ def _count(url: str, lane: str) -> None:
                 tot = sum(n for n, _ in rows)
                 lanes = ", ".join(f"{ln} {n / span:.1f}" for n, ln in sorted(rows, reverse=True)[:6])
                 parts.append(f"{h} {tot / span:.1f}/s ({lanes})")
-            line = "PUMP reads per second, last minute: " + "; ".join(parts)
+            top = ", ".join(f"{k} {n / span:.1f}" for k, n in sorted(_paths.items(), key=lambda kv: -kv[1])[:8])
+            line = "PUMP reads per second, last minute: " + "; ".join(parts) + " | top paths: " + top
             _reads.clear()
+            _paths.clear()
             _reads_at = now
     if line:
         log.info(line)

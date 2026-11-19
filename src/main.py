@@ -245,6 +245,7 @@ NOT_A_TRADE_MINTS = {
     "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",   # USDT
 }
 RECONCILE_DUST_SOL = 0.0002   # a leftover worth less than this is dust, not an open trade (Max position ~0.005)
+DUST_PAINT_S = 30.0          # dust left in the wallet: held-coin painter reads its pump price this rarely (pump ~10 req/s)
 
 
 def is_pump_mint(mint: str) -> bool:
@@ -2894,10 +2895,21 @@ async def live_feed_demo(
                 manager.set_price(pos.mint, mark)
 
         while not (stop_event and stop_event.is_set()):
-            opened = [p for p in manager.positions.values() if p.status == "OPEN"]
+            # Dust left in the wallet (sell stopped, never sold) is painted once every 30 s, not every second:
+            # 5 dust coins adopted at start cost ~11 pump reads/s here, over pump's ~10/s limit (2026-11-19).
+            now_p = time.time()
+            opened = [
+                p for p in manager.positions.values()
+                if p.status == "OPEN" and (
+                    not (getattr(p, "_dust_closed_logged", False) and getattr(p, "_sell_stopped", False))
+                    or now_p - float(getattr(p, "_paint_at", 0) or 0) >= DUST_PAINT_S
+                )
+            ]
             if not opened:
                 await asyncio.sleep(1.0)
                 continue
+            for p in opened:
+                p._paint_at = now_p
 
             async def _pair(pos):
                 coin_url = f"https://frontend-api-v3.pump.fun/coins-v2/{pos.mint}"

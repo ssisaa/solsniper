@@ -158,6 +158,15 @@ show `fast_get.short_err()` ("pump rate limit (HTTP 429) — reads paused Ns, re
 (dashboard `_short_err`), and `fast_get._count` logs "PUMP reads per second, last minute: host N/s (lane …)" once a
 minute to find the loop that overruns pump. The user stopped the bot at 02:01.
 
+**Dust coins flooded pump reads (2026-11-19, user's request)**: after a restart pump reads were 11–12/s on frontend-api-v3
+(over pump's ~10/s). The read counter now also lists the top URL paths, and a shared-lane read is tagged with its caller
+(`fast_get._caller`: "outer>module.function:line"). The culprit was `main._paint_held` (`_pull`): the start-up wallet
+reconcile adopts 5 leftover dust coins as open trades (sell stopped, `_dust_closed_logged`), and the painter read
+coins-v2 + swap-api market-activity + user-positions (+ user-portfolio) for each one about every second (~11 reads/s for
+coins worth nothing). Dust with sell stopped is now painted once per `DUST_PAINT_S` 30 s. After the fix: ~3 reads/s
+(Mayhem2 / Candles candles + mayhem-state). Not explained: the 19:29 run also read ~7/s on the shared lane until ~20:25
+although its dust closed at once (before the caller tag) — if it comes back, the minute line names the loop.
+
 **Unsold Coins: 1 h retry, Clear button (2026-11-18, user's request)**: `UNSOLD_RETRY_S` = 3600; after it the row's
 status says it was retried for 1 h (N tries), still no price, not sellable, retrying stopped. The Retry column now sits
 before Reason (it was off-screen at the right, so the user saw no retry although AI / Cyber had been re-priced) and each
