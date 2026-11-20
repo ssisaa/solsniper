@@ -184,6 +184,12 @@ coins worth nothing). Dust with sell stopped is now painted once per `DUST_PAINT
 (Mayhem2 / Candles candles + mayhem-state). Not explained: the 19:29 run also read ~7/s on the shared lane until ~20:25
 although its dust closed at once (before the caller tag) — if it comes back, the minute line names the loop.
 
+**Completed at the buy, then went quiet (2026-11-20, user's request)**: $CAT was bought at 18:38:45 and pump said
+"completed" (`sell_zero_amount`) 2 s later, so `was_completed` made it a normal trade; its chart printed no candle again
+and it sat 15+ min (No candle close only applies before the first candle; Max hold 3600 s). Now the mayhem-state watch
+sells off a coin bought already completed once no chart has a candle for `idle_exit_s` (else `COMPLETED_QUIET_S` 120 s)
+(`_quiet_s`, `_completed_sell(…, why)`, reason "Mayhem completed and no trade for Ns — sold off").
+
 **Unsold Coins: 1 h retry, Clear button (2026-11-18, user's request)**: `UNSOLD_RETRY_S` = 3600; after it the row's
 status says it was retried for 1 h (N tries), still no price, not sellable, retrying stopped. The Retry column now sits
 before Reason (it was off-screen at the right, so the user saw no retry although AI / Cyber had been re-priced) and each

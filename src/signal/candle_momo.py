@@ -59,6 +59,7 @@ PAUSED_DUST_FRAC = 0.02
 # PAPER: a paused coin that has not traded again for this long is booked as a total loss (it cannot be sold while
 # paused). 2026-11-18 paper run: 321 coins paused, none moved again in 7 h; left open they hid 2.26 SOL from Net PnL.
 PAUSED_GIVE_UP_S = 600.0
+COMPLETED_QUIET_S = 120.0     # a coin bought already completed is sold off after this long with no candle (No candle close s = 0)
 PAUSED_RECOVER_S = 86400.0     # ...and is re-checked this long: one that comes back has its trade corrected
 PAUSED_WATCH_N = 8             # paused coins re-read per second (rotating); open trades are always checked
 SELL_FAILS_SET_ASIDE = 7       # paper sells in a row that could not read the price -> Unsold Coins (user 2026-11-18: 3, then 7)
@@ -958,6 +959,15 @@ class CandleMomo:
                                 pos["was_completed"] = time.time() - float(pos.get("entry_ts") or 0) < 10
                             if not pos["was_completed"]:
                                 self._completed_sell(mint, pos)
+                            else:
+                                # bought already completed: it trades on — but once its chart stops printing
+                                # candles the run is really over ($CAT 2026-11-20: completed, "sell_zero_amount",
+                                # no candle for 15 min, held to Max hold). Sold off like a completed coin.
+                                quiet = self._quiet_s(mint, pos)
+                                lim = float(self.cfg.idle_exit_s or 0) or COMPLETED_QUIET_S
+                                if quiet is not None and quiet >= lim:
+                                    self._completed_sell(mint, pos, f"Mayhem completed and no trade for {quiet:.0f}s "
+                                                                    f"— sold off")
                         else:
                             pos.setdefault("was_completed", False)
                     except Exception:
@@ -1072,7 +1082,17 @@ class CandleMomo:
         except Exception:
             log.debug("pause watch record failed", exc_info=True)
 
-    def _completed_sell(self, mint: str, pos: Dict[str, Any]) -> None:
+    def _quiet_s(self, mint: str, pos: Dict[str, Any]) -> Optional[float]:
+        """Seconds since the coin's newest candle on any chart (or since the buy / resume, if later). None = no
+        chart for the coin."""
+        f = self.feeds.get(mint)
+        if not f:
+            return None
+        last = max([(b.rows[-1].t + 1000) / 1000.0 for b in f.books.values() if b.rows] or [0.0])
+        ref = max(last, float(pos.get("entry_ts") or 0), float(pos.get("resumed_at") or 0))
+        return time.time() - ref
+
+    def _completed_sell(self, mint: str, pos: Dict[str, Any], why: str = "") -> None:
         """pump's state is "completed" (the Mayhem run is over), not "paused": the coin can be sold, so it is sold
         off now instead of sitting on the Paused Coins page (user 2026-11-15). A failed sell is retried: a coin on
         the watch stays there (next second), any other trade keeps its normal exits."""
@@ -1100,7 +1120,7 @@ class CandleMomo:
                           f"selling it off.", mint)
         if self.store:
             self.store.audit("completed_sell", mint=mint)
-        asyncio.ensure_future(self._forced_exit(mint, "Mayhem completed (not paused) — sold off"))
+        asyncio.ensure_future(self._forced_exit(mint, why or "Mayhem completed (not paused) — sold off"))
 
     @staticmethod
     def _pause_give_up_due(pos: Dict[str, Any]) -> bool:
