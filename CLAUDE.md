@@ -158,6 +158,14 @@ show `fast_get.short_err()` ("pump rate limit (HTTP 429) — reads paused Ns, re
 (dashboard `_short_err`), and `fast_get._count` logs "PUMP reads per second, last minute: host N/s (lane …)" once a
 minute to find the loop that overruns pump. The user stopped the bot at 02:01.
 
+**Manual Entry lot had no buy price (2026-11-20, user's request)**: pinned 9hjBLB, bought with the chart's + Entry, showed a
+uPnL that sat still while the candles moved. The manual signal had close 0, so the lot was stored with `px` 0 and
+`_chart_value` (needs every lot's price) gave nothing: Open positions / chart footer fell back to the value loop's Jupiter
+quote (cached up to 45 s; `value_src` "jupiter", not "chart · …"). Now `manual()` puts the chart's last close / feed /
+candle time into the signal, so the lot gets a real chart price. An old lot with px 0 is priced from this chart's candle
+at its fill (`_lot_px_at_fill`, ±10 s); if the chart no longer holds that time (restart), the value loop sets it once
+from the candle at the moment of a price read (one px-0 lot; other lots' value subtracted).
+
 **CallOuts reader budget (2026-11-20, user's request)**: with OpenCopy as the source (02:37–11:48) pump reads were
 13–30/s on frontend-api-v3 (997 rate-limit pauses); Candles' charts went STALE / DEGRADED and OpenCopy's 5 slots
 filled with dead losers (Max hold off). The CallOuts reader read every caller in pump's home feed (~38) every 1.2 s:

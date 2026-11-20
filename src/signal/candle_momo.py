@@ -1861,6 +1861,8 @@ class CandleMomo:
         pxs = []
         for l in lots:
             lp, ls = float(l.get("px") or 0), l.get("src")
+            if lp <= 0:
+                lp, ls = self._lot_px_at_fill(f, l), f.using   # a lot stored with no price (old manual entry)
             if lp > 0 and ls not in (None, f.using):
                 r = self._unit_ratio(f, f.using, ls)
                 lp = lp * r if r else 0.0
@@ -1874,6 +1876,24 @@ class CandleMomo:
             upnl = value - cost - net - cost * fee_pct / 100.0
             return value, upnl, upnl / cost * 100.0
         return None
+
+    @staticmethod
+    def _lot_px_at_fill(f: Feed, lot: Dict[str, Any]) -> float:
+        """Close of this chart's candle at the lot's fill time (the last one at or before it, else the first after it, ≤ 10 s), else 0."""
+        try:
+            rows = f.books[f.using].rows
+            ts = float(lot.get("ts") or 0) * 1000.0
+        except Exception:
+            return 0.0
+        best = 0.0
+        for c in rows:
+            if c.t <= ts and ts - c.t <= 10_000 and c.close > 0:
+                best = c.close
+            elif c.t > ts:
+                if not best and c.t - ts <= 10_000 and c.close > 0:
+                    best = c.close          # no candle just before the fill (thin stream): the first one after it
+                break
+        return best
 
     @staticmethod
     def _unit_ratio(f: Feed, to: str, frm: str) -> Optional[float]:
@@ -3037,6 +3057,12 @@ class CandleMomo:
                "open": 0.0, "prevClose": None, "close": 0.0, "ref": 0.0, "deltaPct": 0.0, "candleTs": int(now * 1000),
                "rule": cfg.rule, "provider": "manual", "feedLagMs": 0, "seen": now, "manual": True, "_counted": True,
                "symbol": (f.symbol if f else None) or (held or {}).get("symbol") or mint[:6]}
+        # the chart price now, so the lot gets a real buy price in chart units (2026-11-20: a manual entry stored
+        # px 0, the table could not read the trade from the chart and sat on a Jupiter quote up to 45 s old)
+        book = f.books.get(f.using) if f and f.using else None
+        if book and book.rows and book.rows[-1].close > 0:
+            last = book.rows[-1]
+            sig.update(open=last.close, close=last.close, ref=last.close, provider=f.using, candleTs=int(last.t))
         if action == "exit":
             if held is None:
                 return {"ok": False, "error": "Nothing held on this coin"}
@@ -3900,6 +3926,27 @@ class CandleMomo:
                             # selling the whole holding moves a thin curve: real value / chart value at this moment
                             # scales the fast chart reading (2026-11-14: chart said +10%, the sale was under cost).
                             # Only on a FRESH price: re-scaling to an old Jupiter quote froze the reading (GEKKO)
+                            fv0 = self.feeds.get(mint)
+                            lots0 = pos.get("lots") or []
+                            nopx = [l for l in lots0 if float(l.get("px") or 0) <= 0]
+                            if (fv0 and fv0.using and len(nopx) == 1 and not self._lot_px_at_fill(fv0, nopx[0])):
+                                # one lot with no buy price and no candle at its fill (old manual entry after a restart):
+                                # set it once from the chart candle at the moment this price was read, so the chart
+                                # value equals that read, then the reading follows the chart (2026-11-20, 9hjBLB)
+                                tq = float(self._val_at.get(mint) or 0)
+                                cq = self._lot_px_at_fill(fv0, {"ts": tq}) if time.time() - tq <= 60 else 0.0
+                                rest = 0.0      # SOL the other lots are worth at cq (same unit conversion as _chart_value)
+                                for l in lots0:
+                                    if l is nopx[0] or cq <= 0:
+                                        continue
+                                    lp, ls = float(l.get("px") or 0), l.get("src")
+                                    r = self._unit_ratio(fv0, fv0.using, ls) if ls not in (None, fv0.using) else 1.0
+                                    if not r or lp <= 0:
+                                        cq = 0.0
+                                        break
+                                    rest += float(l.get("sol") or 0) * cq / (lp * r)
+                                if cq > 0 and v - rest > 0:
+                                    nopx[0]["px"], nopx[0]["src"] = cq * float(nopx[0].get("sol") or 0) / (v - rest), fv0.using
                             if time.time() - float(self._val_at.get(mint) or 0) > 2.0:
                                 raise LookupError("old price")
                             fv = self.feeds.get(mint)

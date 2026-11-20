@@ -1653,3 +1653,28 @@ def test_paper_sell_priced_from_chart_when_curve_read_fails(engine, monkeypatch)
     assert "M" not in e.positions
     t = e.store.trades(1)[0]
     assert abs(t["exit_sol"] - 0.008) < 1e-9 and "priced from the chart" in t["why"]
+
+
+def test_manual_entry_lot_gets_chart_price_and_old_px0_lot_reads_chart():
+    """A manual Entry stored px 0 (2026-11-20, pinned 9hjBLB): the table could not read the trade from the chart and
+    sat on a Jupiter quote. The manual signal now carries the chart close; an old px-0 lot uses the candle at its fill."""
+    import time as _t
+    from src.signal import candle_momo as CM
+    from src.signal import candle_core as C
+    e = CM.CandleMomo()
+    e._started = []
+    e._start = lambda sig: e._started.append(sig) or "started"
+    f = CM.Feed("M", e.cfg.count)
+    f.using = "pump_rest"
+    now_ms = int(_t.time() * 1000) // 1000 * 1000
+    f.books["pump_rest"].merge([C.Candle(t=now_ms - 5000, open=1.0, high=1.0, low=1.0, close=1.0, volume=1, final=True),
+                                C.Candle(t=now_ms, open=1.0, high=1.2, low=1.0, close=1.2, volume=1, final=False)])
+    e.feeds["M"] = f
+    assert e.manual("entry", "M")["ok"]
+    sig = e._started[-1]
+    assert sig["close"] == 1.2 and sig["provider"] == "pump_rest"
+    # an old manual lot: px 0, filled 4 s ago -> priced at the candle then (1.0); the chart now is 1.2 -> ~+20 %
+    e.positions["M"] = {"mint": "M", "mode": "paper", "entry_sol": 0.005, "upct": -1.0, "value_src": "jupiter",
+                        "lots": [{"n": 1, "sol": 0.005, "px": 0.0, "src": "manual", "ts": now_ms / 1000 - 4}]}
+    v, u, pct, src = e.reading("M")
+    assert src.startswith("chart") and 15.0 < pct < 21.0
