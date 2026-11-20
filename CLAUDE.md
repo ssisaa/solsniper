@@ -158,6 +158,15 @@ show `fast_get.short_err()` ("pump rate limit (HTTP 429) — reads paused Ns, re
 (dashboard `_short_err`), and `fast_get._count` logs "PUMP reads per second, last minute: host N/s (lane …)" once a
 minute to find the loop that overruns pump. The user stopped the bot at 02:01.
 
+**CallOuts reader budget (2026-11-20, user's request)**: with OpenCopy as the source (02:37–11:48) pump reads were
+13–30/s on frontend-api-v3 (997 rate-limit pauses); Candles' charts went STALE / DEGRADED and OpenCopy's 5 slots
+filled with dead losers (Max hold off). The CallOuts reader read every caller in pump's home feed (~38) every 1.2 s:
+958 portfolio reads in 30 s at 11:48. Now all callers together get `CO_READS_PER_S` 2.5 portfolio reads/s (each caller
+every max(pace, callers / 2.5) s), caller totals every `CO_SUMMARY_EVERY_S` 60 s (was 15), caller token holds every
+20 s (profile-api, was 8), and each pinned CallOuts coin's tape / price every `CO_PIN_EVERY_S` 3 s (was 1). Measured with
+the reader on: ~3 caller reads/s, 0 rate limits. CallOuts rows refresh more slowly (a new caller open shows within
+~15 s instead of ~1 s).
+
 **Dust coins flooded pump reads (2026-11-19, user's request)**: after a restart pump reads were 11–12/s on frontend-api-v3
 (over pump's ~10/s). The read counter now also lists the top URL paths, and a shared-lane read is tagged with its caller
 (`fast_get._caller`: "outer>module.function:line"). The culprit was `main._paint_held` (`_pull`): the start-up wallet

@@ -182,6 +182,11 @@ def callout_reader_needed() -> bool:
 
 CO_SHOW_WINDOW_S = 300.0   # CallOuts page shows calls opened in the last 5 minutes (pins always)
 _CO_EVERY_S = 1.2   # each CallOuts caller is re-read this often (its portfolio is one pump request)
+# All callers together get at most this many portfolio reads a second (2026-11-20, user's request): ~20 callers at 1.2 s
+# each made 8–12 reads/s, the whole bot 13–30/s on frontend-api-v3 (pump's limit ~10) — 429s stalled the Candles charts.
+CO_READS_PER_S = 2.5
+CO_SUMMARY_EVERY_S = 60.0   # a caller's portfolio total (was 15 s)
+CO_PIN_EVERY_S = 3.0        # a pinned CallOuts coin's 5m / 1h tape and price (was every second)
 _callout_thread_started = False
 _callout_by_wallet: Dict[str, Dict[str, Any]] = {}
 _callout_tapes: Dict[str, Dict[str, Any]] = {}
@@ -297,13 +302,13 @@ def _co_summary(wallet: str) -> Optional[float]:
         if isinstance(summary, dict) and summary.get("totalValueUsd") is not None:
             return float(summary["totalValueUsd"])
         return None
-    return _co_side_get("sum|" + wallet, 15.0, fetch)
+    return _co_side_get("sum|" + wallet, CO_SUMMARY_EVERY_S, fetch)
 
 
 def _co_hold(wallet: str, mint: str) -> Optional[Dict[str, Any]]:
     if not mint:
         return None
-    return _co_side_get(f"hold|{wallet}|{mint}", 8.0, lambda: _token_hold(wallet, mint))
+    return _co_side_get(f"hold|{wallet}|{mint}", 20.0, lambda: _token_hold(wallet, mint))   # profile-api (was 8 s; it 429ed too)
 
 
 def _latest_open(user_name: str, wallet: str) -> Optional[Dict[str, Any]]:
@@ -830,8 +835,9 @@ def _callout_loop() -> None:
             # Each caller refreshes on its own clock. A caller with a big portfolio (~2s at pump)
             # no longer holds back the others: a fast caller is re-read about once a second.
             now_t = time.time()
+            every = max(pace["every"], len(people) / CO_READS_PER_S)   # the whole reader stays under its budget
             for name, wallet in people:
-                if wallet in inflight or now_t - float(last_done.get(wallet) or 0) < pace["every"]:
+                if wallet in inflight or now_t - float(last_done.get(wallet) or 0) < every:
                     continue
                 inflight.add(wallet)
                 fut = pool.submit(_latest_open, name, wallet)
@@ -3742,10 +3748,11 @@ def _apply_hold(item: Dict[str, Any], hold: Dict[str, Any]) -> None:
 
 
 def _pin_live_loop() -> None:
-    """5m and 1h on a pinned Callout trade. The page polls every second, so this does too."""
+    """5m and 1h on a pinned Callout trade, each pin every CO_PIN_EVERY_S."""
     import time
 
     hold_at: Dict[str, float] = {}
+    pin_at: Dict[str, float] = {}
     wallet_at: Dict[str, float] = {}
     while True:
         with _called_lock:
@@ -3755,8 +3762,9 @@ def _pin_live_loop() -> None:
             continue
         for pin in pins:
             mint = str(pin.get("coinMint") or "")
-            if not mint:
+            if not mint or time.time() - pin_at.get(mint, 0) < CO_PIN_EVERY_S:
                 continue
+            pin_at[mint] = time.time()
             try:
                 tape = _read_tape(mint)
             except Exception:
