@@ -1678,3 +1678,17 @@ def test_manual_entry_lot_gets_chart_price_and_old_px0_lot_reads_chart():
                         "lots": [{"n": 1, "sol": 0.005, "px": 0.0, "src": "manual", "ts": now_ms / 1000 - 4}]}
     v, u, pct, src = e.reading("M")
     assert src.startswith("chart") and 15.0 < pct < 21.0
+
+
+def test_no_buy_on_paused_or_completed_coin():
+    import asyncio, time as _t
+    from src.signal.candle_momo import CandleMomo
+    cm = CandleMomo.__new__(CandleMomo)
+    cm.paused_mints, cm.feeds, cm.pump_state = {}, {}, {}
+    assert cm.stopped_state("M") == ""
+    cm.pump_state["M"] = ("completed", _t.time())
+    assert cm.stopped_state("M") == "completed"
+    cm.pump_state["M"] = ("completed", _t.time() - 30)
+    assert cm.stopped_state("M") == ""        # old read: not trusted
+    cm.paused_mints["M"] = _t.time()
+    assert cm.stopped_state("M") == "paused"

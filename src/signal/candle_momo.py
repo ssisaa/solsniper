@@ -251,6 +251,7 @@ class CandleMomo:
         self.loss_pause_until = 0.0                        # no new trade before this time (pause after losses)
         self._instant = False
         self.paused_mints: Dict[str, float] = {}
+        self.pump_state: Dict[str, Tuple[str, float]] = {}   # mint -> (pump's mayhem-state, read time)
         self._pin_warned: set = set()
         self._named: set = set()                       # mints whose name was looked up (pinned / unnamed feeds)      # coins pump paused / completed while Candles held them    # AutoTrade-Candles feed-only sources: mint -> offer
         self._mirrored: Dict[str, float] = {}         # Paper + AutoTrade-Candles: coins given a paper lot 1
@@ -950,6 +951,7 @@ class CandleMomo:
                         body = await asyncio.to_thread(mayhem2_get, STATE_URL.format(mint=mint), "candlepaused", 2.0)
                         st = str((body or {}).get("state") or "").lower() if isinstance(body, dict) else ""
                         self._watch_rec(mint, pos, body, "paused" if st == "paused" else "")
+                        self.pump_state[mint] = (st, time.time())
                         if st == "paused":
                             self._pause_hold(mint, pos, st)
                         elif st == "completed":
@@ -1368,6 +1370,19 @@ class CandleMomo:
         """Open trades that are not on the Paused Coins watch: a paused coin never blocks the next coin."""
         return {m: p for m, p in self.positions.items() if not p.get("paused_at")}
 
+    def stopped_state(self, mint: str) -> str:
+        """'paused' / 'completed' when pump says so right now (board ≤ ~1 s old, or a mayhem-state read ≤ 5 s old,
+        or the coin is on the Paused Coins watch); '' otherwise. No buy and no feed on such a coin (user 2026-11-20)."""
+        if mint in self.paused_mints:
+            return "paused"
+        f = self.feeds.get(mint)
+        if f and f.board_state in ("paused", "completed"):
+            return f.board_state
+        st, at = self.pump_state.get(mint, ("", 0.0))
+        if st in ("paused", "completed") and time.time() - at <= 5:
+            return st
+        return ""
+
     def is_paused(self, mint: str) -> bool:
         """pump paused (or completed) this coin: it cannot be sold, so it is not an active trade."""
         if mint in self.paused_mints:
@@ -1616,8 +1631,9 @@ class CandleMomo:
                 f.board_state = str(r.get("ms") or "").lower()
                 f.age = r.get("age")
         for mint in list(self.feeds):
-            if mint not in want:
-                self.feeds.pop(mint, None)
+            if mint not in want or (mint not in self.positions and mint not in self.busy
+                                    and mint not in (cfg.mints or []) and self.stopped_state(mint)):
+                self.feeds.pop(mint, None)        # not held and pump paused / completed it: next coin
         self.providers["stream"].wanted = set(self.feeds)
         for mint, pos in list(self.positions.items()):
             f = self.feeds.get(mint)
@@ -2451,6 +2467,13 @@ class CandleMomo:
         mint = sig["mint"]
         try:
             held = self.positions.get(mint) or {}
+            stopped = self.stopped_state(mint) if sig["side"] == "BUY" and not sig.get("manual") else ""
+            if stopped:
+                # pump already paused / completed this coin: a paused coin cannot be sold and a completed one has
+                # stopped (30 trades booked at 0 SOL on 2026-11-20) — no new trade, no extra lot
+                self.skip(sig, "COIN_" + stopped.upper())
+                sig["reason"] = f"COIN_{stopped.upper()} (pump says {stopped} — not bought)"
+                return
             if sig["side"] == "BUY" and not sig.get("add") and not sig.get("manual") and not sig.get("mirror"):
                 why, detail = self._entry_filters(mint, first=bool(sig.get("first")), now_buy=bool(sig.get("now_buy")))
                 if why:

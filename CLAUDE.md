@@ -184,6 +184,13 @@ coins worth nothing). Dust with sell stopped is now painted once per `DUST_PAINT
 (Mayhem2 / Candles candles + mayhem-state). Not explained: the 19:29 run also read ~7/s on the shared lane until ~20:25
 although its dust closed at once (before the caller tag) — if it comes back, the minute line names the loop.
 
+**No buy / feed on a paused or completed coin (2026-11-20, user's request)**: of 30 paper trades booked at 0 SOL in 24 h
+("paused by pump for 10 min …"), almost all were active at the buy and paused seconds to minutes later (JLONG was
+already paused at 1.4 s). `stopped_state(mint)` = "paused" / "completed" from the Paused Coins watch, the board state
+(≤ ~1 s old) or a mayhem-state read ≤ 5 s old (`pump_state`); `_run` refuses every non-manual BUY (lot 1 and adds) on it
+(skip `COIN_PAUSED` / `COIN_COMPLETED`), and `_pick_feeds` drops a coin that is not held / busy / pinned once it is
+paused or completed, so the next coin comes. A pause after the buy cannot be prevented this way.
+
 **Completed at the buy, then went quiet (2026-11-20, user's request)**: $CAT was bought at 18:38:45 and pump said
 "completed" (`sell_zero_amount`) 2 s later, so `was_completed` made it a normal trade; its chart printed no candle again
 and it sat 15+ min (No candle close only applies before the first candle; Max hold 3600 s). Now the mayhem-state watch
